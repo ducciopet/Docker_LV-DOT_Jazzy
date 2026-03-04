@@ -15,10 +15,10 @@ def generate_launch_description():
     pkg_dir = get_package_share_directory('onboard_detector')
     
     # Path to parameters file
-    config_file = os.path.join(pkg_dir, 'cfg', 'detector_param.yaml')
+    config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac.yaml')
     
     # Path to rviz config file
-    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_working.rviz')
+    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_working_jo_zotac.rviz')
     
     # Add scripts directory to Python path for yolo imports
     scripts_dir = os.path.join(pkg_dir, 'scripts')
@@ -50,6 +50,7 @@ def generate_launch_description():
         ),
         
         # YOLO v11 detector node
+
         Node(
             package='onboard_detector',
             executable='yolov11_detector_node.py',
@@ -65,5 +66,67 @@ def generate_launch_description():
             name='rviz2',
             output='screen',
             arguments=['-d', rviz_config_file],
+        ),
+
+        # Static TF transforms
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',                        
+            arguments=[
+                '--x','0.0',
+                '--y','0.0',
+                '--z','0.0',
+                '--roll','0.0',
+                '--pitch','0.0',
+                '--yaw','0.0',
+                '--frame-id','map', 
+                '--child-frame-id','base_link'
+            ]
+        ),
+        
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',                        
+            arguments=[
+                '--x','0.0',
+                '--y','0.0',
+                '--z','0.0',
+                '--roll','0.0',
+                '--pitch','0.0',
+                '--yaw','0.0',
+                '--frame-id','base_link', 
+                '--child-frame-id','imu_link'
+            ]
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',                        
+            arguments=[
+                '--x','-0.1',
+                '--y','0.0',
+                '--z','0.30',
+                '--roll','0.0',
+                '--pitch','0.0',
+                '--yaw','0.0',
+                '--frame-id','imu_link', 
+                '--child-frame-id','velodyne'
+            ]
+        ),
+
+        Node( 
+            package='tf2_ros',
+            executable='static_transform_publisher',                        
+            arguments=[
+                '--x','-0.3',
+                '--y','-0.06',
+                '--z','-0.3',
+                '--roll','-1.5707963267948966',
+                '--pitch','0.6108652381980153',
+                '--yaw','-1.9547687622336491',
+                '--frame-id','velodyne', 
+                '--child-frame-id','rs1_link'
+            ]
         ),
     ])
