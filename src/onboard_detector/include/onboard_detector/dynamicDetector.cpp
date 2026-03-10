@@ -42,14 +42,25 @@ namespace onboardDetector{
         this->useTfPose_ = true;
         this->nh_->get_parameter(pname("use_tf_pose"), this->useTfPose_);
 
-        this->tfMapFrame_ = "map";
-        this->tfLidarFrame_ = "velodyne";
-        this->tfDepthFrame_ = "rs1_link";
-        this->tfColorFrame_ = "rs1_link";
-        this->nh_->get_parameter(pname("tf_map_frame"), this->tfMapFrame_);
-        this->nh_->get_parameter(pname("tf_lidar_frame"), this->tfLidarFrame_);
-        this->nh_->get_parameter(pname("tf_depth_frame"), this->tfDepthFrame_);
-        this->nh_->get_parameter(pname("tf_color_frame"), this->tfColorFrame_);
+        if (!this->nh_->get_parameter(pname("tf_map_frame"), this->tfMapFrame_)) {
+            this->tfMapFrame_ = "map";
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_map_frame not set, using default '%s'", this->tfMapFrame_.c_str());
+        }
+
+        if (!this->nh_->get_parameter(pname("tf_lidar_frame"), this->tfLidarFrame_)) {
+            this->tfLidarFrame_ = "velodyne";
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_lidar_frame not set, using default '%s'", this->tfLidarFrame_.c_str());
+        }
+
+        if (!this->nh_->get_parameter(pname("tf_depth_frame"), this->tfDepthFrame_)) {
+            this->tfDepthFrame_ = "rs1_link_refined";
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_depth_frame not set, using default '%s'", this->tfDepthFrame_.c_str());
+        }
+
+        if (!this->nh_->get_parameter(pname("tf_color_frame"), this->tfColorFrame_)) {
+            this->tfColorFrame_ = "rs1_link_refined";
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_color_frame not set, using default '%s'", this->tfColorFrame_.c_str());
+        }
 
         RCLCPP_INFO(this->nh_->get_logger(),
                     "[dynamicDetector]: TF pose mode: %s (map=%s, lidar=%s, depth=%s, color=%s)",
@@ -2410,9 +2421,13 @@ namespace onboardDetector{
     
     void dynamicDetector::publishUVImages(){
         if (this->uvDetector_ != NULL){
-            auto depthBoxMsg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", this->uvDetector_->depth_show).toImageMsg();
-            auto UmapBoxMsg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", this->uvDetector_->U_map_show).toImageMsg();
-            auto birdBoxMsg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", this->uvDetector_->bird_view).toImageMsg();  
+            std_msgs::msg::Header depthHeader;
+            depthHeader.stamp = this->nh_->now();
+            depthHeader.frame_id = this->tfDepthFrame_;
+
+            auto depthBoxMsg = cv_bridge::CvImage(depthHeader, "bgr8", this->uvDetector_->depth_show).toImageMsg();
+            auto UmapBoxMsg = cv_bridge::CvImage(depthHeader, "bgr8", this->uvDetector_->U_map_show).toImageMsg();
+            auto birdBoxMsg = cv_bridge::CvImage(depthHeader, "bgr8", this->uvDetector_->bird_view).toImageMsg();  
             this->uvDepthMapPub_->publish(*depthBoxMsg);
             this->uDepthMapPub_->publish(*UmapBoxMsg); 
             this->uvBirdViewPub_->publish(*birdBoxMsg);
@@ -2421,7 +2436,10 @@ namespace onboardDetector{
 
 
     void dynamicDetector::publishColorImages(){
-        auto detectedColorImgMsg = cv_bridge::CvImage(std_msgs::msg::Header(), "rgb8", this->detectedColorImage_).toImageMsg();
+        std_msgs::msg::Header colorHeader;
+        colorHeader.stamp = this->nh_->now();
+        colorHeader.frame_id = this->tfColorFrame_;
+        auto detectedColorImgMsg = cv_bridge::CvImage(colorHeader, "rgb8", this->detectedColorImage_).toImageMsg();
         this->detectedColorImgPub_->publish(*detectedColorImgMsg);
     }
 

@@ -42,8 +42,6 @@ def generate_launch_description():
             parameters=[
                 ParameterFile(config_file, allow_substs=True),
                 {'use_sim_time': True},
-                {'onboard_detector.tf_depth_frame': 'rs1_link'},
-                {'onboard_detector.tf_color_frame': 'rs1_link'},
             ],
         ),
         
@@ -114,21 +112,21 @@ def generate_launch_description():
         ),
 
         # Old static transform: velodyne -> rs1_link (used as initial guess for ICP)
-        # Node(
-        #     package='tf2_ros',
-        #     executable='static_transform_publisher',
-        #     parameters=[{'use_sim_time': True}],
-        #     arguments=[
-        #         '--x','0.2',
-        #         '--y','0.0',
-        #         '--z','-0.65',
-        #         '--roll','-1.4661566652919380',
-        #         '--pitch','0.0',
-        #         '--yaw','-1.8500490070139893',
-        #         '--frame-id','velodyne',
-        #         '--child-frame-id','rs1_link'
-        #     ]
-        # ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            parameters=[{'use_sim_time': True}],
+            arguments=[
+                '--x','0.2',
+                '--y','0.0',
+                '--z','-0.65',
+                '--roll','-1.4661566652919380',
+                '--pitch','0.0',
+                '--yaw','-1.8500490070139893',
+                '--frame-id','velodyne',
+                '--child-frame-id','rs1_link'
+            ]
+        ),
 
         # ICP Refined Transform (velodyne -> rs1_link):
         Node(
@@ -143,7 +141,7 @@ def generate_launch_description():
                 '--pitch', '-0.042',
                 '--yaw', '-1.561',
                 '--frame-id', 'velodyne',
-                '--child-frame-id', 'rs1_link'
+                '--child-frame-id', 'rs1_link_refined'
             ]
         ),
     ])

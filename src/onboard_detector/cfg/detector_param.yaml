@@ -9,6 +9,8 @@ detector_node:
       lidar_pointcloud_topic: /pointcloud
       pose_topic: /mavros/local_position/pose
       odom_topic: /mavros/local_position/odom
+      tf_depth_frame: rs1_link_refined
+      tf_color_frame: rs1_link_refined
 
       # Camera Parameters
       depth_intrinsics: [385.3096008300781, 385.3096008300781, 324.7971496582031, 237.722900390625] # fx,  fy, cx, cy realsense

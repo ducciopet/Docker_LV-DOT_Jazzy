@@ -12,8 +12,8 @@ detector_node:
       use_tf_pose: true
       tf_map_frame: map
       tf_lidar_frame: velodyne
-      tf_depth_frame: rs1_link
-      tf_color_frame: rs1_link
+      tf_depth_frame: rs1_link_refined
+      tf_color_frame: rs1_link_refined
 
       # Camera Parameters
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # fx, fy, cx, cy - from actual camera calibration
