@@ -40,6 +40,7 @@ set(CMAKE_WARN_DEPRECATED TRUE)
 find_package(pcl_conversions REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 # Open3D from /usr/local may export hardcoded LLVM libc++ paths that are not
 # present on this image (e.g. /usr/lib/llvm-18/lib/libc++.so.1). Rewrite them
@@ -168,6 +169,7 @@ ament_target_dependencies(calibration_icp_node
   pcl_conversions
   tf2
   tf2_geometry_msgs
+  std_srvs
 )
 
 target_link_libraries(calibration_icp_node

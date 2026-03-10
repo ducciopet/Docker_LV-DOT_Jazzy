@@ -20,10 +20,12 @@
 
 #include <opencv2/opencv.hpp>
 #include <Eigen/Dense>
+#include <std_srvs/srv/trigger.hpp>
 
 #include <chrono>
 #include <cmath>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -87,10 +89,16 @@ public:
             SyncPolicy(20), sub_lidar_, sub_depth_);
         sync_->registerCallback(&CalibrationICPNode::onData, this);
 
-        RCLCPP_INFO(this->get_logger(), "Calibration ICP node ready (one-shot)");
+        calibration_service_ = this->create_service<std_srvs::srv::Trigger>(
+            "run_calibration",
+            std::bind(&CalibrationICPNode::runCalibrationService, this, std::placeholders::_1, std::placeholders::_2));
+
+        RCLCPP_INFO(this->get_logger(), "Calibration ICP node ready (service mode)");
         RCLCPP_INFO(this->get_logger(), "  depth topic: %s", depth_topic_.c_str());
         RCLCPP_INFO(this->get_logger(), "  lidar topic: %s", lidar_topic_.c_str());
         RCLCPP_INFO(this->get_logger(), "  initial TF from: %s -> %s", lidar_frame_.c_str(), camera_frame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  refined TF target child: %s", refined_camera_frame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  service: %s", (this->get_name() + std::string("/run_calibration")).c_str());
         RCLCPP_INFO(this->get_logger(), "  overlap FOV margin: %d px", overlap_fov_margin_px_);
     }
 
@@ -132,6 +140,12 @@ private:
     int icp_normal_max_nn_{30};
     int min_overlap_points_{100};
     int overlap_fov_margin_px_{120};
+
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr calibration_service_;
+
+    std::mutex data_mutex_;
+    sensor_msgs::msg::PointCloud2::ConstSharedPtr latest_lidar_msg_;
+    sensor_msgs::msg::Image::ConstSharedPtr latest_depth_msg_;
 
     bool processed_{false};
     Eigen::Matrix4d T_lidar_camera_init_{Eigen::Matrix4d::Identity()};
@@ -354,13 +368,18 @@ private:
 
     void onData(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& lidar_msg,
                 const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg) {
-        if (processed_) {
-            return;
-        }
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        latest_lidar_msg_ = lidar_msg;
+        latest_depth_msg_ = depth_msg;
+    }
 
+    bool runCalibration(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& lidar_msg,
+                        const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg,
+                        std::string& status_message) {
         if (!fetchInitialGuessFromTF(depth_msg->header.stamp)) {
-            RCLCPP_ERROR(this->get_logger(), "Cannot start calibration without initial TF guess");
-            return;
+            status_message = "Cannot start calibration without initial TF guess velodyne->rs1_link";
+            RCLCPP_ERROR(this->get_logger(), "%s", status_message.c_str());
+            return false;
         }
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr lidar_cloud(new pcl::PointCloud<pcl::PointXYZ>());
@@ -371,14 +390,16 @@ private:
             auto depth_cv = cv_bridge::toCvShare(depth_msg);
             depth_image = depth_cv->image;
         } catch (const std::exception& ex) {
-            RCLCPP_ERROR(this->get_logger(), "Depth cv_bridge conversion failed: %s", ex.what());
-            return;
+            status_message = std::string("Depth cv_bridge conversion failed: ") + ex.what();
+            RCLCPP_ERROR(this->get_logger(), "%s", status_message.c_str());
+            return false;
         }
 
         auto depth_cloud_camera = depthToPointCloud(depth_image);
         if (depth_cloud_camera->points_.empty()) {
-            RCLCPP_ERROR(this->get_logger(), "Depth point cloud is empty. Stop.");
-            return;
+            status_message = "Depth point cloud is empty";
+            RCLCPP_ERROR(this->get_logger(), "%s", status_message.c_str());
+            return false;
         }
 
         auto lidar_overlap = extractLidarOverlapWithDepthFov(
@@ -442,7 +463,7 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "ICP done. fitness=%.6f rmse=%.6f",
                     reg_result.fitness_, reg_result.inlier_rmse_);
-        RCLCPP_INFO(this->get_logger(), "Refined velodyne->rs1_link:\n%s",
+        RCLCPP_INFO(this->get_logger(), "Refined velodyne->rs1_link_refined:\n%s",
                     matrixToString(T_lidar_camera_refined).c_str());
 
         auto depth_aligned = std::make_shared<open3d::geometry::PointCloud>(*source);
@@ -458,7 +479,36 @@ private:
         printCopyPasteTransform(T_lidar_camera_refined);
 
         processed_ = true;
-        RCLCPP_INFO(this->get_logger(), "Published one-shot clouds: lidar overlap + aligned depth");
+        status_message = "Calibration completed and refined TF published";
+        return true;
+    }
+
+    void runCalibrationService(const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                               std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+        if (processed_) {
+            response->success = true;
+            response->message = "Calibration already completed";
+            return;
+        }
+
+        sensor_msgs::msg::PointCloud2::ConstSharedPtr lidar_msg;
+        sensor_msgs::msg::Image::ConstSharedPtr depth_msg;
+        {
+            std::lock_guard<std::mutex> lock(data_mutex_);
+            lidar_msg = latest_lidar_msg_;
+            depth_msg = latest_depth_msg_;
+        }
+
+        if (!lidar_msg || !depth_msg) {
+            response->success = false;
+            response->message = "No synchronized LiDAR/depth data received yet";
+            RCLCPP_WARN(this->get_logger(), "%s", response->message.c_str());
+            return;
+        }
+
+        std::string status_message;
+        response->success = runCalibration(lidar_msg, depth_msg, status_message);
+        response->message = status_message;
     }
 };
 

@@ -83,3 +83,25 @@ detector_node:
       target_constrain_size: true
       target_object_size: [0.5, 0.5, 1.5]
       max_object_size: [3.0, 3.0, 2.0] # filter out objects that are too large
+
+calibration_icp_node:
+  ros__parameters:
+    depth_topic: /camera1/rs1/depth/image_rect_raw
+    velodyne_topic: /velodyne_points
+    lidar_frame: velodyne
+    camera_frame: rs1_link
+    refined_camera_frame: rs1_link_refined
+    icp_max_correspondence_distance: 0.2
+    icp_max_iteration: 100
+    icp_voxel_size: 0.05
+    icp_use_point_to_plane: true
+    icp_normal_radius: 0.15
+    icp_normal_max_nn: 30
+    min_overlap_points: 100
+    overlap_fov_margin_px: 120
+    onboard_detector:
+      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]
+      depth_scale_factor: 1000.0
+      depth_min_value: 0.5
+      depth_max_value: 5.0
+      depth_skip_pixel: 2
