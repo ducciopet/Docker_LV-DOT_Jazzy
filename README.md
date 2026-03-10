@@ -5,6 +5,10 @@
 ## Introduction
 This repository contains the **ROS2 Jazzy** port of the LV-DOT dynamic obstacle detection and tracking system. The original implementation can be found at https://github.com/Zhefan-Xu/LV-DOT
 
+Repository variants:
+- ROS2 Jazzy (this repo): https://github.com/ducciopet/Docker_LV-DOT_Jazzy
+- Previous ROS2 Humble version: https://github.com/ducciopet/Docker_LV-DOT
+
 LV-DOT integrates:
 - **YOLO v11** person detection
 - **LiDAR-based dynamic obstacle detection**
@@ -24,7 +28,7 @@ This setup runs in a **Docker container** with NVIDIA GPU support for YOLO infer
 ## Repository Structure
 
 ```
-Docker_LV-DOT/
+Docker_LV-DOT_Jazzy/
 ├── src/                          # ROS2 workspace source
 │   └── onboard_detector/        # Main detector package
 ├── bags/                        # ROS2 bag files
@@ -40,8 +44,8 @@ Docker_LV-DOT/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/ducciopet/Docker_LV-DOT.git
-cd Docker_LV-DOT
+git clone https://github.com/ducciopet/Docker_LV-DOT_Jazzy.git
+cd Docker_LV-DOT_Jazzy
 ```
 
 **Note:** The ROS2 bag files are not included in this repository due to GitHub's file size limits (bags are ~4GB).
