@@ -2,14 +2,9 @@
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 import os
-from launch.substitutions import LaunchConfiguration
 from launch_ros.descriptions import ParameterFile
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
-from launch_ros.substitutions import FindPackageShare
-from pathlib import Path
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory('onboard_detector')
@@ -17,44 +12,20 @@ def generate_launch_description():
     # Path to parameters file
     config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac.yaml')
     
-    # Path to rviz config file
-    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_working_jo_zotac.rviz')
-    
-    # Add scripts directory to Python path for yolo imports
-    scripts_dir = os.path.join(pkg_dir, 'scripts')
-    yolo_dir = os.path.join(scripts_dir, 'yolo_detector')
-    
-    # Set ROS_DOMAIN_ID if needed and PYTHONPATH
-    pythonpath_action = SetEnvironmentVariable(
-        'PYTHONPATH',
-        yolo_dir + os.pathsep + scripts_dir + os.pathsep + os.environ.get('PYTHONPATH', '')
-    )
+    # Path to rviz config file (optional)
+    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_debug.rviz')
     
     return LaunchDescription([
-        pythonpath_action,
-        
-        # Load parameters from YAML file
+        # Calibration node
         Node(
             package='onboard_detector',
-            executable='detector_node',
-            name='detector_node',
+            executable='calibration_node',
+            name='calibration_node',
             output='screen',
             parameters=[
                 ParameterFile(config_file, allow_substs=True),
                 {'use_sim_time': True},
-                {'onboard_detector.tf_depth_frame': 'rs1_link'},
-                {'onboard_detector.tf_color_frame': 'rs1_link'},
             ],
-        ),
-        
-        # YOLO v11 detector node
-
-        Node(
-            package='onboard_detector',
-            executable='yolov11_detector_node.py',
-            name='yolov11_detector_node',
-            output='screen',
-            parameters=[{'use_sim_time': True}],
         ),
         
         # RViz visualization (optional - comment out if not needed)
@@ -66,8 +37,9 @@ def generate_launch_description():
             arguments=['-d', rviz_config_file],
         ),
 
-        # Static TF transforms
-
+        # Static TF transforms (required for calibration node)
+        
+        # map -> base_link (identity)
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',                        
@@ -83,6 +55,7 @@ def generate_launch_description():
             ]
         ),
         
+        # base_link -> imu_link (identity)
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',                        
@@ -98,6 +71,7 @@ def generate_launch_description():
             ]
         ),
 
+        # imu_link -> velodyne
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',                        
@@ -113,37 +87,54 @@ def generate_launch_description():
             ]
         ),
 
-        # Old static transform: velodyne -> rs1_link (used as initial guess for ICP)
-        # Node(
-        #     package='tf2_ros',
-        #     executable='static_transform_publisher',
-        #     parameters=[{'use_sim_time': True}],
-        #     arguments=[
-        #         '--x','0.2',
-        #         '--y','0.0',
-        #         '--z','-0.65',
-        #         '--roll','-1.4661566652919380',
-        #         '--pitch','0.0',
-        #         '--yaw','-1.8500490070139893',
-        #         '--frame-id','velodyne',
-        #         '--child-frame-id','rs1_link'
-        #     ]
-        # ),
-
-        # ICP Refined Transform (velodyne -> rs1_link):
+        # velodyne -> rs1_link (calibrated transform)
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             parameters=[{'use_sim_time': True}],
             arguments=[
-                '--x', '0.225',
-                '--y', '0.062',
-                '--z', '-0.193',
-                '--roll', '-1.537',
-                '--pitch', '-0.042',
-                '--yaw', '-1.561',
-                '--frame-id', 'velodyne',
-                '--child-frame-id', 'rs1_link'
+                '--x','0.2',
+                '--y','0.0',
+                '--z','-0.65',
+                '--roll','-1.4661566652919380',
+                '--pitch','0.0',
+                '--yaw','-1.8500490070139893',
+                '--frame-id','velodyne',
+                '--child-frame-id','rs1_link'
+            ]
+        ),
+
+        # rs1_link -> camera_depth_optical_frame (identity, same physical position)
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            parameters=[{'use_sim_time': True}],
+            arguments=[
+                '--x','0.0',
+                '--y','0.0',
+                '--z','0.0',
+                '--roll','0.0',
+                '--pitch','0.0',
+                '--yaw','0.0',
+                '--frame-id','rs1_link',
+                '--child-frame-id','camera_depth_optical_frame'
+            ]
+        ),
+
+        # rs1_link -> camera_color_optical_frame (identity, assuming aligned)
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            parameters=[{'use_sim_time': True}],
+            arguments=[
+                '--x','0.0',
+                '--y','0.0',
+                '--z','0.0',
+                '--roll','0.0',
+                '--pitch','0.0',
+                '--yaw','0.0',
+                '--frame-id','rs1_link',
+                '--child-frame-id','camera_color_optical_frame'
             ]
         ),
     ])

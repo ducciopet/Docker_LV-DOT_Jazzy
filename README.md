@@ -1,9 +1,9 @@
 # LV-DOT: Light-Weight Visual Dynamic Obstacle Tracker (ROS2 Port)
 
-![ROS2](https://img.shields.io/badge/ROS-2%20Humble-green) ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-blue) ![Linux](https://img.shields.io/badge/Platform-Linux-orange) ![License](https://img.shields.io/badge/License-MIT-blue)
+![ROS2](https://img.shields.io/badge/ROS-2%20Jazzy-green) ![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-blue) ![Linux](https://img.shields.io/badge/Platform-Linux-orange) ![License](https://img.shields.io/badge/License-MIT-blue)
 
 ## Introduction
-This repository contains the **ROS2 Humble** port of the LV-DOT dynamic obstacle detection and tracking system. The original implementation can be found at https://github.com/Zhefan-Xu/LV-DOT
+This repository contains the **ROS2 Jazzy** port of the LV-DOT dynamic obstacle detection and tracking system. The original implementation can be found at https://github.com/Zhefan-Xu/LV-DOT
 
 LV-DOT integrates:
 - **YOLO v11** person detection
@@ -84,7 +84,7 @@ docker compose up -d
 ### 4. Enter the Container
 
 ```bash
-docker compose exec ros2_humble_sim bash
+docker compose exec ros2_jazzy_sim bash
 ```
 
 ## Verify GPU Support
@@ -251,5 +251,5 @@ See LICENSE file for details.
 ## References
 
 - Original LV-DOT Repository: https://github.com/Zhefan-Xu/LV-DOT
-- ROS2 Migration Guide: https://docs.ros.org/en/humble/
+- ROS2 Migration Guide: https://docs.ros.org/en/jazzy/
 - Ultralytics YOLO: https://docs.ultralytics.com/

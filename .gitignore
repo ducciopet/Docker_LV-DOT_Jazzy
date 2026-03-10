@@ -50,6 +50,8 @@ action_gen/
 *.bag
 *.bag.active
 *.bag.yaml
+*.mcap
+bags/
 
 # Miscellaneous
 *.log

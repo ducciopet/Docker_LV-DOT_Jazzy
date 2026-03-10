@@ -9,7 +9,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <Eigen/Eigen>
 #include <Eigen/StdVector>
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -24,12 +24,16 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2/exceptions.h>
 #include <onboard_detector/dbscan.h>
 #include <onboard_detector/uvDetector.h>
 #include <onboard_detector/lidarDetector.h>
 #include <onboard_detector/kalmanFilter.h>
 #include <onboard_detector/utils.h>
 #include <onboard_detector/srv/get_dynamic_obstacles.hpp>
+
 
 namespace onboardDetector{
     class dynamicDetector{
@@ -39,6 +43,8 @@ namespace onboardDetector{
 
         // ROS node
         rclcpp::Node::SharedPtr nh_;
+        std::shared_ptr<tf2_ros::Buffer> tfBuffer_;
+        std::shared_ptr<tf2_ros::TransformListener> tfListener_;
         std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>> depthSub_;
         std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> lidarCloudSub_;
         std::shared_ptr<message_filters::Subscriber<geometry_msgs::msg::PoseStamped>> poseSub_;
@@ -111,6 +117,11 @@ namespace onboardDetector{
         std::string lidarTopicName_;
         std::string poseTopicName_;
         std::string odomTopicName_;
+        bool useTfPose_;
+        std::string tfMapFrame_;
+        std::string tfLidarFrame_;
+        std::string tfDepthFrame_;
+        std::string tfColorFrame_;
 
         // System
         double dt_;
@@ -302,6 +313,7 @@ namespace onboardDetector{
         void getCameraPose(const nav_msgs::msg::Odometry::ConstSharedPtr& odom, Eigen::Matrix4d& camPoseDepthMatrix, Eigen::Matrix4d& camPoseColorMatrix);
         void getLidarPose(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose, Eigen::Matrix4d& lidarPoseMatrix);
         void getLidarPose(const nav_msgs::msg::Odometry::ConstSharedPtr& odom, Eigen::Matrix4d& lidarPoseMatrix);
+        bool lookupTfMatrix(const std::string& targetFrame, const std::string& sourceFrame, Eigen::Matrix4d& transformMatrix);
         onboardDetector::Point eigenToDBPoint(const Eigen::Vector3d& p);
         Eigen::Vector3d dbPointToEigen(const onboardDetector::Point& pDB);
         void eigenToDBPointVec(const std::vector<Eigen::Vector3d>& points, std::vector<onboardDetector::Point>& pointsDB, int size);       
@@ -343,48 +355,80 @@ namespace onboardDetector{
 	}
     
     inline void dynamicDetector::getCameraPose(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose, Eigen::Matrix4d& camPoseDepthMatrix, Eigen::Matrix4d& camPoseColorMatrix){
-        Eigen::Quaterniond quat;
-        quat = Eigen::Quaterniond(pose->pose.orientation.w, pose->pose.orientation.x, pose->pose.orientation.y, pose->pose.orientation.z);
-        Eigen::Matrix3d rot = quat.toRotationMatrix();
+        bool depthFromTf = false;
+        bool colorFromTf = false;
 
-        // convert body pose to camera pose
-        Eigen::Matrix4d map2body; map2body.setZero();
-        map2body.block<3, 3>(0, 0) = rot;
-        map2body(0, 3) = pose->pose.position.x; 
-        map2body(1, 3) = pose->pose.position.y;
-        map2body(2, 3) = pose->pose.position.z;
-        map2body(3, 3) = 1.0;
+        if (this->useTfPose_) {
+            depthFromTf = this->lookupTfMatrix(this->tfMapFrame_, this->tfDepthFrame_, camPoseDepthMatrix);
+            colorFromTf = this->lookupTfMatrix(this->tfMapFrame_, this->tfColorFrame_, camPoseColorMatrix);
+        }
 
-        camPoseDepthMatrix = map2body * this->body2CamDepth_;
-        camPoseColorMatrix = map2body * this->body2CamColor_;
+        if (!depthFromTf || !colorFromTf) {
+            Eigen::Quaterniond quat;
+            quat = Eigen::Quaterniond(pose->pose.orientation.w, pose->pose.orientation.x, pose->pose.orientation.y, pose->pose.orientation.z);
+            Eigen::Matrix3d rot = quat.toRotationMatrix();
+
+            // fallback path: convert body pose to camera pose using sensor transforms
+            Eigen::Matrix4d map2body; map2body.setZero();
+            map2body.block<3, 3>(0, 0) = rot;
+            map2body(0, 3) = pose->pose.position.x;
+            map2body(1, 3) = pose->pose.position.y;
+            map2body(2, 3) = pose->pose.position.z;
+            map2body(3, 3) = 1.0;
+
+            if (!depthFromTf) {
+                camPoseDepthMatrix = map2body * this->body2CamDepth_;
+            }
+            if (!colorFromTf) {
+                camPoseColorMatrix = map2body * this->body2CamColor_;
+            }
+        }
     }
 
     inline void dynamicDetector::getCameraPose(const nav_msgs::msg::Odometry::ConstSharedPtr& odom, Eigen::Matrix4d& camPoseDepthMatrix, Eigen::Matrix4d& camPoseColorMatrix){
-        Eigen::Quaterniond quat;
-        quat = Eigen::Quaterniond(odom->pose.pose.orientation.w, odom->pose.pose.orientation.x, odom->pose.pose.orientation.y, odom->pose.pose.orientation.z);
-        Eigen::Matrix3d rot = quat.toRotationMatrix();
+        bool depthFromTf = false;
+        bool colorFromTf = false;
 
-        // convert body pose to camera pose
-        Eigen::Matrix4d map2body; map2body.setZero();
-        map2body.block<3, 3>(0, 0) = rot;
-        map2body(0, 3) = odom->pose.pose.position.x; 
-        map2body(1, 3) = odom->pose.pose.position.y;
-        map2body(2, 3) = odom->pose.pose.position.z;
-        map2body(3, 3) = 1.0;
+        if (this->useTfPose_) {
+            depthFromTf = this->lookupTfMatrix(this->tfMapFrame_, this->tfDepthFrame_, camPoseDepthMatrix);
+            colorFromTf = this->lookupTfMatrix(this->tfMapFrame_, this->tfColorFrame_, camPoseColorMatrix);
+        }
 
-        camPoseDepthMatrix = map2body * this->body2CamDepth_;
-        camPoseColorMatrix = map2body * this->body2CamColor_;
+        if (!depthFromTf || !colorFromTf) {
+            Eigen::Quaterniond quat;
+            quat = Eigen::Quaterniond(odom->pose.pose.orientation.w, odom->pose.pose.orientation.x, odom->pose.pose.orientation.y, odom->pose.pose.orientation.z);
+            Eigen::Matrix3d rot = quat.toRotationMatrix();
+
+            // fallback path: convert body pose to camera pose using sensor transforms
+            Eigen::Matrix4d map2body; map2body.setZero();
+            map2body.block<3, 3>(0, 0) = rot;
+            map2body(0, 3) = odom->pose.pose.position.x;
+            map2body(1, 3) = odom->pose.pose.position.y;
+            map2body(2, 3) = odom->pose.pose.position.z;
+            map2body(3, 3) = 1.0;
+
+            if (!depthFromTf) {
+                camPoseDepthMatrix = map2body * this->body2CamDepth_;
+            }
+            if (!colorFromTf) {
+                camPoseColorMatrix = map2body * this->body2CamColor_;
+            }
+        }
     }
 
     inline void dynamicDetector::getLidarPose(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose, Eigen::Matrix4d& lidarPoseMatrix){
+        if (this->useTfPose_ && this->lookupTfMatrix(this->tfMapFrame_, this->tfLidarFrame_, lidarPoseMatrix)) {
+            return;
+        }
+
         Eigen::Quaterniond quat;
         quat = Eigen::Quaterniond(pose->pose.orientation.w, pose->pose.orientation.x, pose->pose.orientation.y, pose->pose.orientation.z);
         Eigen::Matrix3d rot = quat.toRotationMatrix();
 
-        // convert body pose to camera pose
+        // fallback path: convert body pose to lidar pose using sensor transforms
         Eigen::Matrix4d map2body; map2body.setZero();
         map2body.block<3, 3>(0, 0) = rot;
-        map2body(0, 3) = pose->pose.position.x; 
+        map2body(0, 3) = pose->pose.position.x;
         map2body(1, 3) = pose->pose.position.y;
         map2body(2, 3) = pose->pose.position.z;
         map2body(3, 3) = 1.0;
@@ -393,14 +437,18 @@ namespace onboardDetector{
     }
 
     inline void dynamicDetector::getLidarPose(const nav_msgs::msg::Odometry::ConstSharedPtr& odom, Eigen::Matrix4d& lidarPoseMatrix){
+        if (this->useTfPose_ && this->lookupTfMatrix(this->tfMapFrame_, this->tfLidarFrame_, lidarPoseMatrix)) {
+            return;
+        }
+
         Eigen::Quaterniond quat;
         quat = Eigen::Quaterniond(odom->pose.pose.orientation.w, odom->pose.pose.orientation.x, odom->pose.pose.orientation.y, odom->pose.pose.orientation.z);
         Eigen::Matrix3d rot = quat.toRotationMatrix();
 
-        // convert body pose to camera pose
+        // fallback path: convert body pose to lidar pose using sensor transforms
         Eigen::Matrix4d map2body; map2body.setZero();
         map2body.block<3, 3>(0, 0) = rot;
-        map2body(0, 3) = odom->pose.pose.position.x; 
+        map2body(0, 3) = odom->pose.pose.position.x;
         map2body(1, 3) = odom->pose.pose.position.y;
         map2body(2, 3) = odom->pose.pose.position.z;
         map2body(3, 3) = 1.0;

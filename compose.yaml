@@ -1,10 +1,10 @@
 services:
-  ros2_humble_sim:
+  ros2_jazzy_sim:
     build:
       context: .
       dockerfile: DockerFiles/Dockerfile
 
-    container_name: ros2_humble_simulator
+    container_name: ros2_jazzy_simulator
 
     stdin_open: true
     tty: true
@@ -15,17 +15,17 @@ services:
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all,graphics,compute
+      - QT_X11_NO_MITSHM=1
+      - XDG_RUNTIME_DIR=/tmp/runtime-ros
 
     volumes:
       - ./src:/home/ros/ros2_ws/src
-      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ./bags:/home/ros/ros2_ws/bags
+      - ./entrypoint.sh:/home/ros/entrypoint.sh
+      - /dev/dri:/dev/dri
 
     runtime: nvidia
 
-    command: >
-      bash -c "
-        source /opt/ros/humble/setup.bash &&
-        cd /home/ros/ros2_ws &&
-        bash
-      "
+    entrypoint: /home/ros/entrypoint.sh
+    command: bash

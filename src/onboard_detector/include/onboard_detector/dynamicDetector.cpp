@@ -15,6 +15,8 @@ namespace onboardDetector{
         this->ns_ = "onboard_detector";
         this->hint_ = "[onboardDetector]";
         this->nh_ = nh;
+        this->tfBuffer_ = std::make_shared<tf2_ros::Buffer>(this->nh_->get_clock());
+        this->tfListener_ = std::make_shared<tf2_ros::TransformListener>(*this->tfBuffer_);
         this->initParam();
         this->registerPub();
         this->registerCallback();
@@ -22,6 +24,8 @@ namespace onboardDetector{
 
     void dynamicDetector::initDetector(const rclcpp::Node::SharedPtr& nh){
         this->nh_ = nh;
+        this->tfBuffer_ = std::make_shared<tf2_ros::Buffer>(this->nh_->get_clock());
+        this->tfListener_ = std::make_shared<tf2_ros::TransformListener>(*this->tfBuffer_);
         this->initParam();
         this->registerPub();
         this->registerCallback();
@@ -30,6 +34,30 @@ namespace onboardDetector{
     void dynamicDetector::initParam(){
         // helper lambda to build parameter names
         auto pname = [&](const std::string &p){ return this->ns_.empty() ? p : this->ns_ + "." + p; };
+
+        this->body2CamDepth_.setIdentity();
+        this->body2CamColor_.setIdentity();
+        this->body2Lidar_.setIdentity();
+
+        this->useTfPose_ = true;
+        this->nh_->get_parameter(pname("use_tf_pose"), this->useTfPose_);
+
+        this->tfMapFrame_ = "map";
+        this->tfLidarFrame_ = "velodyne";
+        this->tfDepthFrame_ = "rs1_link";
+        this->tfColorFrame_ = "rs1_link";
+        this->nh_->get_parameter(pname("tf_map_frame"), this->tfMapFrame_);
+        this->nh_->get_parameter(pname("tf_lidar_frame"), this->tfLidarFrame_);
+        this->nh_->get_parameter(pname("tf_depth_frame"), this->tfDepthFrame_);
+        this->nh_->get_parameter(pname("tf_color_frame"), this->tfColorFrame_);
+
+        RCLCPP_INFO(this->nh_->get_logger(),
+                    "[dynamicDetector]: TF pose mode: %s (map=%s, lidar=%s, depth=%s, color=%s)",
+                    this->useTfPose_ ? "enabled" : "disabled",
+                    this->tfMapFrame_.c_str(),
+                    this->tfLidarFrame_.c_str(),
+                    this->tfDepthFrame_.c_str(),
+                    this->tfColorFrame_.c_str());
 
         // localization mode
         if (!this->nh_->get_parameter(pname("localization_mode"), this->localizationMode_)){
@@ -188,7 +216,7 @@ namespace onboardDetector{
         // transform matrix: body to camera depth
         std::vector<double> body2CamDepthVec (16);
         if (!this->nh_->get_parameter(pname("body_to_camera_depth"), body2CamDepthVec)){
-            RCLCPP_ERROR(this->nh_->get_logger(), "[dynamicDetector]: Please check body to camera matrix!");
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: body_to_camera_depth not found, using identity fallback.");
         }
         else{
             for (int i=0; i<4; ++i){
@@ -201,7 +229,7 @@ namespace onboardDetector{
         // transform matrix: body to camera color
         std::vector<double> body2CamColorVec (16);
         if (!this->nh_->get_parameter(pname("body_to_camera_color"), body2CamColorVec)){
-            RCLCPP_ERROR(this->nh_->get_logger(), "[dynamicDetector]: Please check body to camera color matrix!");
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: body_to_camera_color not found, using identity fallback.");
         }
         else{
             for (int i=0; i<4; ++i){
@@ -214,7 +242,7 @@ namespace onboardDetector{
         // transform matrix: body to lidar
         std::vector<double> body2LidarVec (16);
         if (!this->nh_->get_parameter(pname("body_to_lidar"), body2LidarVec)){
-            RCLCPP_ERROR(this->nh_->get_logger(), "[dynamicDetector]: Please check body to lidar matrix!");
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: body_to_lidar not found, using identity fallback.");
         }
         else{
             for (int i=0; i<4; ++i){
@@ -528,6 +556,34 @@ namespace onboardDetector{
                 }
             }
             std::cout << "]." << std::endl;
+        }
+    }
+
+    bool dynamicDetector::lookupTfMatrix(const std::string& targetFrame, const std::string& sourceFrame, Eigen::Matrix4d& transformMatrix){
+        if (!this->tfBuffer_) {
+            return false;
+        }
+
+        try {
+            geometry_msgs::msg::TransformStamped tfStamped =
+                this->tfBuffer_->lookupTransform(targetFrame, sourceFrame, tf2::TimePointZero);
+
+            const auto& t = tfStamped.transform.translation;
+            const auto& q = tfStamped.transform.rotation;
+
+            Eigen::Quaterniond quat(q.w, q.x, q.y, q.z);
+            Eigen::Matrix3d rot = quat.toRotationMatrix();
+
+            transformMatrix.setIdentity();
+            transformMatrix.block<3, 3>(0, 0) = rot;
+            transformMatrix(0, 3) = t.x;
+            transformMatrix(1, 3) = t.y;
+            transformMatrix(2, 3) = t.z;
+
+            return true;
+        }
+        catch (const tf2::TransformException&) {
+            return false;
         }
     }
 

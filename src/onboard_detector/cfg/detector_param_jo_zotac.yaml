@@ -9,17 +9,22 @@ detector_node:
       lidar_pointcloud_topic: /velodyne_points
       pose_topic: /pose
       odom_topic: /odom
+      use_tf_pose: true
+      tf_map_frame: map
+      tf_lidar_frame: velodyne
+      tf_depth_frame: rs1_link
+      tf_color_frame: rs1_link
 
       # Camera Parameters
-      depth_intrinsics: [645.0390014648438, 644.30419921875, 653.908203125, 365.65606689453125] # fx, fy, cx, cy
+      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # fx, fy, cx, cy - from actual camera calibration
       color_intrinsics: [645.0390014648438, 644.30419921875, 653.908203125, 365.65606689453125] # fx, fy, cx, cy
       depth_scale_factor: 1000.0 # 1000 for Intel Realsense Camera
       depth_min_value: 0.5
       depth_max_value: 5.0
       depth_filter_margin: 10 # filter
       depth_skip_pixel: 2  # filter
-      image_cols: 1280
-      image_rows: 720
+      image_cols: 848 #depth_image_width
+      image_rows: 480 #depth_image_cols
 
       # Sensor Transforms
       body_to_camera_depth: [-0.3069,  0.2149,  0.9272, -0.4000,

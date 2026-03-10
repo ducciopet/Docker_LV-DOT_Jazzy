@@ -27,6 +27,7 @@
 
   <!-- PCL -->
   <depend>pcl_ros</depend>
+  <depend>libopen3d-dev</depend>
 
   <!-- Service generation -->
   <build_depend>rosidl_default_generators</build_depend>
