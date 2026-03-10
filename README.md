@@ -1,243 +1,433 @@
-# LV-DOT: Light-Weight Visual Dynamic Obstacle Tracker (ROS2 Port)
+# LV-DOT Jazzy Workspace
 
 ![ROS2](https://img.shields.io/badge/ROS-2%20Jazzy-green) ![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-blue) ![Linux](https://img.shields.io/badge/Platform-Linux-orange) ![License](https://img.shields.io/badge/License-MIT-blue)
 
-## Introduction
-This repository contains the **ROS2 Jazzy** port of the LV-DOT dynamic obstacle detection and tracking system. The original implementation can be found at https://github.com/Zhefan-Xu/LV-DOT
+This repository contains a Dockerized ROS 2 Jazzy workspace for LV-DOT, a lightweight visual and LiDAR-based dynamic obstacle detection and tracking framework.
+
+Original project:
+- https://github.com/Zhefan-Xu/LV-DOT
 
 Repository variants:
-- ROS2 Jazzy (this repo): https://github.com/ducciopet/Docker_LV-DOT_Jazzy
-- Previous ROS2 Humble version: https://github.com/ducciopet/Docker_LV-DOT
+- Jazzy version: https://github.com/ducciopet/Docker_LV-DOT_Jazzy
+- Previous Humble version: https://github.com/ducciopet/Docker_LV-DOT
 
-LV-DOT integrates:
-- **YOLO v11** person detection
-- **LiDAR-based dynamic obstacle detection**
-- **Kalman filter tracking**
-- **Real-time visualization in RViz2**
+## Overview
 
-This setup runs in a **Docker container** with NVIDIA GPU support for YOLO inference.
+The workspace combines:
+- a C++ detector pipeline for depth, LiDAR, fusion, and tracking
+- a Python YOLO node for 2D detections
+- an ICP-based calibration node for refining `velodyne -> rs1_link_refined`
+- RViz configurations for runtime and debugging
+- Docker support for a reproducible ROS 2 Jazzy environment
 
-## Prerequisites
+The main runtime idea is:
+1. publish the base TF chain
+2. run ICP calibration to obtain `velodyne -> rs1_link_refined`
+3. start the main detector only after the refined transform exists
+4. fuse depth, LiDAR, and YOLO detections for dynamic obstacle tracking
 
-- **Docker Engine:** Follow the [Docker Engine installation guide](https://docs.docker.com/engine/install/ubuntu/), then enable Docker usage as a non-root user as described [here](https://docs.docker.com/engine/install/linux-postinstall/).
+---
 
-- **NVIDIA Driver:** Follow the [NVIDIA Display Driver installation guide](https://github.com/oddmario/NVIDIA-Ubuntu-Driver-Guide).
+## Top-level repository structure
 
-- **NVIDIA Container Toolkit:** Install the NVIDIA Container Toolkit by following [this guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-
-## Repository Structure
-
-```
+```text
 Docker_LV-DOT_Jazzy/
-├── src/                          # ROS2 workspace source
-│   └── onboard_detector/        # Main detector package
-├── bags/                        # ROS2 bag files
-│   └── corridor_demo_mcap/     # MCAP format bag
-├── DockerFiles/                 # Docker configuration
+├── compose.yaml
+├── compose_build.bash
+├── entrypoint.sh
+├── DockerFiles/
 │   └── Dockerfile
-├── compose.yaml                 # Docker Compose configuration
-└── entrypoint.sh               # Container startup script
+├── bags/
+├── media/
+├── FRAMEWORK_ARCHITECTURE.md
+├── README.md
+└── src/
+    ├── CMakeLists.txt
+    └── onboard_detector/
 ```
 
-## Setup and Build
+### Top-level files
 
-### 1. Clone the Repository
+- `compose.yaml`  
+  Docker Compose definition for the Jazzy runtime container.
+
+- `compose_build.bash`  
+  Convenience script to build the Docker image.
+
+- `entrypoint.sh`  
+  Container startup script.
+
+- `DockerFiles/Dockerfile`  
+  Base image and system dependencies.
+
+- `bags/`  
+  Local ROS 2 bag storage used during testing.
+
+- `FRAMEWORK_ARCHITECTURE.md`  
+  Detailed notes about the detection, fusion, and tracking pipeline.
+
+---
+
+## ROS package structure
+
+The main package is `src/onboard_detector`.
+
+```text
+src/onboard_detector/
+├── CMakeLists.txt
+├── package.xml
+├── cfg/
+├── include/onboard_detector/
+├── launch/
+├── rviz/
+├── scripts/
+├── src/
+└── srv/
+```
+
+### `cfg/`
+
+Configuration files for runtime parameters.
+
+Main files:
+- `detector_param_jo_zotac.yaml` — main active Jazzy config
+- `detector_param.yaml` — generic/default config
+
+`detector_param_jo_zotac.yaml` contains two important parameter groups:
+- `detector_node: ros__parameters:`
+- `calibration_icp_node: ros__parameters:`
+
+These parameters control:
+- topic names
+- TF frame names
+- camera intrinsics
+- ICP thresholds
+- clustering thresholds
+- tracking parameters
+
+### `include/onboard_detector/`
+
+Core detector implementation:
+
+- `dynamicDetector.cpp` / `dynamicDetector.h`  
+  Main fusion and tracking logic.
+
+- `uvDetector.cpp` / `uvDetector.h`  
+  UV/depth based detection path.
+
+- `lidarDetector.cpp` / `lidarDetector.h`  
+  LiDAR clustering and box extraction.
+
+- `dbscan.cpp` / `dbscan.h`  
+  DBSCAN implementation.
+
+- `kalmanFilter.cpp` / `kalmanFilter.h`  
+  Tracking filter logic.
+
+- `utils.h`  
+  Shared helpers.
+
+### `src/`
+
+ROS executables:
+
+- `detector_node.cpp`  
+  Main detector executable.
+
+- `calibration_icp_node.cpp`  
+  One-shot ICP calibration executable. It computes the refined transform and publishes calibration debug clouds.
+
+- `calibration_node.cpp`  
+  Legacy / alternate calibration executable retained in the package.
+
+### `scripts/`
+
+Python code and helper scripts.
+
+Important contents:
+- `create_bag_with_pose.py`
+- `yolo_detector/`
+
+Inside `scripts/yolo_detector/`:
+- `yolov11_detector_node.py` — ROS 2 node wrapper for YOLOv11
+- `yolov11_detector.py` — main inference logic
+- `yolo_detector_node.py`, `yolo_detector.py` — older YOLO code paths
+- `config/` — labels and model config
+- `module/` — helper modules and custom layers
+- `weights/` — local model weights
+
+### `launch/`
+
+Main launch files:
+- `run_detector.launch.py` — full runtime launch
+- `run_calibration_icp.launch.py` — calibration-only launch with RViz
+- `run_calibration.launch.py` — older calibration launch flow
+
+### `rviz/`
+
+RViz presets for runtime and debugging:
+- `detector_working_jo_zotac.rviz`
+- `detector_working.rviz`
+- `detector_debug.rviz`
+- `detector.rviz`
+
+### `srv/`
+
+- `GetDynamicObstacles.srv`  
+  Service definition exported by the package.
+
+---
+
+## Build system structure
+
+### `CMakeLists.txt`
+
+The package builds:
+- the shared detector library
+- `detector_node`
+- `calibration_node`
+- `calibration_icp_node`
+- the `GetDynamicObstacles.srv` interface
+
+Main external dependencies include:
+- `rclcpp`
+- `sensor_msgs`, `geometry_msgs`, `nav_msgs`, `visualization_msgs`
+- `message_filters`
+- `cv_bridge`
+- `PCL`
+- `Open3D`
+- `tf2`, `tf2_geometry_msgs`
+
+### `package.xml`
+
+Declares the package metadata and the ROS dependency list used by the executables and the generated service interface.
+
+---
+
+## Runtime architecture
+
+### Calibration path
+
+`calibration_icp_node`:
+- subscribes to synchronized LiDAR and depth streams
+- reads the initial TF guess from `velodyne -> rs1_link`
+- runs one-shot ICP refinement
+- publishes:
+  - `/calibration/velodyne_points`
+  - `/calibration/depth_cloud_in_velodyne`
+  - static transform `velodyne -> rs1_link_refined`
+
+### Detector path
+
+`detector_node`:
+- loads parameters from `detector_param_jo_zotac.yaml`
+- uses refined camera/depth frames (`rs1_link_refined`)
+- combines depth, LiDAR, and YOLO outputs
+- performs association and tracking
+
+### YOLO path
+
+`yolov11_detector_node.py`:
+- runs 2D human detection
+- publishes bounding boxes and debug image topics
+
+---
+
+## Current launch behavior
+
+### `run_detector.launch.py`
+
+This is the main runtime launch.
+
+It currently:
+1. sets `PYTHONPATH` for the YOLO scripts
+2. publishes static TFs:
+   - `map -> base_link`
+   - `base_link -> imu_link`
+   - `imu_link -> velodyne`
+   - `velodyne -> rs1_link`
+3. starts `calibration_icp_node`
+4. starts `yolov11_detector_node.py`
+5. starts `rviz2`
+6. waits for `velodyne -> rs1_link_refined`
+7. starts `detector_node` only after the refined transform is available
+
+This avoids starting the detector before the refined camera frame exists.
+
+### `run_calibration_icp.launch.py`
+
+This launch is intended for calibration debugging.
+
+It starts:
+- `calibration_icp_node`
+- `rviz2`
+- the initial static transform `velodyne -> rs1_link`
+
+All calibration parameters are loaded from `detector_param_jo_zotac.yaml`.
+
+---
+
+## Frame structure
+
+Important frames in this workspace:
+- `map`
+- `base_link`
+- `imu_link`
+- `velodyne`
+- `rs1_link`
+- `rs1_link_refined`
+
+### Intended frame logic
+
+- `rs1_link` is the initial camera frame used by the initial guess transform
+- `rs1_link_refined` is produced by `calibration_icp_node`
+- detector-side depth and color TF parameters are configured to use `rs1_link_refined`
+
+---
+
+## Setup and build
+
+### Clone the repository
 
 ```bash
 git clone https://github.com/ducciopet/Docker_LV-DOT_Jazzy.git
 cd Docker_LV-DOT_Jazzy
 ```
 
-**Note:** The ROS2 bag files are not included in this repository due to GitHub's file size limits (bags are ~4GB).
-
-**Download Demo Bag File:**
-The author's original bag file can be downloaded from:
-https://cmu.app.box.com/s/cucvje5b9xfpdpe57ilh0jx702b3ks2p
-
-After downloading, convert it to MCAP format and reindex:
-```bash
-# Create bags directory if it doesn't exist
-mkdir -p bags
-
-# Convert the downloaded bag to MCAP format
-ros2 bag convert -i <downloaded_bag_file> -o bags/corridor_demo_mcap -s mcap
-
-# Reindex the MCAP bag for faster playback
-ros2 bag reindex bags/corridor_demo_mcap -s mcap
-```
-
-Alternatively, record your own bag files with the required topics (see [Key Topics](#key-topics) section).
-
-### 2. Build the Docker Image
+### Build the Docker image
 
 ```bash
 ./compose_build.bash
 ```
 
-Or manually:
+or:
+
 ```bash
 docker compose build
 ```
 
-### 3. Start the Container
+### Start the container
 
 ```bash
 docker compose up -d
 ```
 
-### 4. Enter the Container
+### Enter the container
 
 ```bash
 docker compose exec ros2_jazzy_sim bash
 ```
 
-## Verify GPU Support
-
-Inside the container, verify NVIDIA GPU is accessible:
-
-```bash
-nvidia-smi
-```
-
-## Building the Workspace
-
-Inside the container:
+### Build the workspace inside the container
 
 ```bash
 cd ~/ros2_ws
-colcon build 
+colcon build
 source install/setup.bash
 ```
 
-## Running the System
+---
 
-### Terminal 1: Launch the Detector
+## Main commands
+
+### Full runtime
 
 ```bash
 ros2 launch onboard_detector run_detector.launch.py
 ```
 
-This launches:
-- `detector_node` - Main C++ detector with LiDAR processing
-- `yolov11_detector_node` - Python YOLO detector
-- `rviz2` - Visualization with detector_working.rviz config
+### Calibration-only debug
 
-### Terminal 2: Play the Bag File
-
-First, reindex the MCAP bag (one-time operation):
 ```bash
-cd ~/ros2_ws/bags
-ros2 bag reindex corridor_demo_mcap -s mcap
+ros2 launch onboard_detector run_calibration_icp.launch.py
 ```
 
-Then play the bag with clock simulation:
+### Bag playback
+
+Use simulated time when replaying data:
+
 ```bash
-ros2 bag play corridor_demo_mcap -s mcap --loop --clock
+ros2 bag play <bag_path> -s mcap --clock
 ```
 
-**Important:** The `--clock` flag publishes `/clock` topic required for `use_sim_time:True` nodes.
+---
 
-## ROS2 Command Reference
+## Required input topics
 
-Common ROS2 commands (updated from ROS1):
+Typical required runtime inputs include:
+- `/velodyne_points`
+- `/camera1/rs1/depth/image_rect_raw`
+- the configured color image topic used by YOLO
+- `/clock` during bag playback
 
-### Topics
-```bash
-# List all topics
-ros2 topic list
+If your topic names differ, update `detector_param_jo_zotac.yaml`.
 
-# Echo a topic
-ros2 topic echo /onboard_detector/dynamic_bboxes
+---
 
-# Get topic info
-ros2 topic info /pointcloud
+## Important outputs
 
-# Show topic Hz
-ros2 topic hz /camera/color/image_raw
-```
+### Calibration outputs
 
-### Nodes
-```bash
-# List running nodes
-ros2 node list
+- `/calibration/velodyne_points`
+- `/calibration/depth_cloud_in_velodyne`
+- refined static TF `velodyne -> rs1_link_refined`
 
-# Get node info
-ros2 node info /detector_node
+### Detector outputs
 
-# View node parameters
-ros2 param list /detector_node
-```
+The detector publishes obstacle and tracking results, including bounding boxes, debug images, and point-cloud outputs depending on configuration.
 
-### Bags
-```bash
-# Get bag info
-ros2 bag info corridor_demo_mcap
+### YOLO outputs
 
-# Play bag
-ros2 bag play corridor_demo_mcap -s mcap --loop --clock
+The YOLO node publishes 2D detections, debug images, and timing-related topics.
 
-# Record new bag
-ros2 bag record -o my_bag /topic1 /topic2
-```
-
-### Launch Files
-```bash
-# Launch with default parameters
-ros2 launch onboard_detector run_detector.launch.py
-
-## Key Topics
-
-### Published by Detector
-- `/onboard_detector/dynamic_bboxes` - Dynamic obstacle bounding boxes (MarkerArray)
-- `/onboard_detector/tracked_bboxes` - Tracked obstacles (MarkerArray)
-- `/onboard_detector/filtered_bboxes` - Filtered detections (MarkerArray)
-- `/onboard_detector/raw_lidar_point_cloud` - Raw LiDAR pointcloud
-- `/onboard_detector/dynamic_point_cloud` - Dynamic obstacle points
-- `/onboard_detector/detected_color_image` - Annotated camera image
-
-### Published by YOLO
-- `/yolo_detector/detected_bounding_boxes` - YOLO detections (Detection2DArray)
-- `/yolo_detector/detected_image` - Annotated YOLO image
-- `/yolo_detector/yolo_time` - Inference time statistics
-
-### Subscribed Topics
-- `/pointcloud` - Input LiDAR pointcloud
-- `/mavros/local_position/pose` - Robot pose
-- `/camera/color/image_raw` - Input camera image
-- `/camera/depth/image_rect_raw` - Depth image
-
-## Configuration
-
-Edit detector parameters in:
-```bash
-src/onboard_detector/cfg/detector_param.yaml
-```
-
-Key parameters:
-- `use_sim_time: true` - Required for bag playback
-- `detection_rate: 10.0` - Detection frequency (Hz)
-- `tracking_dt: 0.1` - Tracking time step
+---
 
 ## Troubleshooting
 
-### YOLO not detecting
-- Check `/clock` topic is being published: `ros2 topic hz /clock`
-- Verify camera images: `ros2 topic echo /camera/color/image_raw`
-- Check YOLO timing: `ros2 topic echo /yolo_detector/yolo_time`
+### `detector_node` does not start
 
-### Empty LiDAR pointcloud
-- Ensure `--clock` flag is used during bag playback
-- Verify `use_sim_time: true` is set in launch file
-- Check message_filters synchronization
+`run_detector.launch.py` waits for `velodyne -> rs1_link_refined`.
 
-### RViz not showing markers
-- Verify topics match in RViz config (no `_markers` suffix)
-- Check Fixed Frame is set correctly (usually `map` or `local_origin`)
-- Enable markers in Displays panel
+If `detector_node` does not appear, verify:
+- `calibration_icp_node` is running
+- synchronized LiDAR and depth data are arriving
+- the refined TF was actually published
+
+### Refined TF seems missing
+
+The calibration node publishes the refined transform as a static transform.
+
+Check with:
+
+```bash
+ros2 topic echo /tf_static --qos-durability transient_local
+```
+
+### Calibration debug clouds are empty
+
+The calibration node only publishes them after it receives synchronized LiDAR and depth data and completes ICP.
+
+### Old TF publishers interfere with startup
+
+If stale `static_transform_publisher` processes are still running, they can interfere with TF-dependent launch logic.
+
+Useful cleanup:
+
+```bash
+pkill -f static_transform_publisher
+```
+
+---
+
+## Additional documentation
+
+- `FRAMEWORK_ARCHITECTURE.md` contains a more detailed explanation of the internal LV-DOT pipeline.
+
+---
 
 ## Citation
 
-This repository is a **ROS2 version** of the work presented in the LV-DOT paper. If you use this work, please cite the original paper:
+If you use LV-DOT academically, please cite the original work.
 
 ```bibtex
 @article{xu2022lvdot,
@@ -250,10 +440,4 @@ This repository is a **ROS2 version** of the work presented in the LV-DOT paper.
 
 ## License
 
-See LICENSE file for details.
-
-## References
-
-- Original LV-DOT Repository: https://github.com/Zhefan-Xu/LV-DOT
-- ROS2 Migration Guide: https://docs.ros.org/en/jazzy/
-- Ultralytics YOLO: https://docs.ultralytics.com/
+MIT, following the package metadata in this repository.

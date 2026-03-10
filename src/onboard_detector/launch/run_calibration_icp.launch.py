@@ -22,10 +22,6 @@ def generate_launch_description():
             parameters=[
                 ParameterFile(config_file, allow_substs=True),
                 {'use_sim_time': True},
-                {'depth_topic': '/camera1/rs1/depth/image_rect_raw'},
-                {'velodyne_topic': '/velodyne_points'},
-                {'onboard_detector.depth_intrinsics': [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]},
-                {'refined_camera_frame': 'rs1_link_refined'},
             ],
         ),
 

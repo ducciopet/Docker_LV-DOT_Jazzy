@@ -3,103 +3,18 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import EmitEvent, LogInfo, OpaqueFunction, SetEnvironmentVariable
+from launch.actions import EmitEvent, ExecuteProcess, LogInfo, RegisterEventHandler, SetEnvironmentVariable
+from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from ament_index_python.packages import get_package_share_directory
 
 
-def _run_calibration_then_start_detector(context, *args, **kwargs):
-    import rclpy
-    from rclpy.node import Node as RclpyNode
-    from std_srvs.srv import Trigger
-
-    timeout_wait_service_sec = 60.0
-    timeout_call_sec = 180.0
-
-    rclpy.init(args=None)
-    helper = RclpyNode('calibration_startup_client')
-    client = helper.create_client(Trigger, '/calibration_icp_node/run_calibration')
-
-    waited = 0.0
-    while not client.wait_for_service(timeout_sec=1.0):
-        waited += 1.0
-        if waited >= timeout_wait_service_sec:
-            helper.get_logger().error('Timeout waiting for /calibration_icp_node/run_calibration service')
-            helper.destroy_node()
-            rclpy.shutdown()
-            return [
-                LogInfo(msg='Calibration service not available. Detector startup aborted.'),
-                EmitEvent(event=Shutdown(reason='Calibration service unavailable')),
-            ]
-
-    request = Trigger.Request()
-    future = client.call_async(request)
-    rclpy.spin_until_future_complete(helper, future, timeout_sec=timeout_call_sec)
-
-    if not future.done() or future.result() is None:
-        helper.get_logger().error('Calibration service call timed out or failed')
-        helper.destroy_node()
-        rclpy.shutdown()
-        return [
-            LogInfo(msg='Calibration request failed or timed out. Detector startup aborted.'),
-            EmitEvent(event=Shutdown(reason='Calibration failed')),
-        ]
-
-    response = future.result()
-    helper.get_logger().info(f'Calibration response: success={response.success}, message={response.message}')
-    helper.destroy_node()
-    rclpy.shutdown()
-
-    if not response.success:
-        return [
-            LogInfo(msg=f'Calibration failed: {response.message}'),
-            EmitEvent(event=Shutdown(reason='Calibration returned failure')),
-        ]
-
-    pkg_dir = get_package_share_directory('onboard_detector')
-    config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac.yaml')
-    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_working_jo_zotac.rviz')
-
-    detector_node = Node(
-        package='onboard_detector',
-        executable='detector_node',
-        name='detector_node',
-        output='screen',
-        parameters=[
-            ParameterFile(config_file, allow_substs=True),
-            {'use_sim_time': True},
-        ],
-    )
-
-    yolo_node = Node(
-        package='onboard_detector',
-        executable='yolov11_detector_node.py',
-        name='yolov11_detector_node',
-        output='screen',
-        parameters=[{'use_sim_time': True}],
-    )
-
-    rviz_node = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        output='screen',
-        arguments=['-d', rviz_config_file],
-    )
-
-    return [
-        LogInfo(msg='Calibration successful. Starting detector, YOLO, and RViz.'),
-        detector_node,
-        yolo_node,
-        rviz_node,
-    ]
-
-
 def generate_launch_description():
     pkg_dir = get_package_share_directory('onboard_detector')
     config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac.yaml')
+    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_working_jo_zotac.rviz')
 
     scripts_dir = os.path.join(pkg_dir, 'scripts')
     yolo_dir = os.path.join(scripts_dir, 'yolo_detector')
@@ -154,6 +69,92 @@ def generate_launch_description():
         ]
     )
 
+    detector_node = Node(
+        package='onboard_detector',
+        executable='detector_node',
+        name='detector_node',
+        output='screen',
+        parameters=[
+            ParameterFile(config_file, allow_substs=True),
+            {'use_sim_time': True},
+        ],
+    )
+
+    yolo_node = Node(
+        package='onboard_detector',
+        executable='yolov11_detector_node.py',
+        name='yolov11_detector_node',
+        output='screen',
+        parameters=[{'use_sim_time': True}],
+    )
+
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        output='screen',
+        arguments=['-d', rviz_config_file],
+    )
+
+    tf_wait_script = """
+import sys
+import time
+import rclpy
+from rclpy.duration import Duration
+from rclpy.node import Node
+from rclpy.time import Time
+from tf2_ros import Buffer, TransformListener
+
+TIMEOUT_SEC = 300.0
+CHECK_PERIOD_SEC = 0.5
+TARGET_FRAME = 'velodyne'
+SOURCE_FRAME = 'rs1_link_refined'
+
+rclpy.init(args=None)
+node = Node('wait_for_refined_tf')
+buffer = Buffer()
+listener = TransformListener(buffer, node, spin_thread=True)
+deadline = time.monotonic() + TIMEOUT_SEC
+
+try:
+    while time.monotonic() < deadline and rclpy.ok():
+        if buffer.can_transform(TARGET_FRAME, SOURCE_FRAME, Time(), timeout=Duration(seconds=0.2)):
+            print('[refined_tf_waiter] Detected TF velodyne -> rs1_link_refined')
+            node.destroy_node()
+            rclpy.shutdown()
+            sys.exit(0)
+        time.sleep(CHECK_PERIOD_SEC)
+
+    print('[refined_tf_waiter] Timeout waiting for TF velodyne -> rs1_link_refined', file=sys.stderr)
+    node.destroy_node()
+    rclpy.shutdown()
+    sys.exit(1)
+except Exception as exc:
+    print(f'[refined_tf_waiter] Error while waiting for TF: {exc}', file=sys.stderr)
+    node.destroy_node()
+    rclpy.shutdown()
+    sys.exit(1)
+"""
+
+    tf_waiter = ExecuteProcess(
+        cmd=['python3', '-c', tf_wait_script],
+        output='screen',
+        name='wait_for_refined_tf',
+    )
+
+    detector_start_handler = RegisterEventHandler(
+        OnProcessExit(
+            target_action=tf_waiter,
+            on_exit=lambda event, context: [
+                LogInfo(msg='Refined TF published. Starting detector_node.'),
+                detector_node,
+            ] if event.returncode == 0 else [
+                LogInfo(msg='Refined TF was not published in time. Shutting down.'),
+                EmitEvent(event=Shutdown(reason='Calibration TF unavailable')),
+            ],
+        )
+    )
+
     return LaunchDescription([
         pythonpath_action,
         static_tf_map_to_base,
@@ -161,5 +162,8 @@ def generate_launch_description():
         static_tf_imu_to_lidar,
         initial_guess_tf,
         calibration_node,
-        OpaqueFunction(function=_run_calibration_then_start_detector),
+        yolo_node,
+        rviz_node,
+        tf_waiter,
+        detector_start_handler,
     ])
