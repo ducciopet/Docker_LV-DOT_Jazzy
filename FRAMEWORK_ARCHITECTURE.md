@@ -1,832 +1,438 @@
-# LV-DOT Framework Architecture
+# LV-DOT Jazzy Architecture
 
 ## Overview
 
-The LV-DOT (Light-Weight Visual Dynamic Obstacle Tracker) framework is structured into **4 main modules** that operate in parallel with temporal synchronization. Each module runs at **30 Hz** (33 ms period).
+This document describes the current runtime architecture of the Jazzy workspace in this repository.
+
+The active system is built around four main runtime pieces:
+- `calibration_icp_node`
+- `detector_node`
+- `yolov11_detector_node.py`
+- `rviz2`
+
+The current launch flow is:
+1. publish the static TF chain up to `velodyne -> rs1_link`
+2. run one-shot ICP calibration
+3. publish the refined transform `velodyne -> rs1_link_refined`
+4. start `detector_node` only after the refined transform exists
+5. run YOLO and RViz in parallel
 
 ---
 
-## 1. DETECTION MODULE (Obstacle Detection)
+## Workspace structure
 
-### Description
-This module detects obstacles using both visual data (depth camera) and LiDAR, fusing the information to obtain robust 3D bounding boxes. It also integrates YOLOv11 person detection to improve classification accuracy and handle human obstacles.
-
-### Main Functions
-
-#### 1.1 Visual Detection (UV Detection)
-- **Function**: `dynamicDetector::uvDetect()`
-- **Description**: Processes depth image to detect obstacles in UV coordinates
-- **Sub-functions**:
-  - `UVdetector::detect()` - Detects obstacles in depth image
-  - `UVdetector::extract_3Dbox()` - Extracts 3D bounding boxes
-  - `transformUVBBoxes()` - Transforms bounding boxes to world frame
-
-#### 1.2 DBSCAN Visual Detection
-- **Function**: `dynamicDetector::dbscanDetect()`
-- **Description**: Uses DBSCAN clustering on point cloud from depth camera
-- **Pipeline**:
-  1. `projectDepthImage()` - Projects depth image into 3D point cloud
-  2. `filterPoints()` - Filters out-of-range and ground points
-  3. `clusterPointsAndBBoxes()` - DBSCAN clustering and bounding box extraction
-
-#### 1.3 LiDAR Detection
-- **Function**: `dynamicDetector::lidarDetect()`
-- **Description**: Detects obstacles using LiDAR with DBSCAN
-- **Pipeline**:
-  1. `lidarDetector::lidarDBSCAN()` - DBSCAN clustering on LiDAR cloud
-  2. `lidarDetector::getClusters()` - Extracts point clusters
-  3. `lidarDetector::getBBoxes()` - Calculates bounding boxes from clusters
-  4. Filters obstacles that are too large (> max_object_size)
-
-#### 1.4 LiDAR-Visual Fusion
-- **Function**: `dynamicDetector::filterLVBBoxes()`
-- **Description**: Fuses visual and LiDAR detections using IOU (Intersection Over Union)
-- **Algorithm (5 STEPS)**:
-
-##### **STEP 1**: Fuse UV and DBSCAN Boxes
-- Finds best bidirectional IOU match (UV↔DBSCAN)
-- Minimum IOU threshold: `filtering_BBox_IOU_threshold` (0.2)
-- Conservative strategy: takes maximum volume
-- Output: `visualBBoxes_`
-
-##### **STEP 2**: Process LiDAR Boxes
-- Filters by maximum size
-- Maintains cluster features (centroid, standard deviation)
-- Output: `lidarBBoxes_`
-
-##### **STEP 3**: Fuse Visual and LiDAR
-- Combines visual boxes (Step 1) with LiDAR boxes (Step 2)
-- Creates unified filtered boxes array
-- Output: `filteredBBoxesBeforeYolo_` (saved for visualization)
-
-##### **STEP 4**: Check YOLO Availability
-```cpp
-if (this->yoloDetectionResults_.detections.size() != 0) {
-    // YOLO detections available → proceed to STEP 5
-}
+```text
+Docker_LV-DOT_Jazzy/
+├── compose.yaml
+├── compose_build.bash
+├── entrypoint.sh
+├── DockerFiles/
+├── bags/
+├── FRAMEWORK_ARCHITECTURE.md
+├── README.md
+└── src/
+    └── onboard_detector/
 ```
 
-##### **STEP 5**: YOLO Integration and Box Refinement
-**This is the critical fusion point where YOLO detections enhance the 3D bounding boxes.**
+Main ROS package:
 
-**5.1 3D → 2D Projection**
-For each 3D bounding box from Visual-LiDAR fusion:
-1. Transform bbox from world coordinates → color camera coordinates
-2. Project 3D corners → 2D pixels using camera intrinsics
-3. Create projected 2D bounding boxes (`filteredDetectionResults`)
-
-```cpp
-// Pinhole camera projection
-int tlX = (fxC_ * topleft.x + cxC_ * topleft.z) / topleft.z;
-int tlY = (fyC_ * topleft.y + cyC_ * topleft.z) / topleft.z;
+```text
+src/onboard_detector/
+├── cfg/
+├── include/onboard_detector/
+├── launch/
+├── rviz/
+├── scripts/
+├── src/
+└── srv/
 ```
-
-**5.2 YOLO ↔ 3D Boxes Matching (2D IOU)**
-For each YOLO detection:
-- Calculates 2D IOU between YOLO bbox and all projected 3D bboxes
-- Finds best match: `best3DBBoxForYOLO[i] = bestIdx`
-- Creates mapping: `box3DToYolo[idx3D] = [yolo_indices]`
-
-**5.3 Classification and Splitting**
-
-**CASE 1: No YOLO match for 3D bbox**
-```cpp
-if (it == box3DToYolo.end()) {
-    // Keep original 3D bbox without modifications
-    newFilteredBBoxes.push_back(filteredBBoxesTemp[idx3D]);
-}
-```
-
-**CASE 2: Single YOLO match ← 3D box (Common case)**
-```cpp
-if (yoloIndices.size() == 1) {
-    filteredBBoxesTemp[idx3D].is_dynamic = true;  // ← MARKED DYNAMIC!
-    filteredBBoxesTemp[idx3D].is_human = true;    // ← MARKED HUMAN!
-    newFilteredBBoxes.push_back(filteredBBoxesTemp[idx3D]);
-}
-```
-**⚡ Meaning**: YOLO recognized a person → automatically dynamic
-
-**CASE 3: Multiple YOLO boxes → 1 3D bbox (Close people)**
-```cpp
-} else {  // yoloIndices.size() > 1
-    // SPLITTING ALGORITHM
-```
-
-**Splitting Algorithm:**
-1. Takes point cloud from fused 3D bbox
-2. For each 3D point:
-   - Projects to 2D image
-   - Finds which YOLO box contains the point
-   - Assigns point to closest YOLO box
-3. **Splits point cloud** into sub-clouds (one per YOLO box)
-4. For each sub-cloud:
-   - Calculates new 3D bounding box (AABB - Axis-Aligned Bounding Box)
-   - Marks as `is_dynamic = true` and `is_human = true`
-   - Replaces original 3D bbox with N separate boxes
-
-**Practical Example:**
-```
-Before:  1 large 3D bbox containing 2 close people
-        ┌─────────────┐
-        │   👤  👤    │  ← Single 3D detection
-        └─────────────┘
-
-YOLO:   2 separate detections
-        ┌────┐ ┌────┐
-        │ 👤 │ │ 👤 │  ← Two distinct people
-        └────┘ └────┘
-
-After:   2 separate 3D bboxes
-        ┌────┐ ┌────┐
-        │ 👤 │ │ 👤 │  ← Splitting successful!
-        └────┘ └────┘
-```
-
-**5.4 Final Update**
-```cpp
-filteredBBoxesTemp = newFilteredBBoxes;  // Replace with YOLO-processed results
-this->filteredBBoxes_ = filteredBBoxesTemp;  // Final output
-```
-
-#### 1.5 YOLO Person Detection (Asynchronous)
-- **Function**: `dynamicDetector::yoloDetectionCB()`
-- **Description**: Receives person detections from YOLOv11
-- **Separate node**: `yolov11_detector_node.py` (Python)
-- **Output**: Vision messages with 2D person bounding boxes
-- **Interface**:
-```cpp
-void dynamicDetector::yoloDetectionCB(const vision_msgs::msg::Detection2DArray::ConstSharedPtr& detections){
-    this->yoloDetectionResults_ = *detections;  // Save in buffer
-}
-```
-
-**Characteristics:**
-- **ROS2 Subscriber**: Topic `yolo_detector/detected_bounding_boxes`
-- **Message type**: `vision_msgs::msg::Detection2DArray` (2D person bboxes)
-- **Execution**: **Asynchronous** and independent from detection timers
-- **Function**: Simply updates buffer `yoloDetectionResults_` with latest message
-- **Frequency**: ~30 Hz (from separate Python YOLO node)
-
-### Main Detection Callback
-```cpp
-void dynamicDetector::detectionCB() {
-    this->dbscanDetect();        // STEP 1: Depth camera detection
-    this->uvDetect();            // STEP 2: UV detection
-    this->filterLVBBoxes();      // STEP 3: LiDAR-Visual-YOLO Fusion ← KEY POINT
-    this->newDetectFlag_ = true; // Signal new detection
-}
-```
-
-### Timing Constants
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| **time_step** | 0.033 s (33 ms) | Detection update period |
-| **Frequency** | 30 Hz | Module execution frequency |
-| **YOLO timer** | 0.033 s (33 ms) | YOLO inference period |
-| **YOLO inference** | ~30 ms | Actual GPU inference time |
-
-### Key Parameters
-
-#### Localization Mode
-- **localization_mode**: 0 (default: pose-based) or 1 (odometry-based)
-  - Mode 0: Uses PoseStamped from `/mavros/local_position/pose`
-  - Mode 1: Uses Odometry from `/mavros/local_position/odom`
-  - Both use ApproximateTime sync with sensor data
-
-#### Camera
-- **Depth intrinsics**: fx=385.31, fy=385.31, cx=324.80, cy=237.72
-- **Color intrinsics**: fx=606.31, fy=605.93, cx=314.69, cy=252.19
-- **Resolution**: 640×480 pixels
-- **Depth scale**: 1000 (mm to meters)
-- **Depth range**: 0.5 - 5.0 meters
-
-#### DBSCAN Visual
-- **voxel_occupied_thresh**: 5.0 points (min points for occupied voxel)
-- **dbscan_min_points_cluster**: 20-40 points
-  - 20: 4.0m range
-  - 30: 3.5m range  
-  - 40: 3.0m range
-- **dbscan_search_range_epsilon**: 0.05 meters (DBSCAN search radius)
-- **depth_skip_pixel**: 2 (depth image downsampling)
-
-#### DBSCAN LiDAR
-- **lidar_DBSCAN_min_points**: 10 points
-- **lidar_DBSCAN_epsilon**: 0.05 meters
-- **downsample_threshold**: 3500 points (threshold for gaussian downsampling)
-- **gaussian_downsample_rate**: 6 (downsampling factor)
-
-#### Filtering Heights
-- **ground_height**: 0.2 meters (removes ground points)
-- **roof_height**: 2.0 meters (removes points above this relative height)
-
-#### Obstacle Dimensions
-- **max_object_size**: [3.0, 3.0, 2.0] meters (x, y, z)
-- **target_object_size**: [0.5, 0.5, 1.5] meters (target size if constraint enabled)
-
-#### YOLO-3D Fusion
-- **IOU threshold**: Any positive IOU accepted for matching
-- **Splitting margin**: 0 pixels (can be adjusted for looser assignment)
-- **Box update**: Conservative (maintains larger dimensions)
 
 ---
 
-## 2. TRACKING MODULE (Data Association & Kalman Filter)
+## Runtime nodes
 
-### Description
-Associates current detections with previously tracked obstacles and applies Kalman Filter to estimate state and velocity.
+## 1. `calibration_icp_node`
 
-### Main Functions
+### Role
 
-#### 2.1 Data Association
-- **Function**: `dynamicDetector::boxAssociation(std::vector<int>& bestMatch)`
-- **Description**: Finds best correspondence between current detections and tracked obstacles
-- **Algorithm**:
-  - Calculates weighted distance between detections and historical obstacles
-  - Uses multi-dimensional features: position (3D), size (3D), point cloud centroid (3D)
-  - Applies Hungarian algorithm for optimal matching
-  - Matching thresholds based on distance and size difference
+`calibration_icp_node` computes a refined LiDAR-to-camera transform from:
+- LiDAR point cloud input
+- depth image input
+- initial TF guess `velodyne -> rs1_link`
 
-- **Helper**: `dynamicDetector::boxAssociationHelper(std::vector<int>& bestMatch)`
-  - Calculates cost matrix for matching
-  - Verifies distance and size constraints
+### Current behavior
 
-#### 2.2 Kalman Filter & History Update
-- **Function**: `dynamicDetector::kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch)`
-- **Description**: Applies Kalman Filter for state estimation and updates history
-- **Estimated states**:
-  - Position: (x, y, z)
-  - Velocity: (Vx, Vy)
-  - Acceleration: (Ax, Ay) [optional]
-- **Pipeline**:
-  1. For each matched detection: update existing filter
-  2. For unmatched detections: create new filter
-  3. Estimate state using current observation
-  4. Update history (bounding box + point cloud + centroids)
-  5. Maintains limited history size (max 100 frames)
+The current implementation is **one-shot**, not service-based.
 
-#### 2.3 Kalman Filter Setup
-- **Functions**:
-  - `kalmanFilterMatrixAcc()` - Configures matrices for acceleration model
-  - `getKalmanObservationAcc()` - Prepares observation vector
-- **Dynamic model**: Constant Acceleration Model (CA)
-  - States: [x, y, Vx, Vy, Ax, Ay]
-  - Measurements: [x, y] position
+That means:
+- the node subscribes to synchronized LiDAR and depth messages
+- on the first valid synchronized pair, it runs ICP
+- after success, it publishes debug outputs and the refined transform
+- after success, it does not recalibrate again in the same run
 
-#### 2.4 Feature Extraction
-- **Auxiliary functions**:
-  - `getPointCloudFeatures()` - Extracts features from point cloud
-  - `getSizeFeatures()` - Extracts bounding box dimensions
-  - `distanceBetweenBox3D()` - Calculates weighted distance between boxes
+### Inputs
 
-### Main Tracking Callback
-```cpp
-void dynamicDetector::trackingCB() {
-    std::vector<int> bestMatch;
-    this->boxAssociation(bestMatch);  // Data association
-    
-    if (bestMatch.size()) {
-        this->kalmanFilterAndUpdateHist(bestMatch);  // Kalman + history update
-    } else {
-        // Reset history if no association
-        this->boxHist_.clear();
-        this->pcHist_.clear();
-        this->pcCenterHist_.clear();
-    }
-}
-```
+Configured from YAML under `calibration_icp_node: ros__parameters:`:
+- `depth_topic`
+- `velodyne_topic`
+- `lidar_frame`
+- `camera_frame`
+- `refined_camera_frame`
+- ICP parameters
+- depth intrinsics and range limits
 
-### Timing Constants
+Typical topic names in this repository:
+- `/camera1/rs1/depth/image_rect_raw`
+- `/velodyne_points`
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| **time_step** | 0.033 s (33 ms) | Tracking update period |
-| **Frequency** | 30 Hz | Module execution frequency |
-| **history_size** | 100 frames | Maximum history size per obstacle |
-| **kalman_filter_averaging_frames** | 10 frames | Kalman Filter averaging window |
+### Outputs
 
-### Key Parameters
+Calibration publishes:
+- `/calibration/velodyne_points`
+- `/calibration/depth_cloud_in_velodyne`
+- static TF `velodyne -> rs1_link_refined`
 
-#### Data Association
-- **max_match_range**: 0.5 meters (max distance for match)
-- **max_size_diff_range**: 0.5 meters (max size difference)
-- **feature_weight**: [3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0.0, 0.0, 0.0]
-  - Weights for: [pos_x, pos_y, pos_z, size_x, size_y, size_z, pc_center_x, pc_center_y, pc_center_z]
-  - Position has maximum weight (3.0)
-  - Size has medium weight (0.5)
-  - Point cloud centroid has minimum weight (0.05)
+### Important note
 
-#### Kalman Filter
-- **kalman_filter_param**: [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
-  - Process noise and measurement noise covariance
-  - Tuned to balance responsiveness and smooth tracking
-
-#### Size Fixing
-- **fix_size_history_threshold**: 10 frames
-  - After 10 tracking frames, obstacle size is fixed
-- **fix_size_dimension_threshold**: 0.4 (40%)
-  - Size variation threshold for fixing
+The refined TF is published through a `StaticTransformBroadcaster`, so it appears on `/tf_static`, not `/tf`.
 
 ---
 
-## 3. CLASSIFICATION MODULE (Dynamic/Static Classification)
+## 2. `detector_node`
 
-### Description
-Classifies tracked obstacles as dynamic or static by analyzing point cloud motion and velocity estimated by Kalman Filter.
+### Role
 
-### Main Functions
+`detector_node` is the main C++ LV-DOT runtime.
 
-#### 3.1 Main Classification
-- **Function**: `dynamicDetector::classificationCB()`
-- **Description**: Classifies obstacles using multi-criteria analysis
-- **3-level algorithm**:
+It combines:
+- depth-based detection
+- LiDAR-based detection
+- visual/LiDAR fusion
+- YOLO-assisted human association
+- tracking and dynamic/static classification
 
-##### CASE I: YOLO Human Detection
-- If YOLO recognizes a person → **automatically DYNAMIC**
-- `boxHist_[i][0].is_human == true`
-- **Bypasses all other verifications**
-- **⚡ Impact**: Reduces latency from 0.5s to 33ms for YOLO-detected people!
+### Internal detector stages
 
-##### CASE II: History Length Check
-- Verifies if history is sufficient for classification
-- Minimum required: `skipFrame_ + 1` frames
-- If insufficient: skip classification
+The main logic lives in:
+- `include/onboard_detector/dynamicDetector.cpp`
+- `include/onboard_detector/dynamicDetector.h`
 
-##### CASE III: Force Dynamic
-- If obstacle has been classified as dynamic for N consecutive frames
-- **frames_force_dynamic**: 10 frames (search range)
-- **frames_force_dynamic_check_range**: 30 frames (verification threshold)
-- If `dynaFrames >= forceDynaFrames_` → **DYNAMIC**
+The detector pipeline is organized around these steps:
 
-#### 3.2 Point Cloud Velocity Analysis
-- **Nearest Neighbor Algorithm**:
-  1. Compares current point cloud vs point cloud N frames ago
-  2. For each current point, finds nearest neighbor in previous frame
-  3. Calculates point-to-point velocity: `V = (curr - prev) / (dt * frameGap)`
-  4. Compares point velocity direction with bounding box velocity (dot product)
-  5. If negative alignment: discard point
-  6. If |V| > velocity threshold: increment dynamic vote
+1. **Depth / UV detection**
+   - obstacle extraction from depth imagery
 
-#### 3.3 Voting Mechanism
-- **Vote ratio calculation**: `voteRatio = votes / numValidPoints`
-- **Conditions for DYNAMIC classification**:
-  1. `voteRatio >= dynaVoteThresh_` (0.8 = 80% dynamic points)
-  2. `|V_kalman| >= dynaVelThresh_` (0.2 m/s)
-  3. Dynamic consistency check (see below)
+2. **DBSCAN on depth-derived cloud**
+   - visual clustering and 3D box estimation
 
-#### 3.4 Dynamic Consistency Check
-- **Parameter**: `dynamic_consistency_threshold` = 15 frames
-- **Logic**:
-  - Obstacle must be voted as dynamic for 15 **consecutive** frames
-  - Counts how many of last 15 frames are `is_dynamic_candidate` or `is_human` or `is_dynamic`
-  - Only if all 15 frames satisfy condition → `is_dynamic = true`
-- **Purpose**: Reduces false positives, ensures motion persistence
+3. **LiDAR clustering**
+   - LiDAR DBSCAN and box extraction
 
-#### 3.5 Size Constraint
-- **Function**: Final filtering by target dimensions
-- **Parameter**: `target_constrain_size` = true/false
-- **Logic**:
-  - Compares dynamic obstacle dimensions with `target_object_size`
-  - Tolerance: xdiff < 0.8m, ydiff < 0.8m, zdiff < 1.0m
-  - Only obstacles with compatible dimensions pass filter
+4. **Visual-LiDAR fusion**
+   - fusion of visual and LiDAR boxes
 
-### Main Classification Callback
-```cpp
-void dynamicDetector::classificationCB() {
-    std::vector<onboardDetector::box3D> dynamicBBoxesTemp;
-    
-    for (size_t i=0; i<this->pcHist_.size(); ++i) {
-        // CASE I: YOLO human → dynamic (IMMEDIATE)
-        if (this->boxHist_[i][0].is_human) {
-            dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
-            continue;  // ← BYPASS all other checks!
-        }
-        
-        // CASE II: History check
-        int curFrameGap = (pcHist_[i].size() < skipFrame_+1) 
-                          ? pcHist_[i].size()-1 : skipFrame_;
-        
-        // CASE III: Force dynamic
-        if (dynaFrames >= forceDynaFrames_) {
-            dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
-            continue;
-        }
-        
-        // Point cloud velocity analysis + voting
-        // ... (detailed algorithm above)
-        
-        // Dynamic consistency check
-        if (dynaConsistCount == dynamicConsistThresh_) {
-            dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
-        }
-    }
-    
-    // Size constraint filtering
-    if (this->constrainSize_) {
-        // ... filter by target_object_size
-    }
-    
-    this->dynamicBBoxes_ = dynamicBBoxesTemp;
-}
-```
+5. **YOLO integration**
+   - associates 2D human detections with 3D boxes
+   - marks human detections as dynamic candidates
 
-### Timing Constants
+6. **Tracking**
+   - box association and temporal tracking
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| **time_step** | 0.033 s (33 ms) | Classification period |
-| **Frequency** | 30 Hz | Module execution frequency |
-| **frame_skip** | 5 frames | Temporal gap for pointcloud comparison |
-| **Comparison time** | 5 × 33 ms = **165 ms** | Time between compared frames |
+7. **Dynamic classification**
+   - classifies tracked objects as dynamic/static
 
-### Key Parameters
+8. **Visualization publishing**
+   - debug images, markers, and point clouds
 
-#### Velocity Thresholds
-- **dynamic_velocity_threshold**: 0.2 m/s
-  - Minimum velocity to consider point dynamic
-  - Equivalent to 0.72 km/h (very sensitive to slow movements)
+### Frame usage
 
-#### Voting
-- **dynamic_voting_threshold**: 0.8 (80%)
-  - Minimum percentage of dynamic points for classification
-  - High threshold to reduce false positives
+Detector-side depth and color TF parameters are configured to use:
+- `tf_depth_frame: rs1_link_refined`
+- `tf_color_frame: rs1_link_refined`
 
-#### Force Dynamic
-- **frames_force_dynamic**: 10 frames
-  - Minimum recent dynamic frames for force
-  - Equivalent time: 10 × 33 ms = 330 ms
-- **frames_force_dynamic_check_range**: 30 frames
-  - History range analyzed for force dynamic
-  - Equivalent time: 30 × 33 ms = 990 ms ≈ 1 second
-
-#### Consistency
-- **dynamic_consistency_threshold**: 15 frames
-  - Consecutive frames required for definitive classification
-  - Equivalent time: 15 × 33 ms = **495 ms ≈ 0.5 seconds**
-  - **MINIMUM LATENCY for dynamic detection**: 0.5 seconds
-  - **Exception**: YOLO-detected humans bypass this → 33 ms latency!
+So the main detector is intended to run only after calibration has produced `rs1_link_refined`.
 
 ---
 
-## 4. VISUALIZATION MODULE
+## 3. `yolov11_detector_node.py`
 
-### Description
-Publishes visualizations for RViz2 and debugging. Not part of core methodology but essential for debug and tuning.
+### Role
 
-### Main Functions
+This Python node performs YOLO-based 2D detection.
 
-#### 4.1 Visualization Callback
-- **Function**: `dynamicDetector::visCB()`
-- **Description**: Publishes RViz markers and images
-- **Output**:
-  - UV detection images
-  - Color images with YOLO boxes
-  - 3D bounding boxes (all stages)
-  - Filtered and clustered point clouds
-  - Trajectory history
+### Location
 
-#### 4.2 Publishers
-- **Image Publishers**: 
-  - Depth maps (UV, depth, bird view)
-  - Color images with detection overlay
-- **Marker Publishers**:
-  - UV boxes, DBSCAN boxes, Visual boxes, LiDAR boxes
-  - Filtered boxes (before/after YOLO), Tracked boxes, Dynamic boxes
-- **PointCloud Publishers**:
-  - Filtered depth points, LiDAR clusters
-  - Dynamic points, downsampled points
+Main scripts are under:
+- `src/onboard_detector/scripts/yolo_detector/`
 
-### Main Visualization Callback
-```cpp
-void dynamicDetector::visCB() {
-    this->publishUVImages();
-    this->publishColorImages();
-    this->publish3dBox(this->uvBBoxes_, this->uvBBoxesPub_, 0, 1, 0);  // Green
-    this->publish3dBox(this->dbBBoxes_, this->dbBBoxesPub_, 1, 0, 0);  // Red
-    this->publish3dBox(this->visualBBoxes_, this->visualBBoxesPub_, ...);
-    this->publish3dBox(this->lidarBBoxes_, this->lidarBBoxesPub_, ...);
-    this->publish3dBox(this->filteredBBoxesBeforeYolo_, this->filteredBBoxesBeforeYoloPub_, ...);
-    this->publish3dBox(this->filteredBBoxes_, this->filteredBBoxesPub_, ...);
-    this->publish3dBox(this->trackedBBoxes_, this->trackedBBoxesPub_, ...);
-    this->publish3dBox(this->dynamicBBoxes_, this->dynamicBBoxesPub_, ...);
-    // ... point cloud publishers
-}
-```
+Important files:
+- `yolov11_detector_node.py`
+- `yolov11_detector.py`
+- `weights/`
+- `config/`
 
-### Timing Constants
+### Function in the pipeline
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| **time_step** | 0.033 s (33 ms) | Publication period |
-| **Frequency** | 30 Hz | Module execution frequency |
+YOLO is asynchronous relative to the C++ detector.
+
+The detector stores the latest YOLO detections and uses them during the fusion stage to:
+- improve human detection
+- label certain 3D detections as dynamic
+- split large fused boxes when multiple humans are visible
 
 ---
 
-## YOLO-VISUAL-LIDAR FUSION INTERFACE
+## 4. `rviz2`
 
-### Asynchronous Design with Buffer
+### Role
 
-**Architecture:**
-```
-┌──────────────────────────────────────────────────┐
-│  YOLO Node (Python, async 30Hz)                  │
-│  - Receives color image                          │
-│  - YOLOv11 inference (~30ms)                     │
-│  - Publishes Detection2DArray                    │
-└────────────────┬─────────────────────────────────┘
-                 │ Topic: yolo_detector/detected_bounding_boxes
-                 ↓ (asynchronous)
-┌────────────────▼─────────────────────────────────┐
-│  yoloDetectionCB()                               │
-│  - Saves to buffer: yoloDetectionResults_        │
-│  - Non-blocking, returns immediately            │
-└──────────────────────────────────────────────────┘
-                 │
-                 │ Buffer access
-                 ↓
-┌──────────────────────────────────────────────────┐
-│  detectionCB() Timer (30Hz)                      │
-│  1. dbscanDetect()                               │
-│  2. uvDetect()                                   │
-│  3. filterLVBBoxes() ← READS yoloDetectionResults_│
-│     └─ STEP 5: YOLO Integration                  │
-└──────────────────────────────────────────────────┘
-```
+RViz is used for:
+- debugging calibration outputs
+- verifying TF trees
+- visualizing obstacle markers and point clouds
+- checking detector output alignment
 
-### Key Design Principles
-
-#### 1. Asynchronous Buffer Pattern
-- YOLO callback **asynchronously** updates buffer `yoloDetectionResults_`
-- Detection timer **reads** buffer when needed (STEP 5)
-- **Advantage**: YOLO inference doesn't block main pipeline
-
-#### 2. "Soft" Synchronization
-- No explicit synchronization between YOLO and detection
-- Uses **latest available YOLO message** at fusion time
-- With both at 30Hz, typically aligned (±10-20ms)
-
-#### 3. Hierarchical Fusion
-```
-Visual Detection (UV + DBSCAN) + LiDAR Detection
-            ↓
-    Visual-LiDAR Fusion (3D IOU)
-            ↓
-    3D → 2D Projection
-            ↓
-    YOLO Matching (2D IOU)
-            ↓
-    Classification + Splitting
-            ↓
-    filteredBBoxes_ (final output)
-```
-
-### Benefits of YOLO Integration
-
-| Without YOLO | With YOLO |
-|--------------|-----------|
-| Generic 3D bbox | Bbox marked `is_human=true` |
-| Dynamic classification requires 0.5s | **Instant classification** |
-| Close people → 1 large bbox | **Automatic splitting** into N people |
-| False positives on static objects | Reduced false positives |
-| No semantic information | Semantic class (person) |
-
-### Impact on Classification Module
-
-In `classificationCB()`:
-```cpp
-// CASE I: YOLO human detection
-if (this->boxHist_[i][0].is_human) {
-    dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
-    continue;  // ← BYPASS everything else!
-}
-```
-
-**Benefit**: Obstacles marked `is_human` by YOLO **completely bypass**:
-- Point cloud velocity analysis
-- Voting mechanism
-- Dynamic consistency check (15 frames)
-
-**Result**: **Latency reduced from 0.5s to 33ms** for YOLO-recognized people!
-
-### Performance and Timing
-
-| Component | Time | Notes |
-|-----------|------|-------|
-| **YOLO inference** | ~30 ms | Separate Python node |
-| **yoloDetectionCB()** | <1 ms | Only buffer copy |
-| **filterLVBBoxes() STEP 5** | ~5-10 ms | Projection + matching + splitting |
-| **Total detection** | ~20-31 ms | Includes everything |
-| **YOLO overhead** | ~5-10 ms | Only when detections available |
-
-### Why This Design is Elegant
-
-1. **Doesn't slow down** pipeline even if YOLO is slow
-2. **Drastically improves** classification for people
-3. **Resolves ambiguities** (close people) that 3D sensors can't distinguish
-4. **Optional**: if YOLO detects nothing, pipeline continues normally
-5. **Robust**: Buffer ensures latest data always available
-6. **Scalable**: Can add more semantic detectors following same pattern
+Key configs in this repository:
+- `rviz/detector_working_jo_zotac.rviz`
+- `rviz/detector_debug.rviz`
 
 ---
 
-## COMPLETE PIPELINE AND TIMING ANALYSIS
+## Launch architecture
 
-### Execution Sequence
+## `run_detector.launch.py`
 
+This is the main runtime launch.
+
+### What it starts immediately
+
+- static TF publisher: `map -> base_link`
+- static TF publisher: `base_link -> imu_link`
+- static TF publisher: `imu_link -> velodyne`
+- static TF publisher: `velodyne -> rs1_link`
+- `calibration_icp_node`
+- `yolov11_detector_node.py`
+- `rviz2`
+
+### Detector gating logic
+
+`detector_node` is not started immediately.
+
+Instead, the launch runs a small TF waiter process that checks for:
+- `velodyne -> rs1_link_refined`
+
+If that transform appears within the timeout window:
+- `detector_node` is started
+
+If it does not appear:
+- the launch shuts down
+
+### Why this is needed
+
+The detector uses `rs1_link_refined` for camera/depth frame references. Starting the detector before calibration would make the camera-side cloud/frame logic inconsistent.
+
+---
+
+## `run_calibration_icp.launch.py`
+
+This launch is intended for calibration-only debugging.
+
+It starts:
+- `calibration_icp_node`
+- `rviz2`
+- the initial static transform `velodyne -> rs1_link`
+
+This is useful when validating:
+- aligned calibration clouds
+- TF publication
+- ICP tuning
+
+---
+
+## TF architecture
+
+The core TF chain is:
+
+```text
+map
+└── base_link
+    └── imu_link
+        └── velodyne
+            ├── rs1_link
+            └── rs1_link_refined
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CYCLE: 33 ms (30 Hz)                      │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌───────────────────────────────────────────────┐          │
-│  │ 1. DETECTION MODULE                           │          │
-│  │    - UV Detect (depth image)                  │          │
-│  │    - DBSCAN Detect (depth pointcloud)         │          │
-│  │    - LiDAR Detect (LiDAR DBSCAN)              │          │
-│  │    - Filter & Fuse (LV-Boxes)                 │          │
-│  │    - YOLO Integration (if available)          │          │
-│  │    Duration: ~10-20 ms                        │          │
-│  └───────────────────────────────────────────────┘          │
-│                         ↓                                     │
-│  ┌───────────────────────────────────────────────┐          │
-│  │ 2. TRACKING MODULE                            │          │
-│  │    - Box Association (Hungarian)              │          │
-│  │    - Kalman Filter Update                     │          │
-│  │    - History Update                           │          │
-│  │    Duration: ~3-5 ms                          │          │
-│  └───────────────────────────────────────────────┘          │
-│                         ↓                                     │
-│  ┌───────────────────────────────────────────────┐          │
-│  │ 3. CLASSIFICATION MODULE                      │          │
-│  │    - YOLO Human Check (instant)               │          │
-│  │    - Point Cloud Velocity Analysis            │          │
-│  │    - Voting & Consistency Check               │          │
-│  │    - Dynamic Classification                   │          │
-│  │    Duration: ~5-8 ms                          │          │
-│  └───────────────────────────────────────────────┘          │
-│                         ↓                                     │
-│  ┌───────────────────────────────────────────────┐          │
-│  │ 4. VISUALIZATION MODULE                       │          │
-│  │    - Publish Markers                          │          │
-│  │    - Publish Point Clouds                     │          │
-│  │    - Publish Images                           │          │
-│  │    Duration: ~2-3 ms                          │          │
-│  └───────────────────────────────────────────────┘          │
-│                                                               │
-│  TOTAL PROCESSING: ~20-36 ms                                 │
-│  MARGIN: ~-3 to +13 ms                                       │
-└─────────────────────────────────────────────────────────────┘
 
-         PARALLEL PROCESS: YOLO Detector (30 Hz)
-         - Inference: ~30 ms per frame
-         - Runs asynchronously in separate Python node
-         - Non-blocking buffer update
+### Meaning of the frames
+
+- `rs1_link`  
+  Initial camera frame used as the input guess for ICP
+
+- `rs1_link_refined`  
+  Refined camera frame produced by calibration
+
+### Important distinction
+
+- `velodyne -> rs1_link` is the initial guess
+- `velodyne -> rs1_link_refined` is the calibration result
+
+The detector should use the refined frame.
+
+---
+
+## Configuration architecture
+
+Main config file:
+
+```text
+src/onboard_detector/cfg/detector_param_jo_zotac.yaml
 ```
 
-### System Latencies
+This file contains two runtime sections:
 
-| Phase | Latency | Notes |
-|-------|---------|-------|
-| **Single detection** | 33 ms | 1 frame |
-| **First tracking match** | 66 ms | 2 frames |
-| **Classification (YOLO)** | 33 ms | Instant for humans! |
-| **Classification (min)** | 495 ms | 15 frame consistency |
-| **Classification (typical)** | 660-990 ms | Includes frame_skip and force dynamic check |
-| **Detection → Classification** | 0.033 - 1.0 s | End-to-end latency (depends on YOLO) |
+### `detector_node: ros__parameters:`
 
-### Memory and History
+Contains detector-specific settings such as:
+- detector topics
+- map/lidar/depth/color TF frames
+- depth intrinsics
+- clustering thresholds
+- tracking parameters
 
-| Buffer | Size | Memory (est.) |
-|--------|------|---------------|
-| **boxHist_** | 100 frames × N_objects | ~few KB per object |
-| **pcHist_** | 100 frames × points × N_objects | ~MB scale |
-| **pcCenterHist_** | 100 frames × N_objects | ~few KB |
-| **Kalman Filters** | N_objects × state vector | Negligible |
-| **yoloDetectionResults_** | 1 message | ~few KB |
+### `calibration_icp_node: ros__parameters:`
 
----
+Contains calibration-specific settings such as:
+- input topics
+- initial and refined frame names
+- ICP thresholds
+- overlap parameters
+- depth intrinsics and filtering parameters
 
-## CONFIGURATION AND TUNING
+### Design choice
 
-### Configuration File
-**Path**: `src/onboard_detector/cfg/detector_param.yaml`
-
-### Critical Parameters for Performance
-
-#### For Speed (Real-time Enforcement)
-- Reduce `dbscan_min_points_cluster` (20 is fast, 40 is precise)
-- Increase `depth_skip_pixel` (2 → 3 for more aggressive downsampling)
-- Increase `gaussian_downsample_rate` (6 → 8 for LiDAR downsampling)
-- Reduce `history_size` if memory is limited
-- Disable YOLO if not needed (but lose instant person detection)
-
-#### For Accuracy (Precision Optimization)
-- Increase `dbscan_min_points_cluster` (favors denser clusters)
-- Reduce `depth_skip_pixel` (1 for full resolution)
-- Increase `dynamic_consistency_threshold` (reduces false positives)
-- Reduce `dynamic_velocity_threshold` (more sensitive dynamicity detection)
-- Enable YOLO for better person detection
-
-#### For Robustness
-- Increase `filtering_BBox_IOU_threshold` (0.2 → 0.3 for stricter matches)
-- Increase `dynamic_voting_threshold` (0.8 → 0.9 for more certainty)
-- Increase `dynamic_consistency_threshold` (15 → 20 frames)
-- Keep YOLO enabled for reliable human detection
+Launch files are intended to load parameters from YAML rather than duplicating topic or TF values inline.
 
 ---
 
-## ROS2 TOPICS
+## Topics
 
-### Input Topics
+## Main input topics
 
-#### Synchronized Sensor + Localization Pairs
-- **Depth Image (ApproximateTime Sync)**:
-  - `/camera/depth/image_rect_raw` (sensor_msgs/Image)
-  - Synchronized with **either**:
-    - `/mavros/local_position/pose` (geometry_msgs/PoseStamped) when `localization_mode: 0`
-    - `/mavros/local_position/odom` (nav_msgs/Odometry) when `localization_mode: 1`
+Typical runtime inputs include:
+- `/velodyne_points`
+- `/camera1/rs1/depth/image_rect_raw`
+- color image topic used by YOLO
+- `/clock` for bag playback with simulated time
 
-- **LiDAR PointCloud (ApproximateTime Sync)**:
-  - `/pointcloud` (sensor_msgs/PointCloud2)
-  - Synchronized with **either**:
-    - `/mavros/local_position/pose` (geometry_msgs/PoseStamped) when `localization_mode: 0`
-    - `/mavros/local_position/odom` (nav_msgs/Odometry) when `localization_mode: 1`
+## Calibration outputs
 
-#### Independent Sensor Inputs
-- `/camera/color/image_raw` - Color image for YOLO and visualization (sensor_msgs/Image)
+- `/calibration/velodyne_points`
+- `/calibration/depth_cloud_in_velodyne`
+- `/tf_static` entry for `velodyne -> rs1_link_refined`
 
-#### AI/ML Input
-- `yolo_detector/detected_bounding_boxes` - YOLO person detections (vision_msgs/Detection2DArray)
+## Detector outputs
 
-### Output Topics (Detection)
-- `onboard_detector/filtered_bboxes_before_yolo` - Bounding boxes after LV fusion, before YOLO
-- `onboard_detector/filtered_bboxes` - Final bounding boxes after YOLO integration
-- `onboard_detector/tracked_bboxes` - Tracked bounding boxes
-- `onboard_detector/dynamic_bboxes` - Classified dynamic obstacles
-- `onboard_detector/dynamic_pointcloud` - Point clouds of dynamic obstacles
+The detector publishes obstacle, tracking, and debug outputs. Exact topic names are determined by the detector implementation and YAML configuration.
 
-### Output Topics (Debug)
-- `onboard_detector/uv_bboxes` - UV detection boxes
-- `onboard_detector/dbscan_bboxes` - DBSCAN detection boxes
-- `onboard_detector/lidar_bboxes` - LiDAR detection boxes
-- `onboard_detector/visual_bboxes` - Fused visual boxes
-- `onboard_detector/history_trajectory` - Trajectory history markers
-- `onboard_detector/detected_color_image` - Color image with YOLO boxes overlay
+## YOLO outputs
 
-### Services
-- `onboard_detector/get_dynamic_obstacles` - Query for dynamic obstacles in range
+The YOLO node publishes 2D detections and debug imagery.
 
 ---
 
-## REFERENCES
+## Build architecture
 
-### Original Paper
-- **LV-DOT**: Light-Weight Visual Dynamic Obstacle Tracker
-- Original repository: https://github.com/Zhefan-Xu/LV-DOT
+The package build is defined by:
+- `src/onboard_detector/CMakeLists.txt`
+- `src/onboard_detector/package.xml`
 
-### Algorithms Used
-- **DBSCAN**: Density-Based Spatial Clustering of Applications with Noise
-- **Hungarian Algorithm**: For optimal data association
-- **Kalman Filter**: For state estimation (Constant Acceleration Model)
-- **YOLOv11**: For person detection
+The package builds:
+- detector library
+- `detector_node`
+- `calibration_node`
+- `calibration_icp_node`
+- generated interface for `GetDynamicObstacles.srv`
 
-### Supported Sensors
-- **Camera**: Intel RealSense (depth + color) or equivalent
-- **LiDAR**: VLP-16 or similar (3D pointcloud)
-- **Localization**: MAVROS (PX4/ArduPilot) or Odometry
+The current calibration ICP build does **not** depend on `std_srvs`; the service-based variant was removed from the active code.
 
 ---
 
-## IMPLEMENTATION NOTES
+## Common runtime scenarios
 
-### Thread Safety
-All modules use **shared state** (boxHist_, pcHist_, filters_) updated sequentially by ROS2 timers. There's no true parallelism, but sequential execution scheduled by timers.
+## Scenario 1: Full runtime
 
-### Sensor Synchronization
-- Depth + Pose: ApproximateTime sync policy
-- LiDAR + Pose: ApproximateTime sync policy
-- YOLO: Independent asynchronous callback
-- Color image: Independent subscriber
+1. launch `run_detector.launch.py`
+2. play a bag with `--clock`
+3. calibration runs automatically on the first valid synchronized data
+4. refined TF is published
+5. detector starts
+6. YOLO and RViz continue running
 
-### Hardware Performance Requirements
-- **GPU required**: NVIDIA GPU for YOLO inference
-- **CPU**: Multi-core recommended for parallel processing
-- **RAM**: ~2-4 GB for history buffers with 10-20 obstacles
-- **Disk**: Minimal (no logging by default)
+## Scenario 2: Calibration debugging
 
-### Limitations
-- **Range**: Limited by depth camera (max 5m) and LiDAR range
-- **Classification latency**: Minimum 0.5s for non-YOLO dynamic classification
-- **Occlusions**: May lose tracking during prolonged occlusions
-- **Crowded environments**: Performance degrades with >20 simultaneous obstacles
-- **YOLO dependency**: Requires GPU and adds ~5-10ms overhead
-- **2D-3D projection**: Assumes reasonably accurate camera calibration
+1. launch `run_calibration_icp.launch.py`
+2. play a bag with synchronized depth + LiDAR
+3. observe:
+   - calibration debug clouds
+   - refined TF publication
+   - alignment quality in RViz
 
-### Best Practices
-1. **Always enable YOLO** for human-robot interaction scenarios
-2. Tune DBSCAN parameters based on environment (indoor vs outdoor)
-3. Adjust consistency thresholds based on required response time
-4. Monitor processing time to ensure <33ms per cycle
-5. Use RViz2 visualization for parameter tuning
-6. Test with recorded bag files before deployment
+---
+
+## Known failure modes
+
+### 1. `detector_node` never starts
+
+Likely causes:
+- calibration never received synchronized data
+- ICP failed before publishing `rs1_link_refined`
+- old TF publishers interfered with the TF tree
+
+### 2. Calibration clouds look aligned but refined TF seems missing
+
+Possible explanation:
+- the debug clouds are both published in the LiDAR frame after explicit transformation, so they can appear aligned even if the TF check was done incorrectly
+- the refined transform is on `/tf_static`, not `/tf`
+
+### 3. Old TF publishers affect launch behavior
+
+Stale `static_transform_publisher` processes can satisfy TF checks unexpectedly.
+
+Useful cleanup:
+
+```bash
+pkill -f static_transform_publisher
+```
+
+---
+
+## File responsibilities summary
+
+### Core runtime files
+
+- `src/onboard_detector/launch/run_detector.launch.py`  
+  Main runtime orchestration
+
+- `src/onboard_detector/launch/run_calibration_icp.launch.py`  
+  Calibration debugging launch
+
+- `src/onboard_detector/src/calibration_icp_node.cpp`  
+  One-shot ICP calibration and refined TF publication
+
+- `src/onboard_detector/include/onboard_detector/dynamicDetector.cpp`  
+  Main detector implementation
+
+- `src/onboard_detector/scripts/yolo_detector/yolov11_detector_node.py`  
+  YOLO runtime node
+
+- `src/onboard_detector/cfg/detector_param_jo_zotac.yaml`  
+  Main runtime configuration
+
+---
+
+## Related documentation
+
+For user-oriented setup and repository layout, see:
+- `README.md`
+
+For the original project and paper context, see:
+- https://github.com/Zhefan-Xu/LV-DOT
