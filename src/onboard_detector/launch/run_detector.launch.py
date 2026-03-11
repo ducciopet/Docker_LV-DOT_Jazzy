@@ -4,9 +4,7 @@ import os
 import yaml
 
 from launch import LaunchDescription
-from launch.actions import EmitEvent, ExecuteProcess, LogInfo, RegisterEventHandler, SetEnvironmentVariable
-from launch.event_handlers import OnProcessExit
-from launch.events import Shutdown
+from launch.actions import SetEnvironmentVariable
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from ament_index_python.packages import get_package_share_directory
@@ -28,14 +26,10 @@ def generate_launch_description():
 
     calibration_params = _load_node_params(config_file, 'calibration_icp_node')
     detector_params = _load_node_params(config_file, 'detector_node')
+    detector_onboard_params = detector_params.get('onboard_detector', {}) if isinstance(detector_params, dict) else {}
     camera_frame = str(calibration_params.get('camera_frame', 'rs1_link'))
-    refined_camera_frame = str(
-        calibration_params.get(
-            'refined_camera_frame',
-            detector_params.get('tf_depth_frame', camera_frame),
-        )
-    )
-
+    pose_topic = str(detector_onboard_params.get('pose_topic', '/pose'))
+    map_frame = str(detector_onboard_params.get('tf_map_frame', 'map'))
     scripts_dir = os.path.join(pkg_dir, 'scripts')
     yolo_dir = os.path.join(scripts_dir, 'yolo_detector')
 
@@ -55,11 +49,21 @@ def generate_launch_description():
         ],
     )
 
+
     static_tf_map_to_base = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='detector_tf_map_to_base_link',
-        arguments=['--x', '0.0', '--y', '0.0', '--z', '0.0', '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0', '--frame-id', 'map', '--child-frame-id', 'base_link']
+        arguments=[
+            '--x', '0.0',
+            '--y', '0.0',
+            '--z', '0.6',
+            '--roll', '0.0',
+            '--pitch', '0.0',
+            '--yaw', '0.0',
+            '--frame-id', map_frame,
+            '--child-frame-id', 'base_link'
+        ]
     )
 
     static_tf_base_to_imu = Node(
@@ -121,65 +125,7 @@ def generate_launch_description():
         name='rviz_detector',
         output='screen',
         arguments=['-d', rviz_config_file],
-    )
-
-    tf_wait_script = f"""
-import sys
-import time
-import rclpy
-from rclpy.duration import Duration
-from rclpy.node import Node
-from rclpy.time import Time
-from tf2_ros import Buffer, TransformListener
-
-TIMEOUT_SEC = 300.0
-CHECK_PERIOD_SEC = 0.5
-TARGET_FRAME = 'velodyne'
-SOURCE_FRAME = {refined_camera_frame!r}
-
-rclpy.init(args=None)
-node = Node('wait_for_refined_tf')
-buffer = Buffer()
-listener = TransformListener(buffer, node, spin_thread=True)
-deadline = time.monotonic() + TIMEOUT_SEC
-
-try:
-    while time.monotonic() < deadline and rclpy.ok():
-        if buffer.can_transform(TARGET_FRAME, SOURCE_FRAME, Time(), timeout=Duration(seconds=0.2)):
-            print(f'[refined_tf_waiter] Detected TF {{TARGET_FRAME}} -> {{SOURCE_FRAME}}')
-            node.destroy_node()
-            rclpy.shutdown()
-            sys.exit(0)
-        time.sleep(CHECK_PERIOD_SEC)
-
-    print(f'[refined_tf_waiter] Timeout waiting for TF {{TARGET_FRAME}} -> {{SOURCE_FRAME}}', file=sys.stderr)
-    node.destroy_node()
-    rclpy.shutdown()
-    sys.exit(1)
-except Exception as exc:
-    print('[refined_tf_waiter] Error while waiting for TF: ' + str(exc), file=sys.stderr)
-    node.destroy_node()
-    rclpy.shutdown()
-    sys.exit(1)
-"""
-
-    tf_waiter = ExecuteProcess(
-        cmd=['python3', '-c', tf_wait_script],
-        output='screen',
-        name='wait_for_refined_tf',
-    )
-
-    detector_start_handler = RegisterEventHandler(
-        OnProcessExit(
-            target_action=tf_waiter,
-            on_exit=lambda event, context: [
-                LogInfo(msg='Refined TF published. Starting detector_node.'),
-                detector_node,
-            ] if event.returncode == 0 else [
-                LogInfo(msg='Refined TF was not published in time. Shutting down.'),
-                EmitEvent(event=Shutdown(reason='Calibration TF unavailable')),
-            ],
-        )
+        parameters=[{'use_sim_time': True}],
     )
 
     return LaunchDescription([
@@ -189,8 +135,7 @@ except Exception as exc:
         static_tf_imu_to_lidar,
         initial_guess_tf,
         calibration_node,
+        detector_node,
         yolo_node,
         rviz_node,
-        tf_waiter,
-        detector_start_handler,
     ])
