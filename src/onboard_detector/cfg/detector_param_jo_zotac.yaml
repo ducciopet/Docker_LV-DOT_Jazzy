@@ -26,25 +26,11 @@ detector_node:
       image_cols: 848 #depth_image_width
       image_rows: 480 #depth_image_cols
 
-      # Sensor Transforms
-      body_to_camera_depth: [-0.3069,  0.2149,  0.9272, -0.4000,
-               -0.7595,  0.5318, -0.3746, -0.0600,
-               -0.5736, -0.8192,  0.0000,  0.0000,
-                0.0000,  0.0000,  0.0000,  1.0000]
-      body_to_camera_color: [-0.3069,  0.2149,  0.9272, -0.4000,
-               -0.7595,  0.5318, -0.3746, -0.0600,
-               -0.5736, -0.8192,  0.0000,  0.0000,
-                0.0000,  0.0000,  0.0000,  1.0000]
-      body_to_lidar:  [1.0000,  0.0000,  0.0000, -0.1000,
-                       0.0000,  1.0000,  0.0000,  0.0000,
-                       0.0000,  0.0000,  1.0000,  0.3000,
-                       0.0000,  0.0000,  0.0000,  1.0000]
-
       # System
       time_step: 0.033
 
       # DBSCAN Common
-      ground_height: 0.2 # height of ground to remove ground points
+      ground_height: -0.2 # height of ground to remove ground points
       roof_height: 5.0 # relative height of roof to remove roof points
 
       # DBSCAN visual param
@@ -105,3 +91,30 @@ calibration_icp_node:
       depth_min_value: 0.5
       depth_max_value: 5.0
       depth_skip_pixel: 2
+
+yolov11_detector_node:
+  ros__parameters:
+    image_topic: /camera1/rs1/color/image_raw
+    detected_image_topic: yolo_detector/detected_image
+    detected_bboxes_topic: yolo_detector/detected_bounding_boxes
+    inference_time_topic: yolo_detector/yolo_time
+    weights_path: weights/yolo11n.pt
+    class_names_path: config/coco.names
+    target_classes: [person]
+    timer_period_sec: 0.033
+    inference_size: 352
+    queue_size: 10
+
+# yolo_detector_node:
+#   ros__parameters:
+#     image_topic: /camera1/rs1/color/image_raw
+#     detected_image_topic: yolo_detector/detected_image
+#     detected_bboxes_topic: yolo_detector/detected_bounding_boxes
+#     inference_time_topic: yolo_detector/yolo_time
+#     weights_path: weights/weight_AP05:0.253207_280-epoch.pth
+#     class_names_path: config/coco.names
+#     target_classes: [person]
+#     timer_period_sec: 0.033
+#     inference_size: 352
+#     queue_size: 10
+#     score_threshold: 0.65

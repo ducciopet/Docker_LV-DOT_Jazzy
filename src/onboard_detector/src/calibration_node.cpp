@@ -18,7 +18,7 @@ public:
     CalibrationNode() : Node("calibration_node") {
         // Initialize TF
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
 
         // Get topic names from parameters (with defaults)
         std::string depth_topic = this->declare_parameter("depth_topic", std::string("/camera1/rs1/depth/image_rect_raw"));

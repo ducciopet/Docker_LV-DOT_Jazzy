@@ -193,7 +193,7 @@ RViz is used for:
 - checking detector output alignment
 
 Key configs in this repository:
-- `rviz/detector_working_jo_zotac.rviz`
+- `rviz/detector_jo_zotac.rviz`
 - `rviz/detector_debug.rviz`
 
 ---

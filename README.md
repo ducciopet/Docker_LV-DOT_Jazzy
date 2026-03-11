@@ -91,7 +91,6 @@ Configuration files for runtime parameters.
 
 Main files:
 - `detector_param_jo_zotac.yaml` — main active Jazzy config
-- `detector_param.yaml` — generic/default config
 
 `detector_param_jo_zotac.yaml` contains two important parameter groups:
 - `detector_node: ros__parameters:`
@@ -166,10 +165,8 @@ Main launch files:
 ### `rviz/`
 
 RViz presets for runtime and debugging:
-- `detector_working_jo_zotac.rviz`
-- `detector_working.rviz`
+- `detector_jo_zotac.rviz`
 - `detector_debug.rviz`
-- `detector.rviz`
 
 ### `srv/`
 

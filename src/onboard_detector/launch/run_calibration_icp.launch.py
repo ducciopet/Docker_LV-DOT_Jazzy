@@ -28,7 +28,7 @@ def generate_launch_description():
         Node(
             package='rviz2',
             executable='rviz2',
-            name='rviz2',
+            name='rviz_calibration_icp',
             output='screen',
             arguments=['-d', rviz_config_file],
         ),
@@ -36,6 +36,7 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
+            name='calib_icp_tf_velodyne_to_rs1_link_initial_guess',
             parameters=[{'use_sim_time': True}],
             arguments=[
                 '--x', '0.2',

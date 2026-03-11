@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import yaml
 
 from launch import LaunchDescription
 from launch.actions import EmitEvent, ExecuteProcess, LogInfo, RegisterEventHandler, SetEnvironmentVariable
@@ -11,10 +12,29 @@ from launch_ros.descriptions import ParameterFile
 from ament_index_python.packages import get_package_share_directory
 
 
+def _load_node_params(config_path, node_name):
+    try:
+        with open(config_path, 'r', encoding='utf-8') as cfg:
+            content = yaml.safe_load(cfg) or {}
+        return content.get(node_name, {}).get('ros__parameters', {})
+    except Exception:
+        return {}
+
+
 def generate_launch_description():
     pkg_dir = get_package_share_directory('onboard_detector')
     config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac.yaml')
-    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_working_jo_zotac.rviz')
+    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_jo_zotac.rviz')
+
+    calibration_params = _load_node_params(config_file, 'calibration_icp_node')
+    detector_params = _load_node_params(config_file, 'detector_node')
+    camera_frame = str(calibration_params.get('camera_frame', 'rs1_link'))
+    refined_camera_frame = str(
+        calibration_params.get(
+            'refined_camera_frame',
+            detector_params.get('tf_depth_frame', camera_frame),
+        )
+    )
 
     scripts_dir = os.path.join(pkg_dir, 'scripts')
     yolo_dir = os.path.join(scripts_dir, 'yolo_detector')
@@ -38,24 +58,28 @@ def generate_launch_description():
     static_tf_map_to_base = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
+        name='detector_tf_map_to_base_link',
         arguments=['--x', '0.0', '--y', '0.0', '--z', '0.0', '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0', '--frame-id', 'map', '--child-frame-id', 'base_link']
     )
 
     static_tf_base_to_imu = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
+        name='detector_tf_base_link_to_imu_link',
         arguments=['--x', '0.0', '--y', '0.0', '--z', '0.0', '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0', '--frame-id', 'base_link', '--child-frame-id', 'imu_link']
     )
 
     static_tf_imu_to_lidar = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
+        name='detector_tf_imu_link_to_velodyne',
         arguments=['--x', '-0.1', '--y', '0.0', '--z', '0.30', '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0', '--frame-id', 'imu_link', '--child-frame-id', 'velodyne']
     )
 
     initial_guess_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
+        name='detector_tf_velodyne_to_camera_initial_guess',
         parameters=[{'use_sim_time': True}],
         arguments=[
             '--x', '0.2',
@@ -65,7 +89,7 @@ def generate_launch_description():
             '--pitch', '0.0',
             '--yaw', '-1.8500490070139893',
             '--frame-id', 'velodyne',
-            '--child-frame-id', 'rs1_link'
+            '--child-frame-id', camera_frame
         ]
     )
 
@@ -85,18 +109,21 @@ def generate_launch_description():
         executable='yolov11_detector_node.py',
         name='yolov11_detector_node',
         output='screen',
-        parameters=[{'use_sim_time': True}],
+        parameters=[
+            ParameterFile(config_file, allow_substs=True),
+            {'use_sim_time': True},
+        ],
     )
 
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
-        name='rviz2',
+        name='rviz_detector',
         output='screen',
         arguments=['-d', rviz_config_file],
     )
 
-    tf_wait_script = """
+    tf_wait_script = f"""
 import sys
 import time
 import rclpy
@@ -108,7 +135,7 @@ from tf2_ros import Buffer, TransformListener
 TIMEOUT_SEC = 300.0
 CHECK_PERIOD_SEC = 0.5
 TARGET_FRAME = 'velodyne'
-SOURCE_FRAME = 'rs1_link_refined'
+SOURCE_FRAME = {refined_camera_frame!r}
 
 rclpy.init(args=None)
 node = Node('wait_for_refined_tf')
@@ -119,18 +146,18 @@ deadline = time.monotonic() + TIMEOUT_SEC
 try:
     while time.monotonic() < deadline and rclpy.ok():
         if buffer.can_transform(TARGET_FRAME, SOURCE_FRAME, Time(), timeout=Duration(seconds=0.2)):
-            print('[refined_tf_waiter] Detected TF velodyne -> rs1_link_refined')
+            print(f'[refined_tf_waiter] Detected TF {{TARGET_FRAME}} -> {{SOURCE_FRAME}}')
             node.destroy_node()
             rclpy.shutdown()
             sys.exit(0)
         time.sleep(CHECK_PERIOD_SEC)
 
-    print('[refined_tf_waiter] Timeout waiting for TF velodyne -> rs1_link_refined', file=sys.stderr)
+    print(f'[refined_tf_waiter] Timeout waiting for TF {{TARGET_FRAME}} -> {{SOURCE_FRAME}}', file=sys.stderr)
     node.destroy_node()
     rclpy.shutdown()
     sys.exit(1)
 except Exception as exc:
-    print(f'[refined_tf_waiter] Error while waiting for TF: {exc}', file=sys.stderr)
+    print('[refined_tf_waiter] Error while waiting for TF: ' + str(exc), file=sys.stderr)
     node.destroy_node()
     rclpy.shutdown()
     sys.exit(1)

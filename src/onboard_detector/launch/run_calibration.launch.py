@@ -32,7 +32,7 @@ def generate_launch_description():
         Node(
             package='rviz2',
             executable='rviz2',
-            name='rviz2',
+            name='rviz_calibration',
             output='screen',
             arguments=['-d', rviz_config_file],
         ),
@@ -43,6 +43,7 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',                        
+            name='calib_tf_map_to_base_link',
             arguments=[
                 '--x','0.0',
                 '--y','0.0',
@@ -59,6 +60,7 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',                        
+            name='calib_tf_base_link_to_imu_link',
             arguments=[
                 '--x','0.0',
                 '--y','0.0',
@@ -75,6 +77,7 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',                        
+            name='calib_tf_imu_link_to_velodyne',
             arguments=[
                 '--x','-0.1',
                 '--y','0.0',
@@ -91,6 +94,7 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
+            name='calib_tf_velodyne_to_rs1_link',
             parameters=[{'use_sim_time': True}],
             arguments=[
                 '--x','0.2',
@@ -108,6 +112,7 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
+            name='calib_tf_rs1_link_to_camera_depth_optical_frame',
             parameters=[{'use_sim_time': True}],
             arguments=[
                 '--x','0.0',
@@ -125,6 +130,7 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
+            name='calib_tf_rs1_link_to_camera_color_optical_frame',
             parameters=[{'use_sim_time': True}],
             arguments=[
                 '--x','0.0',

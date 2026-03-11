@@ -14,42 +14,70 @@ from cv_bridge import CvBridge
 from utils.tool import handle_preds
 from module.detector import Detector
 
-target_classes = ["person"]
-
 
 path_curr = os.path.dirname(__file__)
-img_topic = "/camera/color/image_raw"
 device = "cuda" if torch.cuda.is_available() else "cpu"
-weight = "weights/weight_AP05:0.253207_280-epoch.pth"
-class_names = "config/coco.names"
-thresh = 0.65
 
 class yolo_detector(Node):
     def __init__(self):
         super().__init__('yolo_detector')
         print("[onboardDetector]: yolo detector init...")
 
+        self.image_topic = str(self.declare_parameter('image_topic', '').value)
+        self.detected_image_topic = str(self.declare_parameter('detected_image_topic', '').value)
+        self.detected_bboxes_topic = str(self.declare_parameter('detected_bboxes_topic', '').value)
+        self.inference_time_topic = str(self.declare_parameter('inference_time_topic', '').value)
+        self.weights_path = str(self.declare_parameter('weights_path', '').value)
+        self.class_names_path = str(self.declare_parameter('class_names_path', '').value)
+        self.target_classes = list(self.declare_parameter('target_classes', ['person']).value)
+        self.timer_period_sec = float(self.declare_parameter('timer_period_sec', 0.033).value)
+        self.inference_size = int(self.declare_parameter('inference_size', 352).value)
+        self.queue_size = int(self.declare_parameter('queue_size', 10).value)
+        self.score_threshold = float(self.declare_parameter('score_threshold', 0.65).value)
+
+        missing = []
+        if not self.image_topic:
+            missing.append('image_topic')
+        if not self.detected_image_topic:
+            missing.append('detected_image_topic')
+        if not self.detected_bboxes_topic:
+            missing.append('detected_bboxes_topic')
+        if not self.inference_time_topic:
+            missing.append('inference_time_topic')
+        if not self.weights_path:
+            missing.append('weights_path')
+        if not self.class_names_path:
+            missing.append('class_names_path')
+        if not self.target_classes:
+            missing.append('target_classes')
+        if missing:
+            self.get_logger().error('Missing required parameters in YAML: ' + ', '.join(missing))
+            raise RuntimeError('YOLO parameter initialization failed')
+
+        self.weights_path = os.path.join(path_curr, self.weights_path)
+        self.class_names_path = os.path.join(path_curr, self.class_names_path)
+
         self.img_received = False
         self.img_detected = False
 
         # init and load
         self.model = Detector(80, True).to(device)
-        self.model.load_state_dict(torch.load(os.path.join(path_curr, weight), map_location=device))
+        self.model.load_state_dict(torch.load(self.weights_path, map_location=device))
         self.model.eval()
 
         # subscriber
         self.br = CvBridge()
-        self.img_sub = self.create_subscription(Image, img_topic, self.image_callback, 10)
+        self.img_sub = self.create_subscription(Image, self.image_topic, self.image_callback, self.queue_size)
 
         # publisher
-        self.img_pub = self.create_publisher(Image, 'yolo_detector/detected_image', 10)
-        self.bbox_pub = self.create_publisher(Detection2DArray, 'yolo_detector/detected_bounding_boxes', 10)
-        self.time_pub = self.create_publisher(Float64, 'yolo_detector/yolo_time', 1)
+        self.img_pub = self.create_publisher(Image, self.detected_image_topic, self.queue_size)
+        self.bbox_pub = self.create_publisher(Detection2DArray, self.detected_bboxes_topic, self.queue_size)
+        self.time_pub = self.create_publisher(Float64, self.inference_time_topic, 1)
 
         # timers (period in seconds)
-        self.create_timer(0.033, self.detect_callback)
-        self.create_timer(0.033, self.vis_callback)
-        self.create_timer(0.033, self.bbox_callback)
+        self.create_timer(self.timer_period_sec, self.detect_callback)
+        self.create_timer(self.timer_period_sec, self.vis_callback)
+        self.create_timer(self.timer_period_sec, self.bbox_callback)
     
     def image_callback(self, msg):
         self.img = self.br.imgmsg_to_cv2(msg, "bgr8")
@@ -77,7 +105,7 @@ class yolo_detector(Node):
         if self.img_detected:
             bboxes_msg = Detection2DArray()
             for detected_box in self.detected_bboxes:
-                if detected_box[4] in target_classes:
+                if detected_box[4] in self.target_classes:
                     bbox_msg = Detection2D()
                     # detected_box format: [x1, y1, x2, y2, class]
                     x1 = float(detected_box[0])
@@ -98,19 +126,19 @@ class yolo_detector(Node):
 
     def inference(self, ori_img):
         # image pre-processing
-        res_img = cv2.resize(ori_img, (352, 352), interpolation = cv2.INTER_LINEAR) 
-        img = res_img.reshape(1, 352, 352, 3)
+        res_img = cv2.resize(ori_img, (self.inference_size, self.inference_size), interpolation = cv2.INTER_LINEAR)
+        img = res_img.reshape(1, self.inference_size, self.inference_size, 3)
         img = torch.from_numpy(img.transpose(0, 3, 1, 2))
         img = img.to(device).float() / 255.0    
 
         # inference
         preds = self.model(img)
-        output = handle_preds(preds, device, thresh)
+        output = handle_preds(preds, device, self.score_threshold)
         return output
 
     def postprocess(self, ori_img, output):
         LABEL_NAMES = []
-        with open(os.path.join(path_curr, class_names), 'r') as f:
+        with open(self.class_names_path, 'r') as f:
             for line in f.readlines():
                 LABEL_NAMES.append(line.strip())
         

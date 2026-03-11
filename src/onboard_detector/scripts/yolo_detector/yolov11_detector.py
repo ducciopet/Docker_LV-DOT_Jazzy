@@ -11,11 +11,8 @@ from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2DArray
 from vision_msgs.msg import Detection2D
 from cv_bridge import CvBridge
-from utils.tool import handle_preds
 from ultralytics import YOLO
 from PIL import Image as PILImage, ImageDraw, ImageFont
-
-target_classes = ["person"]
 
 
 path_curr = os.path.dirname(__file__)
@@ -37,36 +34,70 @@ def msg_to_cv2_fallback(msg):
     except Exception as e:
         print(f"Fallback conversion error: {e}")
         return None
-img_topic = "/camera1/rs1/color/image_raw"
 device = "cuda" if torch.cuda.is_available() else "cpu"
-weight = "weights/yolo11n.pt"
-class_names = "config/coco.names"
 
 class yolo_detector(Node):
     def __init__(self):
         super().__init__('yolov11_detector')
         print("[onboardDetector]: yolo detector init...")
 
+        self.image_topic = str(self.declare_parameter('image_topic', '').value)
+        self.detected_image_topic = str(self.declare_parameter('detected_image_topic', '').value)
+        self.detected_bboxes_topic = str(self.declare_parameter('detected_bboxes_topic', '').value)
+        self.inference_time_topic = str(self.declare_parameter('inference_time_topic', '').value)
+        self.weights_path = str(self.declare_parameter('weights_path', '').value)
+        self.class_names_path = str(self.declare_parameter('class_names_path', '').value)
+        self.target_classes = list(self.declare_parameter('target_classes', ['person']).value)
+        self.timer_period_sec = float(self.declare_parameter('timer_period_sec', 0.033).value)
+        self.inference_size = int(self.declare_parameter('inference_size', 352).value)
+        self.queue_size = int(self.declare_parameter('queue_size', 10).value)
+
+        missing = []
+        if not self.image_topic:
+            missing.append('image_topic')
+        if not self.detected_image_topic:
+            missing.append('detected_image_topic')
+        if not self.detected_bboxes_topic:
+            missing.append('detected_bboxes_topic')
+        if not self.inference_time_topic:
+            missing.append('inference_time_topic')
+        if not self.weights_path:
+            missing.append('weights_path')
+        if not self.class_names_path:
+            missing.append('class_names_path')
+        if not self.target_classes:
+            missing.append('target_classes')
+        if missing:
+            self.get_logger().error('Missing required parameters in YAML: ' + ', '.join(missing))
+            raise RuntimeError('YOLO parameter initialization failed')
+
+        self.weights_path = os.path.join(path_curr, self.weights_path)
+        self.class_names_path = os.path.join(path_curr, self.class_names_path)
+        self.use_half = (device == "cuda")
+
         self.img_received = False
         self.img_detected = False
 
         # init and load
-        self.model = YOLO(os.path.join(path_curr, weight))
+        self.model = YOLO(self.weights_path)
         self.model.eval()
+        self.get_logger().info(
+            f"YOLOv11 configured: device={device}, half={self.use_half}, image_topic={self.image_topic}, weights={self.weights_path}"
+        )
 
         # subscriber
         self.br = CvBridge()
-        self.img_sub = self.create_subscription(Image, img_topic, self.image_callback, 10)
+        self.img_sub = self.create_subscription(Image, self.image_topic, self.image_callback, self.queue_size)
 
         # publisher
-        self.img_pub = self.create_publisher(Image, 'yolo_detector/detected_image', 10)
-        self.bbox_pub = self.create_publisher(Detection2DArray, 'yolo_detector/detected_bounding_boxes', 10)
-        self.time_pub = self.create_publisher(Float64, 'yolo_detector/yolo_time', 1)
+        self.img_pub = self.create_publisher(Image, self.detected_image_topic, self.queue_size)
+        self.bbox_pub = self.create_publisher(Detection2DArray, self.detected_bboxes_topic, self.queue_size)
+        self.time_pub = self.create_publisher(Float64, self.inference_time_topic, 1)
 
         # timers
-        self.create_timer(0.033, self.detect_callback)
-        self.create_timer(0.033, self.vis_callback)
-        self.create_timer(0.033, self.bbox_callback)
+        self.create_timer(self.timer_period_sec, self.detect_callback)
+        self.create_timer(self.timer_period_sec, self.vis_callback)
+        self.create_timer(self.timer_period_sec, self.bbox_callback)
     
     def image_callback(self, msg):
         try:
@@ -92,6 +123,9 @@ class yolo_detector(Node):
             assert self.img.flags['WRITEABLE'], "Array is not writable"
             
             self.img_received = True
+            if not hasattr(self, '_first_image_logged'):
+                self.get_logger().info(f"First image received on {self.image_topic} ({msg.width}x{msg.height}, {msg.encoding})")
+                self._first_image_logged = True
             
         except Exception as e:
             self.get_logger().error(f"Image callback error: {type(e).__name__}: {e}")
@@ -127,7 +161,7 @@ class yolo_detector(Node):
         if self.img_detected:
             bboxes_msg = Detection2DArray()
             for detected_box in self.detected_bboxes:
-                if detected_box[4] in target_classes:
+                if detected_box[4] in self.target_classes:
                     bbox_msg = Detection2D()
                     # detected_box format: [x1, y1, x2, y2, class]
                     x1 = float(detected_box[0])
@@ -171,13 +205,13 @@ class yolo_detector(Node):
             # Use PIL for image resizing instead of cv2 to avoid numpy/OpenCV compatibility issues
             try:
                 pil_img = PILImage.fromarray(ori_img, mode='RGB')
-                pil_img = pil_img.resize((352, 352), PILImage.Resampling.BILINEAR)
+                pil_img = pil_img.resize((self.inference_size, self.inference_size), PILImage.Resampling.BILINEAR)
                 res_img = np.array(pil_img, dtype=np.uint8)
             except Exception as e:
                 self.get_logger().warning(f"PIL resize failed: {e}. Trying torch...")
                 # Fallback to torch resizing
                 img_tensor = torch.from_numpy(ori_img.copy()).permute(2, 0, 1).unsqueeze(0).float()
-                img_resized = torch.nn.functional.interpolate(img_tensor, size=(352, 352), mode='bilinear', align_corners=False)
+                img_resized = torch.nn.functional.interpolate(img_tensor, size=(self.inference_size, self.inference_size), mode='bilinear', align_corners=False)
                 res_img = img_resized.squeeze(0).permute(1, 2, 0).numpy().astype(np.uint8)
             
             # Ensure res_img is a proper numpy array before torch conversion
@@ -185,7 +219,7 @@ class yolo_detector(Node):
             res_img = np.ascontiguousarray(res_img)
             
             # Reshape and convert to tensor
-            img = res_img.reshape(1, 352, 352, 3)
+            img = res_img.reshape(1, self.inference_size, self.inference_size, 3)
             # Convert to float32 for model input
             img = img.astype(np.float32)
             # Use torch.tensor() instead of torch.from_numpy() to avoid numpy version conflicts
@@ -195,7 +229,7 @@ class yolo_detector(Node):
             img_tensor = img_tensor.to(device) / 255.0   
 
             # inference
-            preds = self.model(img_tensor, device=device, half=True)[0]
+            preds = self.model(img_tensor, device=device, half=self.use_half)[0]
             return [preds.boxes.xyxyn, preds.boxes.conf, preds.boxes.cls]
             
         except Exception as e:
@@ -210,7 +244,7 @@ class yolo_detector(Node):
         ori_img = np.ascontiguousarray(ori_img)
         
         LABEL_NAMES = []
-        with open(os.path.join(path_curr, class_names), 'r') as f:
+        with open(self.class_names_path, 'r') as f:
             for line in f.readlines():
                 LABEL_NAMES.append(line.strip())
         

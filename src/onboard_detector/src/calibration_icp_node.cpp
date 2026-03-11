@@ -47,7 +47,7 @@ public:
 
         lidar_frame_ = this->declare_parameter("lidar_frame", std::string("velodyne"));
         camera_frame_ = this->declare_parameter("camera_frame", std::string("rs1_link"));
-        refined_camera_frame_ = this->declare_parameter("refined_camera_frame", std::string("rs1_link_refined"));
+        refined_camera_frame_ = this->declare_parameter("refined_camera_frame", camera_frame_ + "_refined");
 
         icp_max_corr_dist_ = this->declare_parameter("icp_max_correspondence_distance", 0.2);
         icp_max_iter_ = this->declare_parameter("icp_max_iteration", 100);
@@ -64,7 +64,7 @@ public:
         cy_ = depth_intrinsics[3];
 
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
         static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
 
         rclcpp::QoS qos(1);
@@ -458,7 +458,8 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "ICP done. fitness=%.6f rmse=%.6f",
                     reg_result.fitness_, reg_result.inlier_rmse_);
-        RCLCPP_INFO(this->get_logger(), "Refined velodyne->rs1_link_refined:\n%s",
+        RCLCPP_INFO(this->get_logger(), "Refined %s->%s:\n%s",
+                lidar_frame_.c_str(), refined_camera_frame_.c_str(),
                     matrixToString(T_lidar_camera_refined).c_str());
 
         auto depth_aligned = std::make_shared<open3d::geometry::PointCloud>(*source);

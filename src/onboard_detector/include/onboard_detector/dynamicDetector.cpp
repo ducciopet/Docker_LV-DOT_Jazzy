@@ -16,7 +16,7 @@ namespace onboardDetector{
         this->hint_ = "[onboardDetector]";
         this->nh_ = nh;
         this->tfBuffer_ = std::make_shared<tf2_ros::Buffer>(this->nh_->get_clock());
-        this->tfListener_ = std::make_shared<tf2_ros::TransformListener>(*this->tfBuffer_);
+        this->tfListener_ = std::make_shared<tf2_ros::TransformListener>(*this->tfBuffer_, this->nh_, false);
         this->initParam();
         this->registerPub();
         this->registerCallback();
@@ -25,7 +25,7 @@ namespace onboardDetector{
     void dynamicDetector::initDetector(const rclcpp::Node::SharedPtr& nh){
         this->nh_ = nh;
         this->tfBuffer_ = std::make_shared<tf2_ros::Buffer>(this->nh_->get_clock());
-        this->tfListener_ = std::make_shared<tf2_ros::TransformListener>(*this->tfBuffer_);
+        this->tfListener_ = std::make_shared<tf2_ros::TransformListener>(*this->tfBuffer_, this->nh_, false);
         this->initParam();
         this->registerPub();
         this->registerCallback();
@@ -34,10 +34,6 @@ namespace onboardDetector{
     void dynamicDetector::initParam(){
         // helper lambda to build parameter names
         auto pname = [&](const std::string &p){ return this->ns_.empty() ? p : this->ns_ + "." + p; };
-
-        this->body2CamDepth_.setIdentity();
-        this->body2CamColor_.setIdentity();
-        this->body2Lidar_.setIdentity();
 
         this->useTfPose_ = true;
         this->nh_->get_parameter(pname("use_tf_pose"), this->useTfPose_);
@@ -53,13 +49,13 @@ namespace onboardDetector{
         }
 
         if (!this->nh_->get_parameter(pname("tf_depth_frame"), this->tfDepthFrame_)) {
-            this->tfDepthFrame_ = "rs1_link_refined";
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_depth_frame not set, using default '%s'", this->tfDepthFrame_.c_str());
+            this->tfDepthFrame_.clear();
+            RCLCPP_ERROR(this->nh_->get_logger(), "[dynamicDetector]: tf_depth_frame not set. Configure it in YAML.");
         }
 
         if (!this->nh_->get_parameter(pname("tf_color_frame"), this->tfColorFrame_)) {
-            this->tfColorFrame_ = "rs1_link_refined";
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_color_frame not set, using default '%s'", this->tfColorFrame_.c_str());
+            this->tfColorFrame_.clear();
+            RCLCPP_ERROR(this->nh_->get_logger(), "[dynamicDetector]: tf_color_frame not set. Configure it in YAML.");
         }
 
         RCLCPP_INFO(this->nh_->get_logger(),
@@ -224,44 +220,7 @@ namespace onboardDetector{
         // ------------------------------------------------------------------------------------
 
 
-        // transform matrix: body to camera depth
-        std::vector<double> body2CamDepthVec (16);
-        if (!this->nh_->get_parameter(pname("body_to_camera_depth"), body2CamDepthVec)){
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: body_to_camera_depth not found, using identity fallback.");
-        }
-        else{
-            for (int i=0; i<4; ++i){
-                for (int j=0; j<4; ++j){
-                    this->body2CamDepth_(i, j) = body2CamDepthVec[i * 4 + j];
-                }
-            }
-        }
-        
-        // transform matrix: body to camera color
-        std::vector<double> body2CamColorVec (16);
-        if (!this->nh_->get_parameter(pname("body_to_camera_color"), body2CamColorVec)){
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: body_to_camera_color not found, using identity fallback.");
-        }
-        else{
-            for (int i=0; i<4; ++i){
-                for (int j=0; j<4; ++j){
-                    this->body2CamColor_(i, j) = body2CamColorVec[i * 4 + j];
-                }
-            }
-        }
-
-        // transform matrix: body to lidar
-        std::vector<double> body2LidarVec (16);
-        if (!this->nh_->get_parameter(pname("body_to_lidar"), body2LidarVec)){
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: body_to_lidar not found, using identity fallback.");
-        }
-        else{
-            for (int i=0; i<4; ++i){
-                for (int j=0; j<4; ++j){
-                    this->body2Lidar_(i, j) = body2LidarVec[i * 4 + j];
-                }
-            }
-        }
+        RCLCPP_INFO(this->nh_->get_logger(), "[dynamicDetector]: Sensor extrinsic matrices are not loaded from YAML. Using TF-only pose computation.");
 
         // time step
         if (!this->nh_->get_parameter(pname("time_step"), this->dt_)){
