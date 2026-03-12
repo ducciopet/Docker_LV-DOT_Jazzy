@@ -127,6 +127,7 @@ namespace onboardDetector{
         
         // DBSCAN visual param
         double voxelOccThresh_;
+        double voxelSize_ = 0.1; // default voxel size (meters)
         int dbMinPointsCluster_;
         double dbEpsilon_;
         

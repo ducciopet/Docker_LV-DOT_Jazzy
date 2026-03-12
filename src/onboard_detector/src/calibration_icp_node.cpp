@@ -46,8 +46,8 @@ public:
         depth_skip_ = this->declare_parameter("onboard_detector.depth_skip_pixel", 2);
 
         lidar_frame_ = this->declare_parameter("lidar_frame", std::string("velodyne"));
-        camera_frame_ = this->declare_parameter("camera_frame", std::string("rs1_link"));
-        refined_camera_frame_ = this->declare_parameter("refined_camera_frame", camera_frame_ + "_refined");
+        camera_frame_initial_guess_ = this->declare_parameter("camera_frame_initial_guess", std::string("rs1_link_initial_guess")); 
+        refined_camera_frame_ = this->declare_parameter("refined_camera_frame", "rs1_link_refined");
 
         icp_max_corr_dist_ = this->declare_parameter("icp_max_correspondence_distance", 0.2);
         icp_max_iter_ = this->declare_parameter("icp_max_iteration", 100);
@@ -114,6 +114,7 @@ private:
     std::string lidar_topic_;
     std::string lidar_frame_;
     std::string camera_frame_;
+    std::string camera_frame_initial_guess_;
     std::string refined_camera_frame_;
 
     double fx_{0.0};
@@ -194,10 +195,10 @@ private:
     bool fetchInitialGuessFromTF(const builtin_interfaces::msg::Time& stamp) {
         try {
             auto tf_stamped = tf_buffer_->lookupTransform(
-                lidar_frame_, camera_frame_, rclcpp::Time(stamp), std::chrono::milliseconds(200));
+                lidar_frame_, camera_frame_initial_guess_, rclcpp::Time(stamp), std::chrono::milliseconds(200));
             T_lidar_camera_init_ = transformMsgToEigen(tf_stamped.transform);
             RCLCPP_INFO(this->get_logger(), "Initial TF guess from /tf (%s -> %s):\n%s",
-                        lidar_frame_.c_str(), camera_frame_.c_str(), matrixToString(T_lidar_camera_init_).c_str());
+                        lidar_frame_.c_str(), camera_frame_initial_guess_.c_str(), matrixToString(T_lidar_camera_init_).c_str());
             return true;
         } catch (const tf2::TransformException& ex) {
             RCLCPP_WARN(this->get_logger(), "TF lookup at stamp failed: %s. Trying latest TF.", ex.what());
@@ -205,10 +206,10 @@ private:
 
         try {
             auto tf_stamped = tf_buffer_->lookupTransform(
-                lidar_frame_, camera_frame_, tf2::TimePointZero, std::chrono::milliseconds(200));
+                lidar_frame_, camera_frame_initial_guess_, tf2::TimePointZero, std::chrono::milliseconds(200));
             T_lidar_camera_init_ = transformMsgToEigen(tf_stamped.transform);
             RCLCPP_INFO(this->get_logger(), "Initial TF guess from latest /tf (%s -> %s):\n%s",
-                        lidar_frame_.c_str(), camera_frame_.c_str(), matrixToString(T_lidar_camera_init_).c_str());
+                        lidar_frame_.c_str(), camera_frame_initial_guess_.c_str(), matrixToString(T_lidar_camera_init_).c_str());
             return true;
         } catch (const tf2::TransformException& ex) {
             RCLCPP_ERROR(this->get_logger(), "Failed to read initial guess from /tf: %s", ex.what());

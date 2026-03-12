@@ -33,20 +33,40 @@ def generate_launch_description():
             arguments=['-d', rviz_config_file],
         ),
 
+        # Initial Guess TF Obtained manually from calibration node
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='calib_icp_tf_velodyne_to_rs1_link_initial_guess',
+        #     parameters=[{'use_sim_time': True}],
+        #     arguments=[
+        #         '--x', '0.2',
+        #         '--y', '0.0',
+        #         '--z', '-0.65',
+        #         '--roll', '-1.4661566652919380',
+        #         '--pitch', '0.0',
+        #         '--yaw', '-1.8500490070139893',
+        #         '--frame-id', 'velodyne',
+        #         '--child-frame-id', 'rs1_link_initial_guess'
+        #     ]
+        # ),
+
+        
+        # Initial Guess TF Obtained from a previous calibration ICP node
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='calib_icp_tf_velodyne_to_rs1_link_initial_guess',
             parameters=[{'use_sim_time': True}],
             arguments=[
-                '--x', '0.2',
-                '--y', '0.0',
-                '--z', '-0.65',
-                '--roll', '-1.4661566652919380',
-                '--pitch', '0.0',
-                '--yaw', '-1.8500490070139893',
+                '--x', '0.218304037',
+                '--y', '0.107423631',
+                '--z', '-0.020496928',
+                '--roll', '-1.576042033',
+                '--pitch', '-0.037013778',
+                '--yaw', '-1.578200049',
                 '--frame-id', 'velodyne',
-                '--child-frame-id', 'rs1_link'
+                '--child-frame-id', 'rs1_link_initial_guess'
             ]
-        ),
+        ),  
     ])

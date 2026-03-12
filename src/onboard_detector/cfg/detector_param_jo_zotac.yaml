@@ -1,6 +1,7 @@
 detector_node:
   ros__parameters:
     onboard_detector:
+      
       localization_mode: 0 # 0: pose (default) 1: odom
 
       # ROS Topics
@@ -14,6 +15,11 @@ detector_node:
       tf_lidar_frame: velodyne
       tf_depth_frame: rs1_link_refined
       tf_color_frame: rs1_link_refined
+      urdf_camera_frame: rs1_link
+      camera_frame_initial_guess: rs1_link_initial_guess
+      output_detected_image_topic: /onboard_detector/detected_image
+      output_detected_bboxes_topic: /onboard_detector/detected_bounding_boxes
+      output_obstacles_topic: /onboard_detector/obstacles         
 
       # Camera Parameters
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # fx, fy, cx, cy - from actual camera calibration
@@ -30,6 +36,7 @@ detector_node:
       time_step: 0.033
 
       # DBSCAN Common
+      voxel_size: 0.1 # Size of voxel grid for filtering (meters)
       ground_height: 0.0 # height of ground to remove ground points
       roof_height: 5.0 # relative height of roof to remove roof points
 
@@ -67,15 +74,16 @@ detector_node:
 
       # Constrain size
       target_constrain_size: true
-      target_object_size: [0.5, 0.5, 1.5]
-      max_object_size: [3.0, 3.0, 2.0] # filter out objects that are too large
+      target_object_size: [0.5, 0.5, 1.8]
+      max_object_size: [10.0, 10.0, 10.0] # filter out objects that are too large
 
 calibration_icp_node:
   ros__parameters:
     depth_topic: /camera1/rs1/depth/image_rect_raw
     velodyne_topic: /velodyne_points
     lidar_frame: velodyne
-    camera_frame: rs1_link
+    urdf_camera_frame: rs1_link
+    camera_frame_initial_guess: rs1_link_initial_guess
     refined_camera_frame: rs1_link_refined
     icp_max_correspondence_distance: 0.2
     icp_max_iteration: 100
@@ -84,7 +92,7 @@ calibration_icp_node:
     icp_normal_radius: 0.15
     icp_normal_max_nn: 30
     min_overlap_points: 100
-    overlap_fov_margin_px: 250
+    overlap_fov_margin_px: 120
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]
       depth_scale_factor: 1000.0

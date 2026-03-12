@@ -32,6 +32,14 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::initParam(){
+                // Voxel size for filtering
+                auto pname_voxel = [&](const std::string &p){ return this->ns_.empty() ? p : this->ns_ + "." + p; };
+                if (!this->nh_->get_parameter(pname_voxel("voxel_size"), this->voxelSize_)) {
+                    this->voxelSize_ = 0.1;
+                    RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: voxel_size not set, using default 0.1");
+                } else {
+                    RCLCPP_INFO(this->nh_->get_logger(), "[dynamicDetector]: voxel_size set to %f", this->voxelSize_);
+                }
         // helper lambda to build parameter names
         auto pname = [&](const std::string &p){ return this->ns_.empty() ? p : this->ns_ + "." + p; };
 
@@ -1916,7 +1924,7 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::voxelFilter(const std::vector<Eigen::Vector3d>& points, std::vector<Eigen::Vector3d>& filteredPoints){
-        const double res = 0.1; // resolution of voxel
+        const double res = this->voxelSize_; // resolution of voxel (now tunable)
         int xVoxels = ceil(2*this->localSensorRange_(0)/res); int yVoxels = ceil(2*this->localSensorRange_(1)/res); int zVoxels = ceil(2*this->localSensorRange_(2)/res);
         int totalVoxels = xVoxels * yVoxels * zVoxels;
         // std::vector<bool> voxelOccupancyVec (totalVoxels, false);
