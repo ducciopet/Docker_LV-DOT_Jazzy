@@ -350,21 +350,33 @@ namespace onboardDetector{
 	}
     
     inline void dynamicDetector::getCameraPose(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose, Eigen::Matrix4d& camPoseDepthMatrix, Eigen::Matrix4d& camPoseColorMatrix){
-        (void)pose;
-        Eigen::Matrix4d mapToLidar;
-        Eigen::Matrix4d lidarToDepthCam;
-        Eigen::Matrix4d lidarToColorCam;
+        // Build map->base_link from pose
+        Eigen::Quaterniond quat(
+            pose->pose.orientation.w,
+            pose->pose.orientation.x,
+            pose->pose.orientation.y,
+            pose->pose.orientation.z
+        );
+        Eigen::Matrix3d rot = quat.toRotationMatrix();
+        Eigen::Matrix4d mapToBase;
+        mapToBase.setIdentity();
+        mapToBase.block<3,3>(0,0) = rot;
+        mapToBase(0,3) = pose->pose.position.x;
+        mapToBase(1,3) = pose->pose.position.y;
+        mapToBase(2,3) = pose->pose.position.z;
 
-        bool mapToLidarOk = this->lookupTfMatrix(this->tfMapFrame_, this->tfLidarFrame_, mapToLidar);
-        bool lidarToDepthCamOk = this->lookupTfMatrix(this->tfLidarFrame_, this->tfDepthFrame_, lidarToDepthCam);
-        bool lidarToColorCamOk = this->lookupTfMatrix(this->tfLidarFrame_, this->tfColorFrame_, lidarToColorCam);
+        // Compose the rest of the chain using TF
+        Eigen::Matrix4d baseToImu, imuToLidar, lidarToDepthCam, lidarToColorCam;
+        bool tf_ok = this->lookupTfMatrix("base_link", "imu_link", baseToImu)
+                  && this->lookupTfMatrix("imu_link", "velodyne", imuToLidar)
+                  && this->lookupTfMatrix("velodyne", this->tfDepthFrame_, lidarToDepthCam)
+                  && this->lookupTfMatrix("velodyne", this->tfColorFrame_, lidarToColorCam);
 
-        if (mapToLidarOk && lidarToDepthCamOk && lidarToColorCamOk) {
-            camPoseDepthMatrix = mapToLidar * lidarToDepthCam;
-            camPoseColorMatrix = mapToLidar * lidarToColorCam;
+        if (tf_ok) {
+            camPoseDepthMatrix = mapToBase * baseToImu * imuToLidar * lidarToDepthCam;
+            camPoseColorMatrix = mapToBase * baseToImu * imuToLidar * lidarToColorCam;
             return;
         }
-
         camPoseDepthMatrix.setIdentity();
         camPoseColorMatrix.setIdentity();
     }
@@ -390,8 +402,28 @@ namespace onboardDetector{
     }
 
     inline void dynamicDetector::getLidarPose(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose, Eigen::Matrix4d& lidarPoseMatrix){
-        (void)pose;
-        if (this->lookupTfMatrix(this->tfMapFrame_, this->tfLidarFrame_, lidarPoseMatrix)) {
+        // Build map->base_link from pose
+        Eigen::Quaterniond quat(
+            pose->pose.orientation.w,
+            pose->pose.orientation.x,
+            pose->pose.orientation.y,
+            pose->pose.orientation.z
+        );
+        Eigen::Matrix3d rot = quat.toRotationMatrix();
+        Eigen::Matrix4d mapToBase;
+        mapToBase.setIdentity();
+        mapToBase.block<3,3>(0,0) = rot;
+        mapToBase(0,3) = pose->pose.position.x;
+        mapToBase(1,3) = pose->pose.position.y;
+        mapToBase(2,3) = pose->pose.position.z;
+
+        // Compose the rest of the chain using TF
+        Eigen::Matrix4d baseToImu, imuToLidar;
+        bool tf_ok = this->lookupTfMatrix("base_link", "imu_link", baseToImu)
+                  && this->lookupTfMatrix("imu_link", "velodyne", imuToLidar);
+
+        if (tf_ok) {
+            lidarPoseMatrix = mapToBase * baseToImu * imuToLidar;
             return;
         }
         lidarPoseMatrix.setIdentity();

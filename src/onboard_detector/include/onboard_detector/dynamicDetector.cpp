@@ -104,8 +104,8 @@ namespace onboardDetector{
 
         if (this->localizationMode_ == 0){
             if (!this->nh_->get_parameter(pname("pose_topic"), this->poseTopicName_)){
-                this->poseTopicName_ = "/CERLAB/quadcopter/pose";
-                std::cout << this->hint_ << ": No pose topic name. Use default: /CERLAB/quadcopter/pose" << std::endl;
+                this->poseTopicName_ = "/pose";
+                std::cout << this->hint_ << ": No pose topic name. Use default: /pose" << std::endl;
             }
             else{
                 std::cout << this->hint_ << ": Pose topic: " << this->poseTopicName_ << std::endl;
@@ -114,8 +114,8 @@ namespace onboardDetector{
 
         if (this->localizationMode_ == 1){
             if (!this->nh_->get_parameter(pname("odom_topic"), this->odomTopicName_)){
-                this->odomTopicName_ = "/CERLAB/quadcopter/odom";
-                std::cout << this->hint_ << ": No odom topic name. Use default: /CERLAB/quadcopter/odom" << std::endl;
+                this->odomTopicName_ = "/odom";
+                std::cout << this->hint_ << ": No odom topic name. Use default: /odom" << std::endl;
             }
             else{
                 std::cout << this->hint_ << ": Odom topic: " << this->odomTopicName_ << std::endl;
@@ -176,7 +176,7 @@ namespace onboardDetector{
         }
         else{
             this->raycastMaxLength_ = this->depthMaxValue_;
-            std::cout << this->hint_ << ": Depth depth max value: " << this->depthMaxValue_ << std::endl;
+            std::cout << this->hint_ << ": Depth max value: " << this->depthMaxValue_ << std::endl;
         }
 
         // depth filter margin

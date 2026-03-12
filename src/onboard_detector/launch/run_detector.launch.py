@@ -50,21 +50,6 @@ def generate_launch_description():
     )
 
 
-    static_tf_map_to_base = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='detector_tf_map_to_base_link',
-        arguments=[
-            '--x', '0.0',
-            '--y', '0.0',
-            '--z', '0.6',
-            '--roll', '0.0',
-            '--pitch', '0.0',
-            '--yaw', '0.0',
-            '--frame-id', map_frame,
-            '--child-frame-id', 'base_link'
-        ]
-    )
 
     static_tf_base_to_imu = Node(
         package='tf2_ros',
@@ -130,7 +115,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         pythonpath_action,
-        static_tf_map_to_base,
         static_tf_base_to_imu,
         static_tf_imu_to_lidar,
         initial_guess_tf,
