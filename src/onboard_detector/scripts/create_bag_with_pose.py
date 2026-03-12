@@ -104,10 +104,10 @@ def create_bag_with_pose(input_bag_path, output_bag_path):
         pose_msg.header.stamp.sec = int(sec)
         pose_msg.header.stamp.nanosec = int(nanosec)
         
-        # Set position: 0.6m translation along z-axis (map to base_link)
+        # Set position: 0.75m translation along z-axis (map to base_link)
         pose_msg.pose.position.x = 0.0
         pose_msg.pose.position.y = 0.0
-        pose_msg.pose.position.z = 0.6
+        pose_msg.pose.position.z = 0.75
         
         # Set orientation: identity quaternion (no rotation)
         pose_msg.pose.orientation.x = 0.0
@@ -134,7 +134,7 @@ def main():
     # Paths relative to workspace bags directory
     bags_dir = '/home/ros/ros2_ws/bags'
     input_bag = os.path.join(bags_dir, 'duccio_test')
-    output_bag = os.path.join(bags_dir, 'duccio_test_with_pose')
+    output_bag = os.path.join(bags_dir, 'duccio_test_ok')
     
     # Check if input bag exists
     if not os.path.exists(input_bag):

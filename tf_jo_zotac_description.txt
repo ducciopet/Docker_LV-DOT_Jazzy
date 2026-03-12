@@ -1,0 +1,29 @@
+Transformations (from tf_jo_zotac_description.xacro):
+
+
+# BASE TO CAMERA:
+
+    <xacro:property name="b2c_x" value="-0.30639" />
+    <xacro:property name="b2c_y" value="0.01414" />
+    <xacro:property name="b2c_z" value="0.27801" />
+    <xacro:property name="b2c_R" value="0.0" />
+    <xacro:property name="b2c_P" value="0.0" />
+    <xacro:property name="b2c_Y" value="${PI}" />
+
+# BASE TO IMU:
+
+    <xacro:property name="b2i_x" value="0.22172" />
+    <xacro:property name="b2i_y" value="0.02606" />
+    <xacro:property name="b2i_z" value="0.28202" />
+    <xacro:property name="b2i_R" value="0.0" />
+    <xacro:property name="b2i_P" value="0.0" />
+    <xacro:property name="b2i_Y" value="0.0" />
+
+# BASE TO LIDAR:
+
+    <xacro:property name="b2l_x" value="0.03" />
+    <xacro:property name="b2l_y" value="0.0286" />
+    <xacro:property name="b2l_z" value="0.630" />
+    <xacro:property name="b2l_R" value="0.0" />
+    <xacro:property name="b2l_P" value="0.0" />
+    <xacro:property name="b2l_Y" value="0.0" />

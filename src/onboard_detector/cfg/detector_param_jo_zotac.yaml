@@ -30,7 +30,7 @@ detector_node:
       time_step: 0.033
 
       # DBSCAN Common
-      ground_height: -0.2 # height of ground to remove ground points
+      ground_height: 0.0 # height of ground to remove ground points
       roof_height: 5.0 # relative height of roof to remove roof points
 
       # DBSCAN visual param
@@ -84,7 +84,7 @@ calibration_icp_node:
     icp_normal_radius: 0.15
     icp_normal_max_nn: 30
     min_overlap_points: 100
-    overlap_fov_margin_px: 120
+    overlap_fov_margin_px: 250
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]
       depth_scale_factor: 1000.0
