@@ -63,6 +63,9 @@ public:
         cx_ = depth_intrinsics[2];
         cy_ = depth_intrinsics[3];
 
+        icp_max_runs_ = this->declare_parameter("icp_max_runs", 10);
+        icp_fitness_threshold_ = this->declare_parameter("icp_fitness_threshold", 0.5);
+
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
         static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
@@ -122,6 +125,8 @@ private:
     double cx_{0.0};
     double cy_{0.0};
     double depth_scale_{1000.0};
+
+    void finalizeCalibration();
     double depth_min_{0.5};
     double depth_max_{5.0};
     int depth_skip_{2};
@@ -135,8 +140,23 @@ private:
     int min_overlap_points_{100};
     int overlap_fov_margin_px_{120};
 
+    int icp_max_runs_{10};
+    double icp_fitness_threshold_{0.5};
+
     bool processed_{false};
     Eigen::Matrix4d T_lidar_camera_init_{Eigen::Matrix4d::Identity()};
+
+    std::vector<Eigen::Matrix4d> all_valid_transforms_;
+    std::vector<Eigen::Vector3d> all_translations_;
+    std::vector<Eigen::Vector3d> all_rpy_angles_;
+    int valid_count_ = 0;
+    int scene_count_ = 0;
+    sensor_msgs::msg::PointCloud2 last_lidar_msg_out_;
+    pcl::PointCloud<pcl::PointXYZ> last_lidar_cloud_;
+    sensor_msgs::msg::PointCloud2 last_depth_msg_out_;
+    std::shared_ptr<open3d::geometry::PointCloud> last_depth_cloud_camera_;
+    builtin_interfaces::msg::Time last_stamp_;
+    std::string last_status_message_;
 
     static std::string matrixToString(const Eigen::Matrix4d& m) {
         std::ostringstream oss;
@@ -361,26 +381,45 @@ private:
         }
 
         std::string status_message;
-        if (!runCalibration(lidar_msg, depth_msg, status_message)) {
-            RCLCPP_WARN(this->get_logger(), "Calibration attempt failed: %s", status_message.c_str());
-            return;
+        Eigen::Matrix4d T_result;
+        Eigen::Vector3d translation, rpy;
+        bool valid = runCalibration(lidar_msg, depth_msg, status_message, T_result, translation, rpy);
+        if (valid) {
+            all_valid_transforms_.push_back(T_result);
+            all_translations_.push_back(translation);
+            all_rpy_angles_.push_back(rpy);
+            ++valid_count_;
         }
+        ++scene_count_;
 
-        RCLCPP_INFO(this->get_logger(), "Published one-shot clouds: lidar overlap + aligned depth");
+        // Store last scene's clouds for publishing after all runs
+        last_lidar_msg_out_ = toROSPointCloud2(*extractLidarOverlapWithDepthFov(*pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>(), depth_msg->width, depth_msg->height, T_lidar_camera_init_), depth_msg->header.stamp, lidar_frame_, 0, 255, 0);
+        last_depth_msg_out_ = toROSPointCloud2(*depthToPointCloud(cv_bridge::toCvShare(depth_msg)->image), depth_msg->header.stamp, depth_msg->header.frame_id, 255, 80, 80);
+        last_stamp_ = depth_msg->header.stamp;
+        last_status_message_ = status_message;
+
+        if (scene_count_ >= icp_max_runs_) {
+            finalizeCalibration();
+            processed_ = true;
+        }
     }
 
+    // Modified runCalibration: returns transform, translation, rpy for each scene
     bool runCalibration(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& lidar_msg,
                         const sensor_msgs::msg::Image::ConstSharedPtr& depth_msg,
-                        std::string& status_message) {
+                        std::string& status_message,
+                        Eigen::Matrix4d& T_result,
+                        Eigen::Vector3d& translation,
+                        Eigen::Vector3d& rpy) {
         if (!fetchInitialGuessFromTF(depth_msg->header.stamp)) {
             status_message = "Cannot start calibration without initial TF guess velodyne->rs1_link";
             RCLCPP_ERROR(this->get_logger(), "%s", status_message.c_str());
             return false;
         }
-
         pcl::PointCloud<pcl::PointXYZ>::Ptr lidar_cloud(new pcl::PointCloud<pcl::PointXYZ>());
         pcl::fromROSMsg(*lidar_msg, *lidar_cloud);
-
+        RCLCPP_INFO(this->get_logger(), "Raw lidar cloud has %zu points", lidar_cloud->points.size());
+        last_lidar_cloud_ = *lidar_cloud;
         cv::Mat depth_image;
         try {
             auto depth_cv = cv_bridge::toCvShare(depth_msg);
@@ -390,14 +429,19 @@ private:
             RCLCPP_ERROR(this->get_logger(), "%s", status_message.c_str());
             return false;
         }
-
         auto depth_cloud_camera = depthToPointCloud(depth_image);
+        last_depth_cloud_camera_ = depth_cloud_camera;
+        RCLCPP_INFO(this->get_logger(), "Depth cloud frame_id: %s", depth_msg->header.frame_id.c_str());
+        RCLCPP_INFO(this->get_logger(), "Using T_lidar_camera_init_ for transform:");
+        RCLCPP_INFO(this->get_logger(), "[ %.6f, %.6f, %.6f, %.6f ]", T_lidar_camera_init_(0,0), T_lidar_camera_init_(0,1), T_lidar_camera_init_(0,2), T_lidar_camera_init_(0,3));
+        RCLCPP_INFO(this->get_logger(), "[ %.6f, %.6f, %.6f, %.6f ]", T_lidar_camera_init_(1,0), T_lidar_camera_init_(1,1), T_lidar_camera_init_(1,2), T_lidar_camera_init_(1,3));
+        RCLCPP_INFO(this->get_logger(), "[ %.6f, %.6f, %.6f, %.6f ]", T_lidar_camera_init_(2,0), T_lidar_camera_init_(2,1), T_lidar_camera_init_(2,2), T_lidar_camera_init_(2,3));
+        RCLCPP_INFO(this->get_logger(), "[ %.6f, %.6f, %.6f, %.6f ]", T_lidar_camera_init_(3,0), T_lidar_camera_init_(3,1), T_lidar_camera_init_(3,2), T_lidar_camera_init_(3,3));
         if (depth_cloud_camera->points_.empty()) {
             status_message = "Depth point cloud is empty";
             RCLCPP_ERROR(this->get_logger(), "%s", status_message.c_str());
             return false;
         }
-
         auto lidar_overlap = extractLidarOverlapWithDepthFov(
             *lidar_cloud, depth_msg->width, depth_msg->height, T_lidar_camera_init_);
         if (static_cast<int>(lidar_overlap->points_.size()) < min_overlap_points_) {
@@ -413,10 +457,8 @@ private:
                 lidar_overlap->points_.emplace_back(pt.x, pt.y, pt.z);
             }
         }
-
         auto source = depth_cloud_camera;
         auto target = lidar_overlap;
-
         if (icp_voxel_size_ > 0.0) {
             source = source->VoxelDownSample(icp_voxel_size_);
             target = target->VoxelDownSample(icp_voxel_size_);
@@ -427,15 +469,12 @@ private:
                 target = lidar_overlap;
             }
         }
-
         if (icp_use_point_to_plane_) {
             target->EstimateNormals(
                 open3d::geometry::KDTreeSearchParamHybrid(icp_normal_radius_, icp_normal_max_nn_));
         }
-
         open3d::pipelines::registration::ICPConvergenceCriteria criteria;
         criteria.max_iteration_ = icp_max_iter_;
-
         open3d::pipelines::registration::RegistrationResult reg_result;
         if (icp_use_point_to_plane_) {
             reg_result = open3d::pipelines::registration::RegistrationICP(
@@ -454,30 +493,18 @@ private:
                 open3d::pipelines::registration::TransformationEstimationPointToPoint(false),
                 criteria);
         }
-
-        const Eigen::Matrix4d T_lidar_camera_refined = reg_result.transformation_;
-
         RCLCPP_INFO(this->get_logger(), "ICP done. fitness=%.6f rmse=%.6f",
                     reg_result.fitness_, reg_result.inlier_rmse_);
-        RCLCPP_INFO(this->get_logger(), "Refined %s->%s:\n%s",
-                lidar_frame_.c_str(), refined_camera_frame_.c_str(),
-                    matrixToString(T_lidar_camera_refined).c_str());
-
-        auto depth_aligned = std::make_shared<open3d::geometry::PointCloud>(*source);
-        depth_aligned->Transform(T_lidar_camera_refined);
-
-        auto lidar_msg_out = toROSPointCloud2(*lidar_overlap, depth_msg->header.stamp, lidar_frame_, 0, 255, 0);
-        auto depth_msg_out = toROSPointCloud2(*depth_aligned, depth_msg->header.stamp, lidar_frame_, 255, 80, 80);
-
-        pub_lidar_overlap_->publish(lidar_msg_out);
-        pub_depth_aligned_->publish(depth_msg_out);
-
-        publishRefinedStaticTF(T_lidar_camera_refined, depth_msg->header.stamp);
-        printCopyPasteTransform(T_lidar_camera_refined);
-
-        processed_ = true;
-        status_message = "Calibration completed and refined TF published";
-        return true;
+        if (reg_result.fitness_ >= icp_fitness_threshold_) {
+            T_result = reg_result.transformation_;
+            translation = T_result.block<3,1>(0,3);
+            rpy = rotationToRPY(T_result.block<3,3>(0,0));
+            status_message = "Calibration result valid and collected.";
+            return true;
+        } else {
+            status_message = "ICP fitness below threshold, result discarded.";
+            return false;
+        }
     }
 
 };
@@ -488,4 +515,59 @@ int main(int argc, char** argv) {
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
+}
+
+void CalibrationICPNode::finalizeCalibration() {
+    if (valid_count_ == 0) {
+        RCLCPP_WARN(this->get_logger(), "No valid ICP results above fitness threshold across all scenes");
+        return;
+    }
+    // Average translation
+    Eigen::Vector3d mean_translation = Eigen::Vector3d::Zero();
+    for (const auto& t : all_translations_) {
+        mean_translation += t;
+    }
+    mean_translation /= static_cast<double>(valid_count_);
+    // Average RPY using mean of sin/cos and atan2
+    Eigen::Vector3d mean_rpy = Eigen::Vector3d::Zero();
+    for (int i = 0; i < 3; ++i) {
+        double sum_sin = 0.0, sum_cos = 0.0;
+        for (const auto& rpy : all_rpy_angles_) {
+            sum_sin += std::sin(rpy(i));
+            sum_cos += std::cos(rpy(i));
+        }
+        mean_rpy(i) = std::atan2(sum_sin / valid_count_, sum_cos / valid_count_);
+    }
+    // Build mean transform
+    Eigen::Matrix4d T_mean = Eigen::Matrix4d::Identity();
+    Eigen::Matrix3d rot_mean;
+    rot_mean = (
+        Eigen::AngleAxisd(mean_rpy(2), Eigen::Vector3d::UnitZ()) *
+        Eigen::AngleAxisd(mean_rpy(1), Eigen::Vector3d::UnitY()) *
+        Eigen::AngleAxisd(mean_rpy(0), Eigen::Vector3d::UnitX())
+    ).toRotationMatrix();
+    T_mean.block<3,3>(0,0) = rot_mean;
+    T_mean.block<3,1>(0,3) = mean_translation;
+    RCLCPP_INFO(this->get_logger(), "Final ICP mean transform from %d valid scenes", valid_count_);
+    RCLCPP_INFO(this->get_logger(), "Mean translation: [%.6f, %.6f, %.6f]", mean_translation(0), mean_translation(1), mean_translation(2));
+    RCLCPP_INFO(this->get_logger(), "Mean RPY: [%.6f, %.6f, %.6f]", mean_rpy(0), mean_rpy(1), mean_rpy(2));
+    RCLCPP_INFO(this->get_logger(), "Mean transform matrix:\n%s", matrixToString(T_mean).c_str());
+    // Debug: print number of points in overlap cloud (using actual last lidar cloud)
+    // Already declared above, just reuse overlap_cloud
+    // Publish only the raw lidar cloud cropped to the camera FOV plus margin
+    auto overlap_cloud = extractLidarOverlapWithDepthFov(last_lidar_cloud_, last_depth_msg_out_.width, last_depth_msg_out_.height, T_lidar_camera_init_);
+    last_lidar_msg_out_ = toROSPointCloud2(*overlap_cloud, last_depth_msg_out_.header.stamp, lidar_frame_, 0, 255, 0);
+    // Transform the last depth cloud (camera frame) to the lidar frame using the mean transform
+    if (last_depth_cloud_camera_ && !last_depth_cloud_camera_->points_.empty()) {
+        auto depth_cloud_lidar = std::make_shared<open3d::geometry::PointCloud>(*last_depth_cloud_camera_);
+        depth_cloud_lidar->Transform(T_mean); // T_mean is the refined transform
+        auto depth_msg_out = toROSPointCloud2(*depth_cloud_lidar, last_depth_msg_out_.header.stamp, lidar_frame_, 255, 80, 80);
+        pub_depth_aligned_->publish(depth_msg_out);
+    } else {
+        RCLCPP_WARN(this->get_logger(), "No valid last depth cloud to transform and publish.");
+    }
+    // Publish clouds for last scene only
+    pub_lidar_overlap_->publish(last_lidar_msg_out_);
+    publishRefinedStaticTF(T_mean, last_stamp_);
+    printCopyPasteTransform(T_mean);
 }

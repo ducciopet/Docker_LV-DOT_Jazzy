@@ -93,6 +93,8 @@ calibration_icp_node:
     icp_normal_max_nn: 30
     min_overlap_points: 100
     overlap_fov_margin_px: 120
+    icp_max_runs: 10         # Number of ICP runs (tunable)
+    icp_fitness_threshold: 0.3 # Minimum fitness for valid ICP result (tunable)
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]
       depth_scale_factor: 1000.0
