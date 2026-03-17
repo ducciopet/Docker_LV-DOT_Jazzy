@@ -37,6 +37,8 @@
 
 namespace onboardDetector{
     class dynamicDetector{
+        // Track ID counter for persistent unique IDs
+        int nextTrackId_ = 0;
     private:
         std::string ns_;
         std::string hint_;

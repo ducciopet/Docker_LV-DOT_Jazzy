@@ -6,7 +6,8 @@
 #include <onboard_detector/dynamicDetector.h>
 
 namespace onboardDetector{
-    dynamicDetector::dynamicDetector(){
+    // Ensure nextTrackId_ is initialized in the constructor
+    dynamicDetector::dynamicDetector() : nextTrackId_(0) {
         this->ns_ = "onboard_detector";
         this->hint_ = "[onboardDetector]";
     }
@@ -1062,11 +1063,7 @@ namespace onboardDetector{
         if (bestMatch.size()){
             this->kalmanFilterAndUpdateHist(bestMatch);
         }
-        else {
-            this->boxHist_.clear();
-            this->pcHist_.clear();
-            this->pcCenterHist_.clear();
-        }
+        // else: do not clear histories, preserve track IDs and allow for re-association
     }
 
     void dynamicDetector::classificationCB(){
@@ -1217,6 +1214,41 @@ namespace onboardDetector{
         this->publish3dBox(this->filteredBBoxesBeforeYolo_, this->filteredBBoxesBeforeYoloPub_, 0, 1, 0.5);
         this->publish3dBox(this->filteredBBoxes_, this->filteredBBoxesPub_, 0, 1, 1);
         this->publish3dBox(this->trackedBBoxes_, this->trackedBBoxesPub_, 1, 1, 0);
+        // Publish track IDs as text markers above each tracked bbox
+        visualization_msgs::msg::MarkerArray trackIdMarkers;
+        for (size_t i = 0; i < this->trackedBBoxes_.size(); ++i) {
+            visualization_msgs::msg::Marker idMarker;
+            idMarker.header.frame_id = "map";
+            idMarker.header.stamp = this->nh_->now();
+            idMarker.ns = "track_id";
+            idMarker.id = i;
+            idMarker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+            idMarker.action = visualization_msgs::msg::Marker::ADD;
+            // Position marker just above the bbox, slightly offset
+            idMarker.pose.position.x = this->trackedBBoxes_[i].x;
+            idMarker.pose.position.y = this->trackedBBoxes_[i].y;
+            idMarker.pose.position.z = this->trackedBBoxes_[i].z + this->trackedBBoxes_[i].z_width/2. + 0.05;
+            // Make text smaller
+            idMarker.scale.z = 0.15;
+            idMarker.scale.x = 0.15;
+            idMarker.scale.y = 0.15;
+            // ID and velocity norm together
+            // Only declare these variables once per marker
+            idMarker.text = "ID: " + std::to_string(static_cast<int>(this->trackedBBoxes_[i].id)) + " | |V|: " + std::to_string(std::sqrt(this->trackedBBoxes_[i].Vx * this->trackedBBoxes_[i].Vx + this->trackedBBoxes_[i].Vy * this->trackedBBoxes_[i].Vy));
+            idMarker.color.a = 1.0;
+            idMarker.color.r = 0.0;
+            idMarker.color.g = 1.0;
+            idMarker.color.b = 0.0;
+            // Show the track id (cast to int for display)
+            int track_id = static_cast<int>(this->trackedBBoxes_[i].id);
+            double vx = this->trackedBBoxes_[i].Vx;
+            double vy = this->trackedBBoxes_[i].Vy;
+            double vnorm = std::sqrt(vx*vx + vy*vy);
+            idMarker.text = "ID: " + std::to_string(track_id) + " | |V|: " + std::to_string(vnorm);
+            idMarker.lifetime = rclcpp::Duration::from_seconds(0.1);
+            trackIdMarkers.markers.push_back(idMarker);
+        }
+        this->trackedBBoxesPub_->publish(trackIdMarkers);
         this->publish3dBox(this->dynamicBBoxes_, this->dynamicBBoxesPub_, 0, 0, 1);
 
         this->publishLidarClusters(); // colored clusters
@@ -1253,7 +1285,7 @@ namespace onboardDetector{
             this->uvDetector_->display_bird_view();
             this->uvDetector_->display_depth();
 
-            // transform to the world frame (recalculate the boudning boxes)
+            // transform to the world frame (recalculate the bounding boxes)
             std::vector<onboardDetector::box3D> uvBBoxes;
             this->transformUVBBoxes(uvBBoxes);
             this->uvBBoxes_ = uvBBoxes;
@@ -2188,8 +2220,8 @@ namespace onboardDetector{
         for (int i=0 ; i<numObjs ; i++){
             onboardDetector::box3D newEstimatedBBox; // from kalman filter
 
-            // inheret history. push history one by one
-            if (bestMatch[i]>=0){
+            // inherit history. push history one by one
+            if (bestMatch[i] >= 0) {
                 boxHistTemp.push_back(this->boxHist_[bestMatch[i]]);
                 pcHistTemp.push_back(this->pcHist_[bestMatch[i]]);
                 pcCenterHistTemp.push_back(this->pcCenterHist_[bestMatch[i]]);
@@ -2201,37 +2233,37 @@ namespace onboardDetector{
                 Eigen::MatrixXd Z;
                 this->getKalmanObservationAcc(currDetectedBBox, bestMatch[i], Z);
                 filtersTemp.back().estimate(Z, MatrixXd::Zero(6,1));
-                
-                
+
                 newEstimatedBBox.x = filtersTemp.back().output(0);
                 newEstimatedBBox.y = filtersTemp.back().output(1);
                 newEstimatedBBox.z = currDetectedBBox.z;
                 newEstimatedBBox.Vx = filtersTemp.back().output(2);
                 newEstimatedBBox.Vy = filtersTemp.back().output(3);
                 newEstimatedBBox.Ax = filtersTemp.back().output(4);
-                newEstimatedBBox.Ay = filtersTemp.back().output(5);   
-                          
+                newEstimatedBBox.Ay = filtersTemp.back().output(5);
 
                 newEstimatedBBox.x_width = currDetectedBBox.x_width;
                 newEstimatedBBox.y_width = currDetectedBBox.y_width;
                 newEstimatedBBox.z_width = currDetectedBBox.z_width;
                 newEstimatedBBox.is_dynamic = currDetectedBBox.is_dynamic;
                 newEstimatedBBox.is_human = currDetectedBBox.is_human;
-            }
-            else{
+                // Propagate track ID from previous track
+                newEstimatedBBox.id = this->boxHist_[bestMatch[i]][0].id;
+            } else {
                 boxHistTemp.push_back(newSingleBoxHist);
                 pcHistTemp.push_back(newSinglePcHist);
                 pcCenterHistTemp.push_back(newSinglePcCenterHist);
 
                 // create new kalman filter for this object
                 onboardDetector::box3D currDetectedBBox = this->filteredBBoxes_[i];
-                MatrixXd states, A, B, H, P, Q, R;    
+                MatrixXd states, A, B, H, P, Q, R;
                 this->kalmanFilterMatrixAcc(currDetectedBBox, states, A, B, H, P, Q, R);
-                
+
                 newFilter.setup(states, A, B, H, P, Q, R);
                 filtersTemp.push_back(newFilter);
                 newEstimatedBBox = currDetectedBBox;
-                
+                // Assign a new unique track ID
+                newEstimatedBBox.id = nextTrackId_++;
             }
 
             // pop old data if len of hist > size limit
