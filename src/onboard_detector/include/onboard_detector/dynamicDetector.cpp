@@ -641,6 +641,9 @@ namespace onboardDetector{
 
         // velocity visualization pub
         this->velVisPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(this->ns_.empty() ? "/velocity_visualizaton" : this->ns_ + "/velocity_visualizaton", 10);
+        
+        // filtered lidar points in velodyne frame pub
+        this->filteredLidarVelodynePub_ = this->nh_->create_publisher<sensor_msgs::msg::PointCloud2>(this->ns_.empty() ? "/filtered_lidar_points_velodyne_frame" : this->ns_ + "/filtered_lidar_points_velodyne_frame", 10);
     }   
 
     void dynamicDetector::registerCallback(){
@@ -873,6 +876,13 @@ namespace onboardDetector{
             }
         }
 
+        // Publish preTransformCloud in velodyne frame
+        sensor_msgs::msg::PointCloud2 preTransformCloudMsg;
+        pcl::toROSMsg(*preTransformCloud, preTransformCloudMsg);
+        preTransformCloudMsg.header.frame_id = this->tfLidarFrame_;
+        preTransformCloudMsg.header.stamp = cloudMsg->header.stamp;
+        this->filteredLidarVelodynePub_->publish(preTransformCloudMsg);
+
         // transform
         Eigen::Affine3d transform = Eigen::Affine3d::Identity();
         transform.linear() = this->orientationLidar_;
@@ -973,6 +983,13 @@ namespace onboardDetector{
                 preTransformCloud->push_back(pt);
             }
         }
+
+        // Publish preTransformCloud in velodyne frame
+        sensor_msgs::msg::PointCloud2 preTransformCloudMsg;
+        pcl::toROSMsg(*preTransformCloud, preTransformCloudMsg);
+        preTransformCloudMsg.header.frame_id = this->tfLidarFrame_;
+        preTransformCloudMsg.header.stamp = cloudMsg->header.stamp;
+        this->filteredLidarVelodynePub_->publish(preTransformCloudMsg);
 
         // transform
         Eigen::Affine3d transform = Eigen::Affine3d::Identity();

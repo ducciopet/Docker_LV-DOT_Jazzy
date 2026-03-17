@@ -85,6 +85,7 @@ namespace onboardDetector{
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr rawDynamicPointsPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr downSamplePointsPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr rawLidarPointsPub_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredLidarVelodynePub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr historyTrajPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr velVisPub_;
         rclcpp::Service<onboard_detector::srv::GetDynamicObstacles>::SharedPtr getDynamicObstacleServer_;
