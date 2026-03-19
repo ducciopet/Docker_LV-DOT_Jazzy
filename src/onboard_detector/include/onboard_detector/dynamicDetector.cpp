@@ -329,6 +329,33 @@ namespace onboardDetector{
         else{
             std::cout << this->hint_ << ": Threshold for boununding box IOU filtering is set to: " << this->boxIOUThresh_ << std::endl;
         }
+        
+        // IOV threshold
+        if (!this->nh_->get_parameter(pname("filtering_BBox_IOV_threshold"), this->boxIOVThresh_)){
+            this->boxIOVThresh_ = 0.5;
+            std::cout << this->hint_ << ": No threshold for boununding box IOV filtering parameter found. Use default: 0.5." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Threshold for boununding box IOV filtering is set to: " << this->boxIOVThresh_ << std::endl;
+        }
+
+        // Merging Flag
+        if (!this->nh_->get_parameter(pname("merging_flag"), this->mergingFlag_)){
+            this->mergingFlag_ = "smaller";
+            std::cout << this->hint_ << ": No merging flag parameter found. Use default: smaller." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Merging flag is set to: " << this->mergingFlag_ << std::endl;
+        }
+
+        // Visual unmerged Flag
+        if (!this->nh_->get_parameter(pname("visual_unmerged_flag"), this->visualUnmergedFlag_)){
+            this->visualUnmergedFlag_ = false;
+            std::cout << this->hint_ << ": No visual unmerged flag parameter found. Use default: false." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Visual unmerged flag is set to: " << (this->visualUnmergedFlag_ ? "true" : "false") << std::endl;
+        }
 
         // maximum match range
         if (!this->nh_->get_parameter(pname("max_match_range"), this->maxMatchRange_)){
@@ -1366,30 +1393,84 @@ namespace onboardDetector{
         std::vector<Eigen::Vector3d> lidarPcClusterCentersTemp;
         std::vector<Eigen::Vector3d> lidarPcClusterStdsTemp; // store lidar output
 
-        // STEP 1: Get visual bboxes by fusing visual bounding boxes
-        // find best IOU match for both uv and dbscan. If they are best for each other, then add to filtered bbox and fuse.
-        for (size_t i=0 ; i<this->uvBBoxes_.size(); ++i){
-            onboardDetector::box3D uvBBox = this->uvBBoxes_[i];
-            double bestIOUForUVBBox, bestIOUForDBBBox;
-            int bestMatchForUVBBox = this->getBestOverlapBBox(uvBBox, this->dbBBoxes_, bestIOUForUVBBox);
-            if (bestMatchForUVBBox == -1) continue; // no match at all
-            onboardDetector::box3D matchedDBBBox = this->dbBBoxes_[bestMatchForUVBBox]; 
-            std::vector<Eigen::Vector3d> matchedPcCluster = this->pcClustersVisual_[bestMatchForUVBBox];
-            Eigen::Vector3d matchedPcClusterCenter = this->pcClusterCentersVisual_[bestMatchForUVBBox];
-            Eigen::Vector3d matchedPcClusterStd = this->pcClusterStdsVisual_[bestMatchForUVBBox];
-            int bestMatchForDBBBox = this->getBestOverlapBBox(matchedDBBBox, this->uvBBoxes_, bestIOUForDBBBox);
+        size_t M = this->uvBBoxes_.size();
+        size_t N = this->dbBBoxes_.size();
 
-            // if best match is each other and both the IOU is greater than the threshold
-            if (bestMatchForDBBBox == int(i) and bestIOUForUVBBox > this->boxIOUThresh_ and bestIOUForDBBBox > this->boxIOUThresh_){
+        Eigen::MatrixXd IOU = Eigen::MatrixXd::Zero(M, N);
+        Eigen::MatrixXd IOV_uv = Eigen::MatrixXd::Zero(M, N);
+        Eigen::MatrixXd IOV_db = Eigen::MatrixXd::Zero(M, N);
+
+        std::vector<bool> usedUV(M, false);
+        std::vector<bool> usedDB(N, false);
+
+        // Declare variables for IOV edge logic
+        double eps = 1e-6;
+        std::vector<onboardDetector::Edge> edges;
+
+        for (size_t i = 0; i < M; ++i)
+        {
+            for (size_t j = 0; j < N; ++j)
+            {
+                IOU(i,j)    = this->calBoxIOU(this->uvBBoxes_[i], this->dbBBoxes_[j]);
+                IOV_uv(i,j) = this->calBoxIOV(this->uvBBoxes_[i], this->dbBBoxes_[j]);
+                IOV_db(i,j) = this->calBoxIOV(this->dbBBoxes_[j], this->uvBBoxes_[i]);
+            }
+        }
+
+        // STEP 1: Mutual matching between UV and DB
+        for (size_t i = 0; i < M; ++i)
+        {
+            if (usedUV[i]) continue;
+
+            double bestIOU_uv = -1.0;
+            int best_j = -1;
+
+            // best DB per UV
+            for (size_t j = 0; j < N; ++j)
+            {
+                if (usedDB[j]) continue;
+
+                if (IOU(i,j) > bestIOU_uv)
+                {
+                    bestIOU_uv = IOU(i,j);
+                    best_j = j;
+                }
+            }
+
+            if (best_j == -1) continue;
+
+            // best UV per quel DB
+            double bestIOU_db = -1.0;
+            int best_i = -1;
+
+            for (size_t k = 0; k < M; ++k)
+            {
+                if (usedUV[k]) continue;
+
+                if (IOU(k, best_j) > bestIOU_db)
+                {
+                    bestIOU_db = IOU(k, best_j);
+                    best_i = k;
+                }
+            }
+
+            // mutual match + threshold
+            if (best_i == (int)i &&
+                bestIOU_uv > this->boxIOUThresh_ &&
+                bestIOU_db > this->boxIOUThresh_)
+            {
+                auto uvBBox = this->uvBBoxes_[i];
+                auto dbBBox = this->dbBBoxes_[best_j];
+
+                // merge conservativo
+                double xmax = std::max(uvBBox.x+uvBBox.x_width/2, dbBBox.x+dbBBox.x_width/2);
+                double xmin = std::min(uvBBox.x-uvBBox.x_width/2, dbBBox.x-dbBBox.x_width/2);
+                double ymax = std::max(uvBBox.y+uvBBox.y_width/2, dbBBox.y+dbBBox.y_width/2);
+                double ymin = std::min(uvBBox.y-uvBBox.y_width/2, dbBBox.y-dbBBox.y_width/2);
+                double zmax = std::max(uvBBox.z+uvBBox.z_width/2, dbBBox.z+dbBBox.z_width/2);
+                double zmin = std::min(uvBBox.z-uvBBox.z_width/2, dbBBox.z-dbBBox.z_width/2);
+
                 onboardDetector::box3D bbox;
-                
-                // take concervative strategy
-                double xmax = std::max(uvBBox.x+uvBBox.x_width/2, matchedDBBBox.x+matchedDBBBox.x_width/2);
-                double xmin = std::min(uvBBox.x-uvBBox.x_width/2, matchedDBBBox.x-matchedDBBBox.x_width/2);
-                double ymax = std::max(uvBBox.y+uvBBox.y_width/2, matchedDBBBox.y+matchedDBBBox.y_width/2);
-                double ymin = std::min(uvBBox.y-uvBBox.y_width/2, matchedDBBBox.y-matchedDBBBox.y_width/2);
-                double zmax = std::max(uvBBox.z+uvBBox.z_width/2, matchedDBBBox.z+matchedDBBBox.z_width/2);
-                double zmin = std::min(uvBBox.z-uvBBox.z_width/2, matchedDBBBox.z-matchedDBBBox.z_width/2);
                 bbox.x = (xmin+xmax)/2;
                 bbox.y = (ymin+ymax)/2;
                 bbox.z = (zmin+zmax)/2;
@@ -1399,13 +1480,245 @@ namespace onboardDetector{
                 bbox.Vx = 0;
                 bbox.Vy = 0;
 
+                // cluster = DB (come tuo codice originale)
+                auto cluster = this->pcClustersVisual_[best_j];
+                auto center  = this->pcClusterCentersVisual_[best_j];
+                auto stddev  = this->pcClusterStdsVisual_[best_j];
+
                 visualBBoxesTemp.push_back(bbox);
-                visualPcClustersTemp.push_back(matchedPcCluster);
-                visualPcClusterCentersTemp.push_back(matchedPcClusterCenter);
-                visualPcClusterStdsTemp.push_back(matchedPcClusterStd);
+                visualPcClustersTemp.push_back(cluster);
+                visualPcClusterCentersTemp.push_back(center);
+                visualPcClusterStdsTemp.push_back(stddev);
+
+                usedUV[i] = true;
+                usedDB[best_j] = true;
             }
         }
-        this->visualBBoxes_ = visualBBoxesTemp; // for visualization
+
+        // STEP 2: Get unmatched UV and DB pairs with high IOV (but low IOU)
+        for (size_t i = 0; i < M; ++i)
+        {
+            if (usedUV[i]) continue;
+
+            for (size_t j = 0; j < N; ++j)
+            {
+                if (usedDB[j]) continue;
+
+                double iov_uv = IOV_uv(i,j);
+                double iov_db = IOV_db(i,j);
+
+                if (iov_uv < eps && iov_db < eps) continue;
+
+                onboardDetector::Edge e;
+
+                if (iov_uv > iov_db)
+                {
+                    e.parent = onboardDetector::Node{(int)j,false};
+                    e.child  = onboardDetector::Node{(int)i,true};
+                    e.weight = iov_uv;
+                }
+                else
+                {
+                    e.parent = onboardDetector::Node{(int)i,true};
+                    e.child  = onboardDetector::Node{(int)j,false};
+                    e.weight = iov_db;
+                }
+
+                if (e.weight >= this->boxIOVThresh_)
+                    edges.push_back(e);
+            }
+        }
+
+        // select the best parent for each unmatched node (if any)
+        std::map<std::pair<int,bool>, onboardDetector::Edge> bestParent;
+
+        for (const auto& e : edges)
+        {
+            auto key = std::make_pair(e.child.idx, e.child.is_uv);
+
+            if (bestParent.find(key) == bestParent.end() ||
+                e.weight > bestParent[key].weight)
+            {
+                bestParent[key] = e;
+            }
+        }
+
+        // build child map and find roots
+        std::map<std::pair<int,bool>, std::vector<onboardDetector::Node>> childrenMap;
+        std::set<std::pair<int,bool>> allNodes, childNodes;
+
+        for (const auto& kv : bestParent)
+        {
+            const auto& e = kv.second;
+
+            auto p = std::make_pair(e.parent.idx, e.parent.is_uv);
+            auto c = std::make_pair(e.child.idx,  e.child.is_uv);
+
+            childrenMap[p].push_back(e.child);
+
+            allNodes.insert(p);
+            allNodes.insert(c);
+            childNodes.insert(c);
+        }
+
+        std::vector<onboardDetector::Node> roots;
+        for (const auto& k : allNodes)
+        {
+            if (childNodes.find(k) == childNodes.end())
+             
+            
+            roots.push_back(onboardDetector::Node{k.first, k.second});
+        }
+
+        // DFS to collect nodes in each tree
+        std::function<void(const onboardDetector::Node&, std::vector<onboardDetector::Node>&)> dfs =
+        [&](const onboardDetector::Node& n, std::vector<onboardDetector::Node>& out)
+        {
+            out.push_back(n);
+
+            auto key = std::make_pair(n.idx, n.is_uv);
+            if (childrenMap.find(key) == childrenMap.end()) return;
+
+            for (const auto& c : childrenMap[key])
+                dfs(c, out);
+        };
+
+        // merge nodes in each tree (if any)
+        if (this->mergingFlag_ == "smaller")
+        {
+            for (const auto& k : allNodes)
+            {
+                if (childrenMap.find(k) == childrenMap.end())
+                {
+                    Node n{k.first, k.second};
+
+                    onboardDetector::box3D bbox;
+                    std::vector<Eigen::Vector3d> cluster;
+                    Eigen::Vector3d center, stddev;
+
+                    if (n.is_uv)
+                    {
+                        bbox = this->uvBBoxes_[n.idx];
+                        cluster = this->pcClustersVisual_[n.idx];
+                        center  = this->pcClusterCentersVisual_[n.idx];
+                        stddev  = this->pcClusterStdsVisual_[n.idx];
+                        usedUV[n.idx] = true;
+                    }
+                    else
+                    {
+                        bbox = this->dbBBoxes_[n.idx];
+                        cluster = this->pcClustersVisual_[n.idx];
+                        center  = this->pcClusterCentersVisual_[n.idx];
+                        stddev  = this->pcClusterStdsVisual_[n.idx];
+                        usedDB[n.idx] = true;
+                    }
+
+                    visualBBoxesTemp.push_back(bbox);
+                    visualPcClustersTemp.push_back(cluster);
+                    visualPcClusterCentersTemp.push_back(center);
+                    visualPcClusterStdsTemp.push_back(stddev);
+                }
+            }
+        } 
+        else if (this->mergingFlag_ == "bigger")
+        {
+            for (const auto& root : roots)
+            {
+                std::vector<Node> subtree;
+                dfs(root, subtree);
+
+                double xmin =  std::numeric_limits<double>::max();
+                double ymin =  std::numeric_limits<double>::max();
+                double zmin =  std::numeric_limits<double>::max();
+
+                double xmax = -std::numeric_limits<double>::max();
+                double ymax = -std::numeric_limits<double>::max();
+                double zmax = -std::numeric_limits<double>::max();
+
+                std::vector<Eigen::Vector3d> mergedCluster;
+
+                for (const auto& n : subtree)
+                {
+                    onboardDetector::box3D b;
+
+                    if (n.is_uv)
+                    {
+                        b = this->uvBBoxes_[n.idx];
+                        usedUV[n.idx] = true;
+                        mergedCluster.insert(mergedCluster.end(),
+                                            this->pcClustersVisual_[n.idx].begin(),
+                                            this->pcClustersVisual_[n.idx].end());
+                    }
+                    else
+                    {
+                        b = this->dbBBoxes_[n.idx];
+                        usedDB[n.idx] = true;
+                        mergedCluster.insert(mergedCluster.end(),
+                                            this->pcClustersVisual_[n.idx].begin(),
+                                            this->pcClustersVisual_[n.idx].end());
+                    }
+
+                    xmax = std::max(xmax, b.x + b.x_width/2);
+                    xmin = std::min(xmin, b.x - b.x_width/2);
+                    ymax = std::max(ymax, b.y + b.y_width/2);
+                    ymin = std::min(ymin, b.y - b.y_width/2);
+                    zmax = std::max(zmax, b.z + b.z_width/2);
+                    zmin = std::min(zmin, b.z - b.z_width/2);
+                }
+
+                onboardDetector::box3D bbox;
+                bbox.x = (xmin+xmax)/2;
+                bbox.y = (ymin+ymax)/2;
+                bbox.z = (zmin+zmax)/2;
+                bbox.x_width = xmax-xmin;
+                bbox.y_width = ymax-ymin;
+                bbox.z_width = zmax-zmin;
+                bbox.Vx = 0;
+                bbox.Vy = 0;
+
+                Eigen::Vector3d center = Eigen::Vector3d::Zero();
+                for (auto& p : mergedCluster) center += p;
+                if (!mergedCluster.empty()) center /= mergedCluster.size();
+
+                Eigen::Vector3d stddev = Eigen::Vector3d::Zero();
+                for (auto& p : mergedCluster)
+                    stddev += (p - center).cwiseAbs2();
+                if (!mergedCluster.empty())
+                    stddev = (stddev / mergedCluster.size()).cwiseSqrt();
+
+                visualBBoxesTemp.push_back(bbox);
+                visualPcClustersTemp.push_back(mergedCluster);
+                visualPcClusterCentersTemp.push_back(center);
+                visualPcClusterStdsTemp.push_back(stddev);
+            }
+        }
+        
+        // add unmerged boxes if the flag is set
+        if (visualUnmergedFlag_){
+            for (size_t i = 0; i < M; ++i)
+            {
+                if (!usedUV[i])
+                {
+                    visualBBoxesTemp.push_back(this->uvBBoxes_[i]);
+                    visualPcClustersTemp.push_back(this->pcClustersVisual_[i]);
+                    visualPcClusterCentersTemp.push_back(this->pcClusterCentersVisual_[i]);
+                    visualPcClusterStdsTemp.push_back(this->pcClusterStdsVisual_[i]);
+                }
+            }
+
+            for (size_t j = 0; j < N; ++j)
+            {
+                if (!usedDB[j])
+                {
+                    visualBBoxesTemp.push_back(this->dbBBoxes_[j]);
+                    visualPcClustersTemp.push_back(this->pcClustersVisual_[j]);
+                    visualPcClusterCentersTemp.push_back(this->pcClusterCentersVisual_[j]);
+                    visualPcClusterStdsTemp.push_back(this->pcClusterStdsVisual_[j]);
+                }
+            }
+        }
+
+        this->visualBBoxes_ = visualBBoxesTemp;
 
         // STEP 2: Get lidar bboxes and its corresponding clusters and features
         // lidar bbox filter
@@ -1531,6 +1844,8 @@ namespace onboardDetector{
                 processedVisualBBoxes[i] = true;
             }
         }
+
+
 
         // STEP 4: Add rest of LiDAR detection 
         for (size_t i = 0; i < lidarBBoxesTemp.size(); ++i) {
@@ -1811,6 +2126,7 @@ namespace onboardDetector{
         this->filteredPcClusterStds_ = filteredPcClusterStdsTemp;
     }
 
+
     void dynamicDetector::transformUVBBoxes(std::vector<onboardDetector::box3D>& bboxes){
         bboxes.clear();
         for(size_t i = 0; i < this->uvDetector_->box3Ds.size(); ++i){
@@ -2070,6 +2386,46 @@ namespace onboardDetector{
             IOU = 0;
         }
         return IOU;
+    }
+
+    double dynamicDetector::calBoxIOV(const onboardDetector::box3D& box1, const onboardDetector::box3D& box2, bool ignoreZmin) {
+        double box1Volume = box1.x_width * box1.y_width * box1.z_width;
+
+        double l1Y = box1.y + box1.y_width / 2. - (box2.y - box2.y_width / 2.);
+        double l2Y = box2.y + box2.y_width / 2. - (box1.y - box1.y_width / 2.);
+        double l1X = box1.x + box1.x_width / 2. - (box2.x - box2.x_width / 2.);
+        double l2X = box2.x + box2.x_width / 2. - (box1.x - box1.x_width / 2.);
+        double l1Z = box1.z + box1.z_width / 2. - (box2.z - box2.z_width / 2.);
+        double l2Z = box2.z + box2.z_width / 2. - (box1.z - box1.z_width / 2.);
+
+        if (ignoreZmin) {
+            double zmin = std::max(box1.z - box1.z_width / 2., box2.z - box2.z_width / 2.);
+            double zWidth1 = box1.z_width / 2. + (box1.z - zmin);
+            box1Volume = box1.x_width * box1.y_width * zWidth1;
+            l1Z = box1.z + box1.z_width / 2. - zmin;
+            l2Z = box2.z + box2.z_width / 2. - zmin;
+        }
+
+        double overlapX = std::min(l1X, l2X);
+        double overlapY = std::min(l1Y, l2Y);
+        double overlapZ = std::min(l1Z, l2Z);
+
+        if (std::max(l1X, l2X) <= std::max(box1.x_width, box2.x_width)) {
+            overlapX = std::min(box1.x_width, box2.x_width);
+        }
+        if (std::max(l1Y, l2Y) <= std::max(box1.y_width, box2.y_width)) {
+            overlapY = std::min(box1.y_width, box2.y_width);
+        }
+        if (std::max(l1Z, l2Z) <= std::max(box1.z_width, box2.z_width)) {
+            overlapZ = std::min(box1.z_width, box2.z_width);
+        }
+
+        double overlapVolume = overlapX * overlapY * overlapZ;
+        double IOV = (box1Volume > 0) ? (overlapVolume / box1Volume) : 0.0;
+        if (overlapX <= 0 || overlapY <= 0 || overlapZ <= 0) {
+            IOV = 0;
+        }
+        return IOV;
     }
 
     void dynamicDetector::boxAssociation(std::vector<int>& bestMatch){
