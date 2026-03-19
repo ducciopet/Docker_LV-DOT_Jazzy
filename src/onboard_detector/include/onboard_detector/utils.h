@@ -15,6 +15,20 @@
 
 namespace onboardDetector{
     const double PI_const = 3.1415926;
+
+    struct Node
+    {
+        int idx;
+        bool is_uv; // true = UV, false = DB
+    };
+
+    struct Edge
+    {
+        Node parent;
+        Node child;
+        double weight;
+    };
+    
     struct box3D
     {
         /* data */

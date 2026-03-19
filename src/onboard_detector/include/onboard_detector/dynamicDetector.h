@@ -37,6 +37,7 @@
 
 namespace onboardDetector{
     class dynamicDetector{
+
         // Track ID counter for persistent unique IDs
         int nextTrackId_ = 0;
     private:
@@ -142,6 +143,9 @@ namespace onboardDetector{
 
         // LiDAR Visual Filtering
         double boxIOUThresh_;
+        double boxIOVThresh_;
+        std::string mergingFlag_;
+        bool visualUnmergedFlag_;
 
         // Tracking and data association
         double maxMatchRange_;
@@ -223,6 +227,7 @@ namespace onboardDetector{
         cv::Mat detectedColorImage_;
 
     public:
+            
         dynamicDetector();
         dynamicDetector(const rclcpp::Node::SharedPtr& nh);
         void initDetector(const rclcpp::Node::SharedPtr& nh);
@@ -264,6 +269,7 @@ namespace onboardDetector{
         // detection helper functions
         void calcPcFeat(const std::vector<Eigen::Vector3d>& pcCluster, Eigen::Vector3d& pcClusterCenter, Eigen::Vector3d& pcClusterStd);
         double calBoxIOU(const onboardDetector::box3D& box1, const onboardDetector::box3D& box2, bool ignoreZmin=false);
+        double calBoxIOV(const onboardDetector::box3D& box1, const onboardDetector::box3D& box2, bool ignoreZmin=false);
 
         // Data association and tracking functions
         void boxAssociation(std::vector<int>& bestMatch);

@@ -52,8 +52,12 @@ detector_node:
       gaussian_downsample_rate: 8
 
       # LiDAR Visual Filtering
-      filtering_BBox_IOU_threshold: 0.2
-      
+      filtering_BBox_IOU_threshold: 0.4
+      filtering_BBox_IOV_threshold: 0.6
+      merging_flag: "smaller" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
+      visual_unmerged_flag: false # whether to visualize unmerged boxes (for debugging);
+
+
       # Sensor and LiDAR Ranges
       local_sensor_range: [10.0, 10.0, 5.0] # x, y, z range for generic sensor (meters)
       local_lidar_range: [10.0, 10.0, 5.0] # x, y, z range for LiDAR (meters)
