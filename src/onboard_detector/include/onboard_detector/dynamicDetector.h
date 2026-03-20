@@ -142,9 +142,15 @@ namespace onboardDetector{
         int downSampleThresh_;
 
         // LiDAR Visual Filtering
-        double boxIOUThresh_;
-        double boxIOVThresh_;
-        std::string mergingFlag_;
+        double visualboxIOUThresh_;
+        double visualboxIOVThresh_;
+        double lidarVisualboxIOUThresh_;
+        double lidarVisualboxIOVThresh_;
+        std::string visualmergingFlag_;
+        std::string lidarVisualmergingFlag_;
+        bool uvUnmergedFlag_;
+        bool dbUnmergedFlag_;
+        bool lidarUnmergedFlag_;
         bool visualUnmergedFlag_;
 
         // Tracking and data association
@@ -227,7 +233,7 @@ namespace onboardDetector{
         cv::Mat detectedColorImage_;
 
     public:
-            
+
         dynamicDetector();
         dynamicDetector(const rclcpp::Node::SharedPtr& nh);
         void initDetector(const rclcpp::Node::SharedPtr& nh);
@@ -274,6 +280,7 @@ namespace onboardDetector{
         // Data association and tracking functions
         void boxAssociation(std::vector<int>& bestMatch);
         void boxAssociationHelper(std::vector<int>& bestMatch);
+        void BboxesMerger(const std::vector<onboardDetector::box3D>& group1BBoxes_, const std::vector<onboardDetector::box3D>& group2BBoxes_, const std::vector<std::vector<Eigen::Vector3d>>& group1pcClusters_, const std::vector<Eigen::Vector3d>& group1pcClusterCenters_, const std::vector<Eigen::Vector3d>& group1pcClusterStds_, const std::vector<std::vector<Eigen::Vector3d>>& group2pcClusters_, const std::vector<Eigen::Vector3d>& group2pcClusterCenters_, const std::vector<Eigen::Vector3d>& group2pcClusterStds_, std::vector<onboardDetector::box3D>& BBoxesTemp, std::vector<std::vector<Eigen::Vector3d>>& PcClustersTemp, std::vector<Eigen::Vector3d>& PcClusterCentersTemp, std::vector<Eigen::Vector3d>& PcClusterStdsTemp, std::string merging_style, bool flag_group1, bool flag_group2, double boxIOUThresh_, double boxIOVThresh_);
         void genFeatHelper(const std::vector<onboardDetector::box3D>& boxes, const std::vector<Eigen::Vector3d>& pcCenters, std::vector<Eigen::VectorXd>& feature);
         void getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters);
         void linearProp(std::vector<onboardDetector::box3D>& propedBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);

@@ -19,7 +19,7 @@ namespace onboardDetector{
     struct Node
     {
         int idx;
-        bool is_uv; // true = UV, false = DB
+        bool is_group1; // true = UV, false = DB
     };
 
     struct Edge
@@ -28,7 +28,7 @@ namespace onboardDetector{
         Node child;
         double weight;
     };
-    
+
     struct box3D
     {
         /* data */
