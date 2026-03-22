@@ -1431,7 +1431,7 @@ namespace onboardDetector{
         }
     }
 
-void dynamicDetector::BboxesMerger(
+    void dynamicDetector::BboxesMerger(
                                     const std::vector<onboardDetector::box3D>& group1BBoxes_,
                                     const std::vector<onboardDetector::box3D>& group2BBoxes_,
 

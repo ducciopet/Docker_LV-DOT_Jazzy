@@ -54,8 +54,8 @@ detector_node:
       # LiDAR Visual Filtering
       visual_filtering_BBox_IOU_threshold: 0.4
       visual_filtering_BBox_IOV_threshold: 0.6
-      lidar_visual_filtering_BBox_IOU_threshold: 0.2
-      lidar_visual_filtering_BBox_IOV_threshold: 0.5
+      lidar_visual_filtering_BBox_IOU_threshold: 0.4
+      lidar_visual_filtering_BBox_IOV_threshold: 0.6
       visual_merging_flag: "smaller" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
       uv_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
       db_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
@@ -80,9 +80,9 @@ detector_node:
 
       # Classification
       frame_skip: 5 # num of frames skiped when comparing 2 point clouds
-      dynamic_velocity_threshold: 0.2
-      dynamic_voting_threshold: 0.8
-      frames_force_dynamic: 10 # Range of searching dynamic obstacles in box history
+      dynamic_velocity_threshold: 0.3
+      dynamic_voting_threshold: 0.85
+      frames_force_dynamic: 20 # Range of searching dynamic obstacles in box history
       frames_force_dynamic_check_range: 30 # threshold for forcing dynamic obstacles
       dynamic_consistency_threshold: 15 # obstacles being voted as dynamic for continuous k frames are eligible to be classified as dynamic
 
