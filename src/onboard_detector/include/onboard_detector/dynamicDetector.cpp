@@ -1639,35 +1639,136 @@ namespace onboardDetector{
         }
         // =========================
         // 🔥 FIX CRITICO: SMALLER = LEAF ONLY
-        // =========================
+        // ==========================
         if (merging_style == "smaller")
-        {
+{
             for (const auto& k : allNodes)
             {
-                // 👉 SOLO LEAF (NO CHILDREN)
+                // skip non-leaf
                 if (childrenMap.find(k) != childrenMap.end()) continue;
 
-                onboardDetector::Node n{k.first, k.second};
+                onboardDetector::Node leaf{k.first, k.second};
 
+                // =========================
+                // 🔥 TROVA IL PARENT (se esiste)
+                // =========================
+                bool hasParent = false;
+                onboardDetector::Node parentNode;
+
+                for (const auto& kv : bestParent)
+                {
+                    if (kv.first.first == leaf.idx &&
+                        kv.first.second == leaf.is_group1)
+                    {
+                        parentNode = kv.second.parent;
+                        hasParent = true;
+                        break;
+                    }
+                }
+
+                // =========================
+                // 🔥 CASO CONSERVATIVO: 1 parent - 1 child
+                // =========================
+                if (hasParent)
+                {
+                    auto parentKey = std::make_pair(parentNode.idx, parentNode.is_group1);
+
+                    // parent ha SOLO questo figlio?
+                    if (childrenMap[parentKey].size() == 1)
+                    {
+                        // 👉 MERGE padre + figlio
+                        onboardDetector::box3D b1, b2;
+                        std::vector<Eigen::Vector3d> cluster;
+
+                        // leaf
+                        if (leaf.is_group1)
+                        {
+                            b1 = group1BBoxes_[leaf.idx];
+                            cluster.insert(cluster.end(),
+                                group1pcClusters_[leaf.idx].begin(),
+                                group1pcClusters_[leaf.idx].end());
+                        }
+                        else
+                        {
+                            b1 = group2BBoxes_[leaf.idx];
+                            cluster.insert(cluster.end(),
+                                group2pcClusters_[leaf.idx].begin(),
+                                group2pcClusters_[leaf.idx].end());
+                        }
+
+                        // parent
+                        if (parentNode.is_group1)
+                        {
+                            b2 = group1BBoxes_[parentNode.idx];
+                            cluster.insert(cluster.end(),
+                                group1pcClusters_[parentNode.idx].begin(),
+                                group1pcClusters_[parentNode.idx].end());
+                        }
+                        else
+                        {
+                            b2 = group2BBoxes_[parentNode.idx];
+                            cluster.insert(cluster.end(),
+                                group2pcClusters_[parentNode.idx].begin(),
+                                group2pcClusters_[parentNode.idx].end());
+                        }
+
+                        double xmax = std::max(b1.x+b1.x_width/2, b2.x+b2.x_width/2);
+                        double xmin = std::min(b1.x-b1.x_width/2, b2.x-b2.x_width/2);
+                        double ymax = std::max(b1.y+b1.y_width/2, b2.y+b2.y_width/2);
+                        double ymin = std::min(b1.y-b1.y_width/2, b2.y-b2.y_width/2);
+                        double zmax = std::max(b1.z+b1.z_width/2, b2.z+b2.z_width/2);
+                        double zmin = std::min(b1.z-b1.z_width/2, b2.z-b2.z_width/2);
+
+                        onboardDetector::box3D bbox;
+                        bbox.x = (xmin+xmax)/2;
+                        bbox.y = (ymin+ymax)/2;
+                        bbox.z = (zmin+zmax)/2;
+                        bbox.x_width = xmax-xmin;
+                        bbox.y_width = ymax-ymin;
+                        bbox.z_width = zmax-zmin;
+                        bbox.Vx = 0;
+                        bbox.Vy = 0;
+
+                        // center + std
+                        Eigen::Vector3d center = Eigen::Vector3d::Zero();
+                        for (auto& p : cluster) center += p;
+                        if (!cluster.empty()) center /= cluster.size();
+
+                        Eigen::Vector3d stddev = Eigen::Vector3d::Zero();
+                        for (auto& p : cluster)
+                            stddev += (p - center).cwiseAbs2();
+                        if (!cluster.empty())
+                            stddev = (stddev / cluster.size()).cwiseSqrt();
+
+                        BBoxesTemp.push_back(bbox);
+                        PcClustersTemp.push_back(cluster);
+                        PcClusterCentersTemp.push_back(center);
+                        PcClusterStdsTemp.push_back(stddev);
+
+                        continue;
+                    }
+                }
+
+                // =========================
+                // DEFAULT: SOLO LEAF
+                // =========================
                 onboardDetector::box3D bbox;
                 std::vector<Eigen::Vector3d> cluster;
                 Eigen::Vector3d center, stddev;
 
-                if (n.is_group1)
+                if (leaf.is_group1)
                 {
-                    bbox = group1BBoxes_[n.idx];
-                    cluster = group1pcClusters_[n.idx];
-                    center  = group1pcClusterCenters_[n.idx];
-                    stddev  = group1pcClusterStds_[n.idx];
-                    usedGroup1[n.idx] = true;
+                    bbox = group1BBoxes_[leaf.idx];
+                    cluster = group1pcClusters_[leaf.idx];
+                    center  = group1pcClusterCenters_[leaf.idx];
+                    stddev  = group1pcClusterStds_[leaf.idx];
                 }
                 else
                 {
-                    bbox = group2BBoxes_[n.idx];
-                    cluster = group2pcClusters_[n.idx];
-                    center  = group2pcClusterCenters_[n.idx];
-                    stddev  = group2pcClusterStds_[n.idx];
-                    usedGroup2[n.idx] = true;
+                    bbox = group2BBoxes_[leaf.idx];
+                    cluster = group2pcClusters_[leaf.idx];
+                    center  = group2pcClusterCenters_[leaf.idx];
+                    stddev  = group2pcClusterStds_[leaf.idx];
                 }
 
                 BBoxesTemp.push_back(bbox);

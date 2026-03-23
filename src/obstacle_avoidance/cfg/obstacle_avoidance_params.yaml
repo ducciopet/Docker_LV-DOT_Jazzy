@@ -1,0 +1,5 @@
+obstacle_threshold: 0.5
+avoidance_gain: 1.0
+filtered_pointcloud_topic: "/onboard_detector/filtered_points"
+filtered_bboxes_topic: "/onboard_detector/filtered_bboxes"
+oriented_bboxes_topic: "/oriented_bboxes"

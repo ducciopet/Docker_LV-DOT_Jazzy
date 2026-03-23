@@ -291,7 +291,6 @@ namespace onboardDetector{
         void getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
         void getKalmanObservationAcc(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
 
-
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);
         void publishUVImages(); 
