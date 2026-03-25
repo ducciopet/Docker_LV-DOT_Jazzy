@@ -7,17 +7,6 @@ endif()
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "Suppress third-party CMake developer warnings")
 
 # --------------------------------------------------
-# Compile options
-# --------------------------------------------------
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-add_compile_options(-O3 -Wall)
-
-# Set RPATH so binary can find libraries
-set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}")
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-
-# --------------------------------------------------
 # Find dependencies
 # --------------------------------------------------
 find_package(ament_cmake REQUIRED)
@@ -33,7 +22,6 @@ find_package(image_transport REQUIRED)
 find_package(vision_msgs REQUIRED)
 unset(FLANN_ROOT)
 find_package(PCL REQUIRED)
-
 set(CMAKE_WARN_DEPRECATED FALSE)
 find_package(Open3D REQUIRED)
 set(CMAKE_WARN_DEPRECATED TRUE)
@@ -41,25 +29,91 @@ find_package(pcl_conversions REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
-# Open3D from /usr/local may export hardcoded LLVM libc++ paths that are not
-# present on this image (e.g. /usr/lib/llvm-18/lib/libc++.so.1). Rewrite them
-# to system locations when available.
-if(TARGET Open3D::Open3D)
-  get_target_property(_o3d_link_libs Open3D::Open3D INTERFACE_LINK_LIBRARIES)
-  if(_o3d_link_libs)
-    set(_o3d_link_libs_fixed "${_o3d_link_libs}")
+# --------------------------------------------------
+# Include directories
+# --------------------------------------------------
+include_directories(
+  include
+  ${PCL_INCLUDE_DIRS}
+)
 
-    if(NOT EXISTS "/usr/lib/llvm-18/lib/libc++.so.1" AND EXISTS "/usr/lib/x86_64-linux-gnu/libc++.so.1")
-      string(REPLACE "/usr/lib/llvm-18/lib/libc++.so.1" "/usr/lib/x86_64-linux-gnu/libc++.so.1" _o3d_link_libs_fixed "${_o3d_link_libs_fixed}")
-    endif()
+# --------------------------------------------------
+# Library
+# --------------------------------------------------
+add_library(${PROJECT_NAME}_lib
+  include/${PROJECT_NAME}/obstacleAvoider.cpp
+)
+ament_target_dependencies(${PROJECT_NAME}_lib
+  rclcpp
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+  nav_msgs
+  visualization_msgs
+  cv_bridge
+  message_filters
+  image_transport
+  vision_msgs
+  pcl_conversions
+  tf2
+  tf2_geometry_msgs
+  PCL
+  Open3D
+)
+target_link_libraries(${PROJECT_NAME}_lib
+  Open3D::Open3D
+  ${PCL_LIBRARIES}
+)
 
-    if(NOT EXISTS "/usr/lib/llvm-18/lib/libc++abi.so" AND EXISTS "/usr/lib/x86_64-linux-gnu/libc++abi.so.1")
-      string(REPLACE "/usr/lib/llvm-18/lib/libc++abi.so" "/usr/lib/x86_64-linux-gnu/libc++abi.so.1" _o3d_link_libs_fixed "${_o3d_link_libs_fixed}")
-    endif()
+# --------------------------------------------------
+# Executable
+# --------------------------------------------------
+add_executable(obstacle_avoidance_node src/obstacle_avoidance_node.cpp)
+ament_target_dependencies(obstacle_avoidance_node
+  rclcpp
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+  nav_msgs
+  visualization_msgs
+  cv_bridge
+  message_filters
+  image_transport
+  vision_msgs
+  pcl_conversions
+  tf2
+  tf2_geometry_msgs
+  PCL
+  Open3D
+)
+target_link_libraries(obstacle_avoidance_node
+  ${PROJECT_NAME}_lib
+)
 
-    set_target_properties(Open3D::Open3D PROPERTIES INTERFACE_LINK_LIBRARIES "${_o3d_link_libs_fixed}")
-  endif()
-endif()
+# --------------------------------------------------
+# Install
+# --------------------------------------------------
+install(TARGETS
+  ${PROJECT_NAME}_lib
+  obstacle_avoidance_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(DIRECTORY include/
+  DESTINATION include/
+)
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+install(DIRECTORY cfg/
+  DESTINATION share/${PROJECT_NAME}/cfg
+)
+install(DIRECTORY rviz/
+  DESTINATION share/${PROJECT_NAME}/rviz
+)
 
+# --------------------------------------------------
+# Export
+# --------------------------------------------------
 ament_export_include_directories(include)
+ament_export_libraries(${PROJECT_NAME}_lib)
 ament_package()

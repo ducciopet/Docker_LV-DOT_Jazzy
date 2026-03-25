@@ -38,17 +38,25 @@ private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
     rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr bbox_sub_;
+    rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr dynamic_bbox_sub_;
+    rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr history_traj_sub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr oriented_bbox_pub_;
 
     std::string filtered_pointcloud_topic_;
     std::string filtered_bboxes_topic_;
+    std::string dynamic_bboxes_topic_;
+    std::string history_trajectory_topic_;
     std::string oriented_bboxes_topic_;
 
     sensor_msgs::msg::PointCloud2::SharedPtr latest_cloud_;
     visualization_msgs::msg::MarkerArray::SharedPtr latest_bboxes_;
+    visualization_msgs::msg::MarkerArray::SharedPtr latest_dynamic_bboxes_;
+    visualization_msgs::msg::MarkerArray::SharedPtr latest_history_traj_;
 
     void pointcloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     void bbox_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg);
+    void dynamic_bbox_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg);
+    void history_traj_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg);
     void process();
 };
 }

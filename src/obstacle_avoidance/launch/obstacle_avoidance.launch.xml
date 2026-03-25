@@ -1,4 +1,0 @@
-<launch>
-    <!-- Example launch file for obstacle avoidance node -->
-    <node pkg="obstacle_avoidance" exec="obstacle_avoidance_node" name="obstacle_avoidance_node" output="screen" />
-</launch>
