@@ -48,19 +48,36 @@ detector_node:
       # DBSCAN LiDAR param
       lidar_DBSCAN_min_points: 10
       lidar_DBSCAN_epsilon: 0.05
-      downsample_threshold: 4500 # threshold for downsampling
-      gaussian_downsample_rate: 7
+      downsample_threshold: 3500 # threshold for downsampling
+      gaussian_downsample_rate: 8
+
+      # DBSCAN refinement param
+      dbscan_refinement_enable: true
+      dbscan_refine_max_diagonal: 2.0
+      dbscan_refine_min_density: 80.0
+      dbscan_refine_split_min_pts: 8
+      dbscan_refine_split_eps: 0.12
+      dbscan_refine_min_subcluster_pts: 15
+      dbscan_refine_axis_slice_width: 0.60
+      dbscan_refine_max_depth: 1
+      dbscan_refine_recursive: false
+      dbscan_refine_min_box_volume: 0.0001
 
       # LiDAR Visual Filtering
-      visual_filtering_BBox_IOU_threshold: 0.5
-      visual_filtering_BBox_IOV_threshold: 0.7
-      lidar_visual_filtering_BBox_IOU_threshold: 0.5
-      lidar_visual_filtering_BBox_IOV_threshold: 0.7
+      visual_filtering_BBox_IOU_threshold: 0.4
+      visual_filtering_BBox_IOV_threshold: 0.5
+
+      lidar_visual_filtering_BBox_IOU_threshold: 0.2
+      lidar_visual_filtering_BBox_IOV_threshold: 0.4
+
+      samegroupIOU_threshold: 0.3 # threshold for merging boxes in the same group (for debugging)
+      samegroupIOV_threshold: 0.4 # threshold for merging boxes in the same group (for debugging)
+
       visual_merging_flag: "smaller" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
       uv_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
       db_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
       lidar_visual_merging_flag: "bigger" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
-      visual_unmerged_flag: false # discard or not visual boxes that don't have enough overlap with LiDAR boxes (for debugging)
+      visual_unmerged_flag: true # discard or not visual boxes that don't have enough overlap with LiDAR boxes (for debugging)
       lidar_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
 
       # Sensor and LiDAR Ranges
@@ -78,12 +95,12 @@ detector_node:
       kalman_filter_averaging_frames: 10
 
       # Classification
-      frame_skip: 5 # num of frames skiped when comparing 2 point clouds
-      dynamic_velocity_threshold: 0.2
-      dynamic_voting_threshold: 0.9
-      frames_force_dynamic: 22 # Range of searching dynamic obstacles in box history
+      frame_skip: 1 # num of frames skiped when comparing 2 point clouds
+      dynamic_velocity_threshold: 0.3
+      dynamic_voting_threshold: 0.8
+      frames_force_dynamic: 20 # Range of searching dynamic obstacles in box history
       frames_force_dynamic_check_range: 30 # threshold for forcing dynamic obstacles
-      dynamic_consistency_threshold: 17 # obstacles being voted as dynamic for continuous k frames are eligible to be classified as dynamic
+      dynamic_consistency_threshold: 20 # obstacles being voted as dynamic for continuous k frames are eligible to be classified as dynamic
 
       # Constrain size
       target_constrain_size: false

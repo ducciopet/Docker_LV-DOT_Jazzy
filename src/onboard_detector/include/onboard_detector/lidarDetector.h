@@ -15,11 +15,12 @@
 #include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <Eigen/Eigen>
+
 namespace onboardDetector{
     struct Cluster
     {
-        int cluster_id;               
-        Eigen::Vector4f centroid;      
+        int cluster_id;
+        Eigen::Vector4f centroid;
         pcl::PointCloud<pcl::PointXYZ>::Ptr points; // pointcloud
 
         // Geometry information
@@ -35,24 +36,50 @@ namespace onboardDetector{
 
     class lidarDetector{
     private:
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_; //current pointcloud
-        std::vector<onboardDetector::Cluster> clusters_; //current cluster list
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_; // current pointcloud
+        std::vector<onboardDetector::Cluster> clusters_; // current cluster list
         std::vector<onboardDetector::box3D> bboxes_; // lidar bboxes
-        //lidar DBSCAN parameters
+
+        // lidar DBSCAN parameters
         double eps_;
         int minPts_;
         double groundHeight_;
         double roofHeight_;
-        
+
+        // refinement parameters
+        bool dbscanRefinementEnable_;
+        double dbscanRefineMaxDiagonal_;
+        double dbscanRefineMinDensity_;
+        int dbscanRefineSplitMinPts_;
+        double dbscanRefineSplitEps_;
+        int dbscanRefineMinSubclusterPts_;
+        double dbscanRefineAxisSliceWidth_;
+        int dbscanRefineMaxDepth_;
+        bool dbscanRefineRecursive_;
+        double dbscanRefineMinBoxVolume_;
+
     public:
         lidarDetector();
-        void setParams(double eps, int minPts);
+
+        void setParams(
+            double eps,
+            int minPts,
+            bool dbscanRefinementEnable,
+            double dbscanRefineMaxDiagonal,
+            double dbscanRefineMinDensity,
+            int dbscanRefineSplitMinPts,
+            double dbscanRefineSplitEps,
+            int dbscanRefineMinSubclusterPts,
+            double dbscanRefineAxisSliceWidth,
+            int dbscanRefineMaxDepth,
+            bool dbscanRefineRecursive,
+            double dbscanRefineMinBoxVolume);
+
         void getPointcloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud);
         void lidarDBSCAN();
         std::vector<onboardDetector::Cluster>& getClusters();
         std::vector<onboardDetector::box3D>& getBBoxes();
     };
 }
-
 
 #endif

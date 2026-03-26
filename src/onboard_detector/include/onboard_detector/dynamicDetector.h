@@ -71,9 +71,12 @@ namespace onboardDetector{
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr uDepthMapPub_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr uvBirdViewPub_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr detectedColorImgPub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr uvBBoxesFilteredPub_;        
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr uvBBoxesPub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dbBBoxesFilteredPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dbBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr visualBBoxesPub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr lidarBBoxesFilteredPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr lidarBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr filteredBBoxesBeforeYoloPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr filteredBBoxesPub_;
@@ -140,12 +143,26 @@ namespace onboardDetector{
         double lidarDBEpsilon_;
         int gaussianDownSampleRate_;
         int downSampleThresh_;
-
+        
+        // DBSCAN refinement param
+        bool dbscanRefinementEnable_;
+        double dbscanRefineMaxDiagonal_;
+        double dbscanRefineMinDensity_;
+        int dbscanRefineSplitMinPts_;
+        double dbscanRefineSplitEps_;
+        int dbscanRefineMinSubclusterPts_;
+        double dbscanRefineAxisSliceWidth_;
+        int dbscanRefineMaxDepth_;
+        bool dbscanRefineRecursive_;
+        double dbscanRefineMinBoxVolume_;
+        
         // LiDAR Visual Filtering
         double visualboxIOUThresh_;
         double visualboxIOVThresh_;
         double lidarVisualboxIOUThresh_;
         double lidarVisualboxIOVThresh_;
+        double samegroupIOUThresh_;
+        double samegroupIOVThresh_;
         std::string visualmergingFlag_;
         std::string lidarVisualmergingFlag_;
         bool uvUnmergedFlag_;
@@ -281,6 +298,8 @@ namespace onboardDetector{
         void boxAssociation(std::vector<int>& bestMatch);
         void boxAssociationHelper(std::vector<int>& bestMatch);
         void BboxesMerger(const std::vector<onboardDetector::box3D>& group1BBoxes_, const std::vector<onboardDetector::box3D>& group2BBoxes_, const std::vector<std::vector<Eigen::Vector3d>>& group1pcClusters_, const std::vector<Eigen::Vector3d>& group1pcClusterCenters_, const std::vector<Eigen::Vector3d>& group1pcClusterStds_, const std::vector<std::vector<Eigen::Vector3d>>& group2pcClusters_, const std::vector<Eigen::Vector3d>& group2pcClusterCenters_, const std::vector<Eigen::Vector3d>& group2pcClusterStds_, std::vector<onboardDetector::box3D>& BBoxesTemp, std::vector<std::vector<Eigen::Vector3d>>& PcClustersTemp, std::vector<Eigen::Vector3d>& PcClusterCentersTemp, std::vector<Eigen::Vector3d>& PcClusterStdsTemp, std::string merging_style, bool flag_group1, bool flag_group2, double boxIOUThresh_, double boxIOVThresh_);
+        void mergeNestedGroup(const std::vector<onboardDetector::box3D>& inBoxes, const std::vector<std::vector<Eigen::Vector3d>>& inClusters, const std::vector<Eigen::Vector3d>& inCenters, const std::vector<Eigen::Vector3d>& inStds,     std::vector<onboardDetector::box3D>& outBoxes, std::vector<std::vector<Eigen::Vector3d>>& outClusters, std::vector<Eigen::Vector3d>& outCenters, std::vector<Eigen::Vector3d>& outStds);
+        void mergeBoxesSet(const std::vector<onboardDetector::box3D>& boxes, const std::vector<std::vector<Eigen::Vector3d>>& clusters, const std::vector<int>& indices, onboardDetector::box3D& outBox, std::vector<Eigen::Vector3d>& outCluster, Eigen::Vector3d& center, Eigen::Vector3d& stddev);
         void genFeatHelper(const std::vector<onboardDetector::box3D>& boxes, const std::vector<Eigen::Vector3d>& pcCenters, std::vector<Eigen::VectorXd>& feature);
         void getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters);
         void linearProp(std::vector<onboardDetector::box3D>& propedBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);

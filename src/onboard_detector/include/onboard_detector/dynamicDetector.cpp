@@ -321,6 +321,96 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Gaussian downsample rate is set to: " << this->gaussianDownSampleRate_ << std::endl;
         }
 
+        // DBSCAN refinement enable
+        if (!this->nh_->get_parameter(pname("dbscan_refinement_enable"), this->dbscanRefinementEnable_)){
+            this->dbscanRefinementEnable_ = true;
+            std::cout << this->hint_ << ": No DBSCAN refinement enable. Use default: true." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refinement enable: " << this->dbscanRefinementEnable_ << std::endl;
+        }
+
+        // DBSCAN refine max diagonal
+        if (!this->nh_->get_parameter(pname("dbscan_refine_max_diagonal"), this->dbscanRefineMaxDiagonal_)){
+            this->dbscanRefineMaxDiagonal_ = 2.0;
+            std::cout << this->hint_ << ": No DBSCAN refine max diagonal. Use default: 2.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine max diagonal: " << this->dbscanRefineMaxDiagonal_ << std::endl;
+        }
+
+        // DBSCAN refine min density
+        if (!this->nh_->get_parameter(pname("dbscan_refine_min_density"), this->dbscanRefineMinDensity_)){
+            this->dbscanRefineMinDensity_ = 80.0;
+            std::cout << this->hint_ << ": No DBSCAN refine min density. Use default: 80.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine min density: " << this->dbscanRefineMinDensity_ << std::endl;
+        }
+
+        // DBSCAN refine split min pts
+        if (!this->nh_->get_parameter(pname("dbscan_refine_split_min_pts"), this->dbscanRefineSplitMinPts_)){
+            this->dbscanRefineSplitMinPts_ = 8;
+            std::cout << this->hint_ << ": No DBSCAN refine split min pts. Use default: 8." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine split min pts: " << this->dbscanRefineSplitMinPts_ << std::endl;
+        }
+
+        // DBSCAN refine split eps
+        if (!this->nh_->get_parameter(pname("dbscan_refine_split_eps"), this->dbscanRefineSplitEps_)){
+            this->dbscanRefineSplitEps_ = 0.08;
+            std::cout << this->hint_ << ": No DBSCAN refine split eps. Use default: 0.08." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine split eps: " << this->dbscanRefineSplitEps_ << std::endl;
+        }
+
+        // DBSCAN refine min subcluster pts
+        if (!this->nh_->get_parameter(pname("dbscan_refine_min_subcluster_pts"), this->dbscanRefineMinSubclusterPts_)){
+            this->dbscanRefineMinSubclusterPts_ = 10;
+            std::cout << this->hint_ << ": No DBSCAN refine min subcluster pts. Use default: 10." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine min subcluster pts: " << this->dbscanRefineMinSubclusterPts_ << std::endl;
+        }
+
+        // DBSCAN refine axis slice width
+        if (!this->nh_->get_parameter(pname("dbscan_refine_axis_slice_width"), this->dbscanRefineAxisSliceWidth_)){
+            this->dbscanRefineAxisSliceWidth_ = 0.40;
+            std::cout << this->hint_ << ": No DBSCAN refine axis slice width. Use default: 0.40." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine axis slice width: " << this->dbscanRefineAxisSliceWidth_ << std::endl;
+        }
+
+        // DBSCAN refine max depth
+        if (!this->nh_->get_parameter(pname("dbscan_refine_max_depth"), this->dbscanRefineMaxDepth_)){
+            this->dbscanRefineMaxDepth_ = 2;
+            std::cout << this->hint_ << ": No DBSCAN refine max depth. Use default: 2." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine max depth: " << this->dbscanRefineMaxDepth_ << std::endl;
+        }
+
+        // DBSCAN refine recursive
+        if (!this->nh_->get_parameter(pname("dbscan_refine_recursive"), this->dbscanRefineRecursive_)){
+            this->dbscanRefineRecursive_ = true;
+            std::cout << this->hint_ << ": No DBSCAN refine recursive. Use default: true." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine recursive: " << this->dbscanRefineRecursive_ << std::endl;
+        }
+
+        // DBSCAN refine min box volume
+        if (!this->nh_->get_parameter(pname("dbscan_refine_min_box_volume"), this->dbscanRefineMinBoxVolume_)){
+            this->dbscanRefineMinBoxVolume_ = 0.0001;
+            std::cout << this->hint_ << ": No DBSCAN refine min box volume. Use default: 0.0001." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": DBSCAN refine min box volume: " << this->dbscanRefineMinBoxVolume_ << std::endl;
+        }
+
         // Visual IOU threshold
         if (!this->nh_->get_parameter(pname("visual_filtering_BBox_IOU_threshold"), this->visualboxIOUThresh_)){
             this->visualboxIOUThresh_ = 0.5;
@@ -400,6 +490,24 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": LiDAR unmerged flag is set to: " << (this->lidarUnmergedFlag_ ? "true" : "false") << std::endl;
+        }
+
+        // Same group IOV Threshold
+        if (!this->nh_->get_parameter(pname("samegroupIOV_threshold"), this->samegroupIOVThresh_)){
+            this->samegroupIOVThresh_ = 0.6;
+            std::cout << this->hint_ << ": No same group IOV threshold parameter found. Use default: 0.6." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Same group IOV threshold is set to: " << this->samegroupIOVThresh_ << std::endl;
+        }
+
+        // Same group IOU Threshold
+        if (!this->nh_->get_parameter(pname("samegroupIOU_threshold"), this->samegroupIOUThresh_)){
+            this->samegroupIOUThresh_ = 0.3;
+            std::cout << this->hint_ << ": No same group IOU threshold parameter found. Use default: 0.3." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Same group IOU threshold is set to: " << this->samegroupIOUThresh_ << std::endl;
         }
 
         // Visual unmerged Flag
@@ -668,9 +776,17 @@ namespace onboardDetector{
         this->uvBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
             this->ns_.empty() ? "/uv_bboxes" : this->ns_ + "/uv_bboxes", 10);
 
+        // uv detector filtered bounding box pub
+        this->uvBBoxesFilteredPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/uv_bboxes_filtered" : this->ns_ + "/uv_bboxes_filtered", 10);
+
         // DBSCAN bounding box pub
         this->dbBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
             this->ns_.empty() ? "/dbscan_bboxes" : this->ns_ + "/dbscan_bboxes", 10);
+        
+        //DBSCAN filtered bounding box pub
+        this->dbBBoxesFilteredPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/dbscan_bboxes_filtered" : this->ns_ + "/dbscan_bboxes_filtered", 10);
 
         // visual bboxes pub
         this->visualBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -679,6 +795,10 @@ namespace onboardDetector{
         // lidar bbox pub
         this->lidarBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
             this->ns_.empty() ? "/lidar_bboxes" : this->ns_ + "/lidar_bboxes", 10);
+
+        // lidar filtered bounding box pub
+        this->lidarBBoxesFilteredPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/lidar_bboxes_filtered" : this->ns_ + "/lidar_bboxes_filtered", 10);
 
         // filtered bounding box before YOLO pub
         this->filteredBBoxesBeforeYoloPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -1306,9 +1426,12 @@ namespace onboardDetector{
         
         // Publish 3D visualization markers for all bounding box stages
         this->publish3dBox(this->uvBBoxes_, this->uvBBoxesPub_, 0, 1, 0);
+        //this->publish3dBox(this->uvBBoxesFiltered_, this->uvBBoxesFilteredPub_, 0, 1, 0.5);
         this->publish3dBox(this->dbBBoxes_, this->dbBBoxesPub_, 1, 0, 0);
+        //this->publish3dBox(this->dbBBoxesFiltered_, this->dbBBoxesFilteredPub_, 1, 0.5, 0);
         this->publish3dBox(this->visualBBoxes_, this->visualBBoxesPub_, 0.3, 0.8, 1.0);
         this->publish3dBox(this->lidarBBoxes_, this->lidarBBoxesPub_, 0.5, 0.5, 0.5);
+        //this->publish3dBox(this->lidarBBoxesFiltered_, this->lidarBBoxesFilteredPub_, 0.5, 0, 0.5);
         this->publish3dBox(this->filteredBBoxesBeforeYolo_, this->filteredBBoxesBeforeYoloPub_, 0, 1, 0.5);
         this->publish3dBox(this->filteredBBoxes_, this->filteredBBoxesPub_, 0, 1, 1);
         this->publish3dBox(this->trackedBBoxes_, this->trackedBBoxesPub_, 1, 1, 0);
@@ -1404,12 +1527,26 @@ namespace onboardDetector{
 
 
     void dynamicDetector::lidarDetect(){
-        if (this->lidarDetector_ == NULL){
+        if (this->lidarDetector_ == nullptr){
             this->lidarDetector_.reset(new lidarDetector());
-            this->lidarDetector_->setParams(this->lidarDBEpsilon_, this->lidarDBMinPoints_);
         }
 
-        if (this->lidarCloud_ != NULL){
+        // aggiorna sempre i parametri, anche se il detector esiste già
+        this->lidarDetector_->setParams(
+            this->lidarDBEpsilon_,
+            this->lidarDBMinPoints_,
+            this->dbscanRefinementEnable_,
+            this->dbscanRefineMaxDiagonal_,
+            this->dbscanRefineMinDensity_,
+            this->dbscanRefineSplitMinPts_,
+            this->dbscanRefineSplitEps_,
+            this->dbscanRefineMinSubclusterPts_,
+            this->dbscanRefineAxisSliceWidth_,
+            this->dbscanRefineMaxDepth_,
+            this->dbscanRefineRecursive_,
+            this->dbscanRefineMinBoxVolume_);
+
+        if (this->lidarCloud_ != nullptr){
             this->lidarDetector_->getPointcloud(this->lidarCloud_);
             this->lidarDetector_->lidarDBSCAN();
 
@@ -1417,15 +1554,20 @@ namespace onboardDetector{
             std::vector<onboardDetector::Cluster> lidarClustersFiltered;
             std::vector<onboardDetector::box3D> lidarBBoxesRaw = this->lidarDetector_->getBBoxes();
             std::vector<onboardDetector::box3D> lidarBBoxesFiltered;
-            for (int i=0; i<int(lidarBBoxesRaw.size()); ++i){
-                onboardDetector::box3D lidarBBox = lidarBBoxesRaw[i];
-                // filter out lidar bounding boxes that are too large
-                if(lidarBBox.x_width > this->maxObjectSize_(0) || lidarBBox.y_width > this->maxObjectSize_(1) || lidarBBox.z_width > this->maxObjectSize_(2)){
+
+            for (size_t i = 0; i < lidarBBoxesRaw.size(); ++i){
+                const onboardDetector::box3D& lidarBBox = lidarBBoxesRaw[i];
+
+                if (lidarBBox.x_width > this->maxObjectSize_(0) ||
+                    lidarBBox.y_width > this->maxObjectSize_(1) ||
+                    lidarBBox.z_width > this->maxObjectSize_(2)){
                     continue;
                 }
+
                 lidarBBoxesFiltered.push_back(lidarBBox);
-                lidarClustersFiltered.push_back(lidarClustersRaw[i]);            
+                lidarClustersFiltered.push_back(lidarClustersRaw[i]);
             }
+
             this->lidarBBoxes_ = lidarBBoxesFiltered;
             this->lidarClusters_ = lidarClustersFiltered;
         }
@@ -1641,7 +1783,7 @@ namespace onboardDetector{
         // 🔥 FIX CRITICO: SMALLER = LEAF ONLY
         // ==========================
         if (merging_style == "smaller")
-{
+        {
             for (const auto& k : allNodes)
             {
                 // skip non-leaf
@@ -1912,6 +2054,276 @@ namespace onboardDetector{
         }
     }
 
+    void dynamicDetector::mergeNestedGroup(
+        const std::vector<onboardDetector::box3D>& inBoxes,
+        const std::vector<std::vector<Eigen::Vector3d>>& inClusters,
+        const std::vector<Eigen::Vector3d>& inCenters,
+        const std::vector<Eigen::Vector3d>& inStds,
+
+        std::vector<onboardDetector::box3D>& outBoxes,
+        std::vector<std::vector<Eigen::Vector3d>>& outClusters,
+        std::vector<Eigen::Vector3d>& outCenters,
+        std::vector<Eigen::Vector3d>& outStds)
+    {
+        size_t N = inBoxes.size();
+        if (N == 0) return;
+
+        double iouThresh = this->samegroupIOUThresh_;
+        double iovThresh = this->samegroupIOVThresh_;
+
+        Eigen::MatrixXd IOU = Eigen::MatrixXd::Zero(N, N);
+
+        // =========================
+        // STEP 0: IOU MATRIX
+        // =========================
+        for (size_t i = 0; i < N; ++i)
+        {
+            for (size_t j = 0; j < N; ++j)
+            {
+                if (i == j) continue;
+                IOU(i,j) = this->calBoxIOU(inBoxes[i], inBoxes[j]);
+            }
+        }
+
+        std::vector<bool> used(N, false);
+
+        // =========================
+        // STEP 1: MUTUAL IOU MATCH
+        // =========================
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (used[i]) continue;
+
+            int best_j = -1;
+            double best_iou = -1;
+
+            for (size_t j = 0; j < N; ++j)
+            {
+                if (i == j || used[j]) continue;
+
+                if (IOU(i,j) > best_iou)
+                {
+                    best_iou = IOU(i,j);
+                    best_j = (int)j;
+                }
+            }
+
+            if (best_j == -1) continue;
+
+            int best_i_back = -1;
+            double best_iou_back = -1;
+
+            for (size_t k = 0; k < N; ++k)
+            {
+                if ((int)k == best_j || used[k]) continue;
+
+                if (IOU(k, best_j) > best_iou_back)
+                {
+                    best_iou_back = IOU(k, best_j);
+                    best_i_back = (int)k;
+                }
+            }
+
+            if (best_i_back == (int)i && best_iou > iouThresh)
+            {
+                std::vector<int> comp = { (int)i, best_j };
+
+                onboardDetector::box3D box;
+                std::vector<Eigen::Vector3d> cluster;
+                Eigen::Vector3d center, stddev;
+
+                mergeBoxesSet(inBoxes, inClusters, comp,
+                            box, cluster, center, stddev);
+
+                outBoxes.push_back(box);
+                outClusters.push_back(cluster);
+                outCenters.push_back(center);
+                outStds.push_back(stddev);
+
+                used[i] = true;
+                used[best_j] = true;
+            }
+        }
+
+        // =========================
+        // STEP 2: BUILD EDGES (NESTED via IOV)
+        // =========================
+        struct Edge { int parent; int child; double w; };
+        std::vector<Edge> edges;
+
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (used[i]) continue;
+
+            for (size_t j = 0; j < N; ++j)
+            {
+                if (i == j || used[j]) continue;
+
+                double iov_ij = this->calBoxIOV(inBoxes[i], inBoxes[j]);
+                double iov_ji = this->calBoxIOV(inBoxes[j], inBoxes[i]);
+
+                // 🔥 nested detection (asimmetrico!)
+                if (iov_ij > iovThresh || iov_ji > iovThresh)
+                {
+                    Edge e;
+
+                    if (iov_ij > iov_ji)
+                    {
+                        // j contiene i
+                        e.parent = (int)j;
+                        e.child  = (int)i;
+                        e.w = iov_ij;
+                    }
+                    else
+                    {
+                        // i contiene j
+                        e.parent = (int)i;
+                        e.child  = (int)j;
+                        e.w = iov_ji;
+                    }
+
+                    edges.push_back(e);
+                }
+            }
+        }
+
+        // =========================
+        // STEP 3: KEEP BEST PARENT
+        // =========================
+        std::map<int, Edge> bestParent;
+
+        for (const auto& e : edges)
+        {
+            if (bestParent.find(e.child) == bestParent.end() ||
+                e.w > bestParent[e.child].w)
+            {
+                bestParent[e.child] = e;
+            }
+        }
+
+        // =========================
+        // STEP 4: BUILD GRAPH
+        // =========================
+        std::map<int, std::vector<int>> children;
+        std::set<int> allNodes, childNodes;
+
+        for (const auto& kv : bestParent)
+        {
+            const auto& e = kv.second;
+
+            children[e.parent].push_back(e.child);
+
+            allNodes.insert(e.parent);
+            allNodes.insert(e.child);
+            childNodes.insert(e.child);
+        }
+
+        // =========================
+        // STEP 5: MERGE TREES
+        // =========================
+        for (auto root : allNodes)
+        {
+            if (childNodes.count(root)) continue;
+
+            std::vector<int> subtree;
+            std::queue<int> q;
+            q.push(root);
+
+            while (!q.empty())
+            {
+                int u = q.front(); q.pop();
+                subtree.push_back(u);
+
+                for (auto c : children[u])
+                    q.push(c);
+            }
+
+            onboardDetector::box3D box;
+            std::vector<Eigen::Vector3d> cluster;
+            Eigen::Vector3d center, stddev;
+
+            mergeBoxesSet(inBoxes, inClusters, subtree,
+                        box, cluster, center, stddev);
+
+            outBoxes.push_back(box);
+            outClusters.push_back(cluster);
+            outCenters.push_back(center);
+            outStds.push_back(stddev);
+
+            for (auto idx : subtree)
+                used[idx] = true;
+        }
+
+        // =========================
+        // STEP 6: LEFTOVER
+        // =========================
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (!used[i])
+            {
+                outBoxes.push_back(inBoxes[i]);
+                outClusters.push_back(inClusters[i]);
+                outCenters.push_back(inCenters[i]);
+                outStds.push_back(inStds[i]);
+            }
+        }
+    }
+
+    void dynamicDetector::mergeBoxesSet(
+        const std::vector<onboardDetector::box3D>& boxes,
+        const std::vector<std::vector<Eigen::Vector3d>>& clusters,
+        const std::vector<int>& indices,
+        onboardDetector::box3D& outBox,
+        std::vector<Eigen::Vector3d>& outCluster,
+        Eigen::Vector3d& center,
+        Eigen::Vector3d& stddev)
+    {
+        double xmin =  std::numeric_limits<double>::max();
+        double ymin =  std::numeric_limits<double>::max();
+        double zmin =  std::numeric_limits<double>::max();
+
+        double xmax = -std::numeric_limits<double>::max();
+        double ymax = -std::numeric_limits<double>::max();
+        double zmax = -std::numeric_limits<double>::max();
+
+        for (int idx : indices)
+        {
+            const auto& b = boxes[idx];
+
+            xmax = std::max(xmax, b.x + b.x_width/2);
+            xmin = std::min(xmin, b.x - b.x_width/2);
+            ymax = std::max(ymax, b.y + b.y_width/2);
+            ymin = std::min(ymin, b.y - b.y_width/2);
+            zmax = std::max(zmax, b.z + b.z_width/2);
+            zmin = std::min(zmin, b.z - b.z_width/2);
+
+            outCluster.insert(outCluster.end(),
+                            clusters[idx].begin(),
+                            clusters[idx].end());
+        }
+
+        outBox.x = (xmin+xmax)/2;
+        outBox.y = (ymin+ymax)/2;
+        outBox.z = (zmin+zmax)/2;
+        outBox.x_width = xmax-xmin;
+        outBox.y_width = ymax-ymin;
+        outBox.z_width = zmax-zmin;
+        outBox.Vx = 0;
+        outBox.Vy = 0;
+
+        // center
+        center = Eigen::Vector3d::Zero();
+        for (auto& p : outCluster) center += p;
+        if (!outCluster.empty()) center /= outCluster.size();
+
+        // std
+        stddev = Eigen::Vector3d::Zero();
+        for (auto& p : outCluster)
+            stddev += (p - center).cwiseAbs2();
+        if (!outCluster.empty())
+            stddev = (stddev / outCluster.size()).cwiseSqrt();
+    }
+
     void dynamicDetector::filterLVBBoxes(){
         std::vector<onboardDetector::box3D> filteredBBoxesTemp;
         std::vector<std::vector<Eigen::Vector3d>> filteredPcClustersTemp;
@@ -1928,13 +2340,72 @@ namespace onboardDetector{
         std::vector<Eigen::Vector3d> lidarPcClusterCentersTemp;
         std::vector<Eigen::Vector3d> lidarPcClusterStdsTemp; // store lidar output
 
-        
+        // =========================
+        // STEP 0: MERGE NESTED UV + DB (INTRA-GROUP)
+        // =========================
+        std::vector<onboardDetector::box3D> uvBBoxesFiltered;
+        std::vector<std::vector<Eigen::Vector3d>> uvPcClustersFiltered;
+        std::vector<Eigen::Vector3d> uvPcClusterCentersFiltered;
+        std::vector<Eigen::Vector3d> uvPcClusterStdsFiltered;
+
+        std::vector<onboardDetector::box3D> dbBBoxesFiltered;
+        std::vector<std::vector<Eigen::Vector3d>> dbPcClustersFiltered;
+        std::vector<Eigen::Vector3d> dbPcClusterCentersFiltered;
+        std::vector<Eigen::Vector3d> dbPcClusterStdsFiltered;
+
+        // UV
+        this->mergeNestedGroup(
+            this->uvBBoxes_,
+            this->pcClustersVisual_,
+            this->pcClusterCentersVisual_,
+            this->pcClusterStdsVisual_,
+
+            uvBBoxesFiltered,
+            uvPcClustersFiltered,
+            uvPcClusterCentersFiltered,
+            uvPcClusterStdsFiltered
+        );
+
+        // DBSCAN
+        this->mergeNestedGroup(
+            this->dbBBoxes_,
+            this->pcClustersVisual_,
+            this->pcClusterCentersVisual_,
+            this->pcClusterStdsVisual_,
+
+            dbBBoxesFiltered,
+            dbPcClustersFiltered,
+            dbPcClusterCentersFiltered,
+            dbPcClusterStdsFiltered
+        );
+
+        this->publish3dBox(uvBBoxesFiltered, this->uvBBoxesFilteredPub_, 0, 1, 0.5);
+        this->publish3dBox(dbBBoxesFiltered, this->dbBBoxesFilteredPub_, 1, 0.5, 0);
+
         // STEP 1: Merge UV and DBSCAN bounding boxes to get visual bounding boxes (with clusters and features)
-        this->BboxesMerger(this->uvBBoxes_, this->dbBBoxes_, 
-                    this->pcClustersVisual_, this->pcClusterCentersVisual_, this->pcClusterStdsVisual_,
-                    this->pcClustersVisual_, this->pcClusterCentersVisual_, this->pcClusterStdsVisual_,
-                    visualBBoxesTemp, visualPcClustersTemp, visualPcClusterCentersTemp, visualPcClusterStdsTemp,
-                    this->visualmergingFlag_, this->uvUnmergedFlag_, this->dbUnmergedFlag_, this->visualboxIOUThresh_, this->visualboxIOVThresh_);
+        this->BboxesMerger(
+            uvBBoxesFiltered, 
+            dbBBoxesFiltered,
+
+            uvPcClustersFiltered,
+            uvPcClusterCentersFiltered,
+            uvPcClusterStdsFiltered,
+
+            dbPcClustersFiltered,
+            dbPcClusterCentersFiltered,
+            dbPcClusterStdsFiltered,
+
+            visualBBoxesTemp, 
+            visualPcClustersTemp, 
+            visualPcClusterCentersTemp, 
+            visualPcClusterStdsTemp,
+
+            this->visualmergingFlag_, 
+            this->uvUnmergedFlag_, 
+            this->dbUnmergedFlag_,
+
+            this->visualboxIOUThresh_, 
+            this->visualboxIOVThresh_);
         
         this->visualBBoxes_ = visualBBoxesTemp;
 
@@ -1963,20 +2434,42 @@ namespace onboardDetector{
             lidarPcClusterStdsTemp.push_back(clusterStd);
         }
 
+        // =========================
+        // STEP 2.5: MERGE NESTED LIDAR
+        // =========================
+        std::vector<onboardDetector::box3D> lidarBBoxesFiltered;
+        std::vector<std::vector<Eigen::Vector3d>> lidarPcClustersFiltered;
+        std::vector<Eigen::Vector3d> lidarPcClusterCentersFiltered;
+        std::vector<Eigen::Vector3d> lidarPcClusterStdsFiltered;
+
+        this->mergeNestedGroup(
+            lidarBBoxesTemp,
+            lidarPcClustersTemp,
+            lidarPcClusterCentersTemp,
+            lidarPcClusterStdsTemp,
+
+            lidarBBoxesFiltered,
+            lidarPcClustersFiltered,
+            lidarPcClusterCentersFiltered,
+            lidarPcClusterStdsFiltered
+        );
+
+        this->publish3dBox(lidarBBoxesFiltered, this->lidarBBoxesFilteredPub_, 1, 0, 0.5);
+        
         // STEP 3: Fuse LiDAR and visual bounding boxes
         // init processed flags
 
         this->BboxesMerger(
             visualBBoxesTemp,                     // group1 = visual
-            lidarBBoxesTemp,                      // group2 = lidar
+            lidarBBoxesFiltered,                  // group2 = lidar
 
             visualPcClustersTemp,                 // cluster visual
             visualPcClusterCentersTemp,
             visualPcClusterStdsTemp,
 
-            lidarPcClustersTemp,                  // cluster lidar
-            lidarPcClusterCentersTemp,
-            lidarPcClusterStdsTemp,
+            lidarPcClustersFiltered,              // cluster lidar
+            lidarPcClusterCentersFiltered,
+            lidarPcClusterStdsFiltered,
 
             filteredBBoxesTemp,
             filteredPcClustersTemp,
@@ -2343,82 +2836,111 @@ namespace onboardDetector{
     }
 
 
-    void dynamicDetector::clusterPointsAndBBoxes(const std::vector<Eigen::Vector3d>& points, std::vector<onboardDetector::box3D>& bboxes, std::vector<std::vector<Eigen::Vector3d>>& pcClusters, std::vector<Eigen::Vector3d>& pcClusterCenters, std::vector<Eigen::Vector3d>& pcClusterStds){
+    void dynamicDetector::clusterPointsAndBBoxes(
+        const std::vector<Eigen::Vector3d>& points,
+        std::vector<onboardDetector::box3D>& bboxes,
+        std::vector<std::vector<Eigen::Vector3d>>& pcClusters,
+        std::vector<Eigen::Vector3d>& pcClusterCenters,
+        std::vector<Eigen::Vector3d>& pcClusterStds)
+    {
+        bboxes.clear();
+        pcClusters.clear();
+        pcClusterCenters.clear();
+        pcClusterStds.clear();
+
+        if (points.empty()){
+            return;
+        }
+
         std::vector<onboardDetector::Point> pointsDB;
         this->eigenToDBPointVec(points, pointsDB, points.size());
 
-        this->dbCluster_.reset(new DBSCAN (this->dbMinPointsCluster_, this->dbEpsilon_, pointsDB));
+        this->dbCluster_.reset(new DBSCAN(
+            this->dbMinPointsCluster_,
+            this->dbEpsilon_,
+            pointsDB));
 
-        // DBSCAN clustering
+        // Camera: refinement OFF
+        this->dbCluster_->setRefinementParams(
+            false,
+            this->dbscanRefineMaxDiagonal_,
+            this->dbscanRefineMinDensity_,
+            this->dbscanRefineSplitMinPts_,
+            this->dbscanRefineSplitEps_,
+            this->dbscanRefineMinSubclusterPts_,
+            this->dbscanRefineAxisSliceWidth_,
+            this->dbscanRefineMaxDepth_,
+            this->dbscanRefineRecursive_,
+            this->dbscanRefineMinBoxVolume_);
+
         this->dbCluster_->run();
-        // get the cluster data with bounding boxes
-        // iterate through all the clustered points and find number of clusters
+
         int clusterNum = 0;
-        for (size_t i=0; i<this->dbCluster_->m_points.size(); ++i){
+        for (size_t i = 0; i < this->dbCluster_->m_points.size(); ++i){
             onboardDetector::Point pDB = this->dbCluster_->m_points[i];
             if (pDB.clusterID > clusterNum){
                 clusterNum = pDB.clusterID;
             }
         }
 
-        
-        // pcClusters.resize(clusterNum);
         std::vector<std::vector<Eigen::Vector3d>> pcClustersTemp;
         pcClustersTemp.resize(clusterNum);
-        for (size_t i=0; i<this->dbCluster_->m_points.size(); ++i){
+
+        for (size_t i = 0; i < this->dbCluster_->m_points.size(); ++i){
             onboardDetector::Point pDB = this->dbCluster_->m_points[i];
             if (pDB.clusterID > 0){
                 Eigen::Vector3d p = this->dbPointToEigen(pDB);
-                pcClustersTemp[pDB.clusterID-1].push_back(p);
-            }            
+                pcClustersTemp[pDB.clusterID - 1].push_back(p);
+            }
         }
 
-        // calculate the bounding boxes and clusters
-        pcClusters.clear();
-        bboxes.clear();
-        // bboxes.resize(clusterNum);
-        for (size_t i=0; i<pcClustersTemp.size(); ++i){
-            onboardDetector::box3D box;
+        for (size_t i=0; i<pcClustersTemp.size(); ++i)
+        { 
+            onboardDetector::box3D box; 
+            double xmin = pcClustersTemp[i][0](0); 
+            double ymin = pcClustersTemp[i][0](1); 
+            double zmin = pcClustersTemp[i][0](2); 
+            double xmax = pcClustersTemp[i][0](0); 
+            double ymax = pcClustersTemp[i][0](1); 
+            double zmax = pcClustersTemp[i][0](2); 
 
-            double xmin = pcClustersTemp[i][0](0);
-            double ymin = pcClustersTemp[i][0](1);
-            double zmin = pcClustersTemp[i][0](2);
-            double xmax = pcClustersTemp[i][0](0);
-            double ymax = pcClustersTemp[i][0](1);
-            double zmax = pcClustersTemp[i][0](2);
-            for (size_t j=0; j<pcClustersTemp[i].size(); ++j){
-                xmin = (pcClustersTemp[i][j](0)<xmin)?pcClustersTemp[i][j](0):xmin;
-                ymin = (pcClustersTemp[i][j](1)<ymin)?pcClustersTemp[i][j](1):ymin;
-                zmin = (pcClustersTemp[i][j](2)<zmin)?pcClustersTemp[i][j](2):zmin;
-                xmax = (pcClustersTemp[i][j](0)>xmax)?pcClustersTemp[i][j](0):xmax;
-                ymax = (pcClustersTemp[i][j](1)>ymax)?pcClustersTemp[i][j](1):ymax;
-                zmax = (pcClustersTemp[i][j](2)>zmax)?pcClustersTemp[i][j](2):zmax;
-            }
-            box.id = i;
+            for (size_t j=0; j<pcClustersTemp[i].size(); ++j)
+            { 
+                xmin = (pcClustersTemp[i][j](0)<xmin)?pcClustersTemp[i][j](0):xmin; 
+                ymin = (pcClustersTemp[i][j](1)<ymin)?pcClustersTemp[i][j](1):ymin; 
+                zmin = (pcClustersTemp[i][j](2)<zmin)?pcClustersTemp[i][j](2):zmin; 
+                xmax = (pcClustersTemp[i][j](0)>xmax)?pcClustersTemp[i][j](0):xmax; 
+                ymax = (pcClustersTemp[i][j](1)>ymax)?pcClustersTemp[i][j](1):ymax; 
+                zmax = (pcClustersTemp[i][j](2)>zmax)?pcClustersTemp[i][j](2):zmax; 
+            } 
 
-            box.x = (xmax + xmin)/2.0;
-            box.y = (ymax + ymin)/2.0;
-            box.z = (zmax + zmin)/2.0;
-            box.x_width = (xmax - xmin)>0.1?(xmax-xmin):0.1;
-            box.y_width = (ymax - ymin)>0.1?(ymax-ymin):0.1;
+            box.id = static_cast<int>(i);
+            box.x = (xmax + xmin) / 2.0;
+            box.y = (ymax + ymin) / 2.0;
+            box.z = (zmax + zmin) / 2.0;
+            box.x_width = (xmax - xmin) > 0.1 ? (xmax - xmin) : 0.1;
+            box.y_width = (ymax - ymin) > 0.1 ? (ymax - ymin) : 0.1;
             box.z_width = (zmax - zmin);
+            box.Vx = 0.0;
+            box.Vy = 0.0;
 
-            // filter out bounding boxes that are too large
-            if(box.x_width > this->maxObjectSize_(0) || box.y_width > this->maxObjectSize_(1) || box.z_width > this->maxObjectSize_(2)){
+            if (box.x_width > this->maxObjectSize_(0) ||
+                box.y_width > this->maxObjectSize_(1) ||
+                box.z_width > this->maxObjectSize_(2)){
                 continue;
             }
+
             bboxes.push_back(box);
             pcClusters.push_back(pcClustersTemp[i]);
         }
 
-        for (size_t i=0 ; i<pcClusters.size() ; ++i){
-            Eigen::Vector3d pcClusterCenter(0.,0.,0.);
-            Eigen::Vector3d pcClusterStd(0.,0.,0.);
+        for (size_t i = 0; i < pcClusters.size(); ++i){
+            Eigen::Vector3d pcClusterCenter(0., 0., 0.);
+            Eigen::Vector3d pcClusterStd(0., 0., 0.);
             this->calcPcFeat(pcClusters[i], pcClusterCenter, pcClusterStd);
             pcClusterCenters.push_back(pcClusterCenter);
             pcClusterStds.push_back(pcClusterStd);
         }
-
     }
 
     void dynamicDetector::voxelFilter(const std::vector<Eigen::Vector3d>& points, std::vector<Eigen::Vector3d>& filteredPoints){
