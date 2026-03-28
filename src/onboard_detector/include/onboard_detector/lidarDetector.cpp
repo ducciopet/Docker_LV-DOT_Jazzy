@@ -8,20 +8,6 @@
 namespace onboardDetector{
 
     lidarDetector::lidarDetector(){
-        this->eps_ = 0.5;
-        this->minPts_ = 10;
-        this->cloud_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
-
-        this->dbscanRefinementEnable_ = false;
-        this->dbscanRefineMaxDiagonal_ = 2.0;
-        this->dbscanRefineMinDensity_ = 80.0;
-        this->dbscanRefineSplitMinPts_ = 8;
-        this->dbscanRefineSplitEps_ = 0.08;
-        this->dbscanRefineMinSubclusterPts_ = 10;
-        this->dbscanRefineAxisSliceWidth_ = 0.40;
-        this->dbscanRefineMaxDepth_ = 2;
-        this->dbscanRefineRecursive_ = true;
-        this->dbscanRefineMinBoxVolume_ = 0.0001;
     }
 
     void lidarDetector::setParams(

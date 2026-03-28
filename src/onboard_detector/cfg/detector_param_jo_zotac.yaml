@@ -46,28 +46,36 @@ detector_node:
       dbscan_search_range_epsilon: 0.05 # searching range radius
 
       # DBSCAN LiDAR param
-      lidar_DBSCAN_min_points: 10
-      lidar_DBSCAN_epsilon: 0.05
-      downsample_threshold: 3500 # threshold for downsampling
+      lidar_DBSCAN_min_points: 14       # ↑ meno rumore
+      lidar_DBSCAN_epsilon: 0.08        # ok così
+
+      downsample_threshold: 3500
       gaussian_downsample_rate: 8
 
       # DBSCAN refinement param
       dbscan_refinement_enable: true
-      dbscan_refine_max_diagonal: 2.0
-      dbscan_refine_min_density: 80.0
-      dbscan_refine_split_min_pts: 8
-      dbscan_refine_split_eps: 0.12
-      dbscan_refine_min_subcluster_pts: 15
-      dbscan_refine_axis_slice_width: 0.60
-      dbscan_refine_max_depth: 1
-      dbscan_refine_recursive: false
+
+      dbscan_refine_max_diagonal: 1.8   # ↓ forza il refine prima
+      dbscan_refine_min_density: 80.0   # ↑ elimina cluster sparsi
+
+      dbscan_refine_split_min_pts: 10
+      dbscan_refine_split_eps: 0.14     # ↑ separa meglio oggetti vicini
+
+      dbscan_refine_min_subcluster_pts: 18  # ↑ niente pezzi sporchi
+
+      dbscan_refine_axis_slice_width: 0.45  # ↓ trova colli di bottiglia
+
+      dbscan_refine_max_depth: 2
+      dbscan_refine_recursive: true     
+
       dbscan_refine_min_box_volume: 0.0001
 
-      # LiDAR Visual Filtering
-      visual_filtering_BBox_IOU_threshold: 0.4
-      visual_filtering_BBox_IOV_threshold: 0.5
 
-      lidar_visual_filtering_BBox_IOU_threshold: 0.2
+      # LiDAR Visual Filtering
+      visual_filtering_BBox_IOU_threshold: 0.3
+      visual_filtering_BBox_IOV_threshold: 0.4
+
+      lidar_visual_filtering_BBox_IOU_threshold: 0.3
       lidar_visual_filtering_BBox_IOV_threshold: 0.4
 
       samegroupIOU_threshold: 0.3 # threshold for merging boxes in the same group (for debugging)
@@ -95,12 +103,12 @@ detector_node:
       kalman_filter_averaging_frames: 10
 
       # Classification
-      frame_skip: 1 # num of frames skiped when comparing 2 point clouds
+      frame_skip: 5 # num of frames skiped when comparing 2 point clouds
       dynamic_velocity_threshold: 0.3
       dynamic_voting_threshold: 0.8
-      frames_force_dynamic: 20 # Range of searching dynamic obstacles in box history
+      frames_force_dynamic: 15 # Range of searching dynamic obstacles in box history
       frames_force_dynamic_check_range: 30 # threshold for forcing dynamic obstacles
-      dynamic_consistency_threshold: 20 # obstacles being voted as dynamic for continuous k frames are eligible to be classified as dynamic
+      dynamic_consistency_threshold: 10 # obstacles being voted as dynamic for continuous k frames are eligible to be classified as dynamic
 
       # Constrain size
       target_constrain_size: false
