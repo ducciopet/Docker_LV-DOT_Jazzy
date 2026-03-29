@@ -1,7 +1,7 @@
 /*
-	FILE: kalman_filter.cpp
-	--------------------------------------
-	function definition of kalman_filter velocity estimator
+    FILE: kalman_filter.cpp
+    --------------------------------------
+    function definition of kalman_filter velocity estimator
 */
 #include <onboard_detector/kalmanFilter.h>
 using Eigen::MatrixXd;
@@ -29,22 +29,31 @@ namespace onboardDetector{
         this->A = A;
     }
 
-    void kalman_filter::estimate(const MatrixXd& z, const MatrixXd& u)
+    void kalman_filter::predict(const MatrixXd& u)
     {
-        // predict
+        if (!this->is_initialized){
+            return;
+        }
+
         this->states = this->A * this->states + this->B * u;
         this->P = this->A * this->P * this->A.transpose() + this->Q;
+    }
 
-        // cout << "prediction: " << endl;
-        // cout << this->states << endl;
+    void kalman_filter::estimate(const MatrixXd& z, const MatrixXd& u)
+    {
+        if (!this->is_initialized){
+            return;
+        }
+
+        // predict
+        this->predict(u);
 
         // update
         MatrixXd S = this->R + this->H * this->P * this->H.transpose(); // innovation matrix
         MatrixXd K = this->P * this->H.transpose() * S.inverse(); // kalman gain
- 
-        this->states = this->states + K * (z - this->H * this->states);
-        this->P = (MatrixXd::Identity(this->P.rows(),this->P.cols()) - K * this->H) * this->P;
 
+        this->states = this->states + K * (z - this->H * this->states);
+        this->P = (MatrixXd::Identity(this->P.rows(), this->P.cols()) - K * this->H) * this->P;
     }
 
     double kalman_filter::output(int state_index)
@@ -58,5 +67,4 @@ namespace onboardDetector{
             return 0;
         }
     }
-
 }

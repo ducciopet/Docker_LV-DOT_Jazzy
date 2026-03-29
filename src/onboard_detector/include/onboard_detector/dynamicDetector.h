@@ -184,6 +184,18 @@ namespace onboardDetector{
         double eRVel_; // observation uncertainty matrix for velocity
         double eRAcc_; // observation uncertainty matrix for acceleration
         int kfAvgFrames_;
+        std::vector<int> missedFrames_;
+        int maxMissedFrames_;
+        double matchFeatWeight_;
+        double matchPosWeight_;
+        double matchPcWeight_;
+        double matchSizeWeight_;
+        double matchIouWeight_;
+        double minMatchScore_;
+        double matchVelWeight_;
+        double newTrackMinDist_;
+        double newTrackMinPcDist_;
+        double maxMatchVelDiff_;
 
         // Classification
         int skipFrame_;
@@ -302,12 +314,15 @@ namespace onboardDetector{
         void genFeatHelper(const std::vector<onboardDetector::box3D>& boxes, const std::vector<Eigen::Vector3d>& pcCenters, std::vector<Eigen::VectorXd>& feature);
         void getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters);
         void linearProp(std::vector<onboardDetector::box3D>& propedBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);
-        void findBestMatch(const std::vector<onboardDetector::box3D>& prevBBoxes, const std::vector<Eigen::VectorXd>& prevBoxesFeat, const std::vector<onboardDetector::box3D>& propedBoxes, const std::vector<Eigen::VectorXd>& propedBoxesFeat, const std::vector<Eigen::VectorXd>& currBoxesFeat, std::vector<int>& bestMatch);
+        void findBestMatch(const std::vector<Eigen::VectorXd>& prevBBoxesFeat, const std::vector<onboardDetector::box3D>& propedBBoxes, const std::vector<Eigen::Vector3d>& propedPcCenters, const std::vector<Eigen::VectorXd>& propedBBoxesFeat, const std::vector<Eigen::VectorXd>& currBBoxesFeat, std::vector<int>& bestMatch);
         void kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch);
         void kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
         void getKalmanObservationAcc(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
+        double computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB);
+        void getPredictedBBoxesFromFilters(std::vector<onboardDetector::box3D>& propedBBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);
+        bool isCloseToExistingTrack(const onboardDetector::box3D& currDetectedBBox, const Eigen::Vector3d& currPcCenter, const std::vector<bool>& prevMatched);
 
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);

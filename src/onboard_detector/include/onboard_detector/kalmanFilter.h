@@ -1,7 +1,7 @@
 /*
-	FILE: kalman_filter.h
-	--------------------------------------
-	header of kalman_filter velocity estimator
+    FILE: kalman_filter.h
+    --------------------------------------
+    header of kalman_filter velocity estimator
 */
 
 #ifndef KALMAN_FILTER_H
@@ -22,9 +22,9 @@ namespace onboardDetector{
         MatrixXd A; // state matrix
         MatrixXd B; // input matrix
         MatrixXd H; // observation matrix
-        MatrixXd P; // uncertianty
+        MatrixXd P; // uncertainty
         MatrixXd Q; // process noise
-        MatrixXd R; // obsevation noise
+        MatrixXd R; // observation noise
 
         public:
         // constructor
@@ -41,6 +41,9 @@ namespace onboardDetector{
 
         // set A (sometimes sampling time will differ)
         void setA(const MatrixXd& A);
+
+        // prediction only
+        void predict(const MatrixXd& u);
 
         // state estimate
         void estimate(const MatrixXd& z, const MatrixXd& u);

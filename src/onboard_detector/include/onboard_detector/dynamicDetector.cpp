@@ -625,6 +625,105 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Number of frames used in KF for observation is set to: " << this->kfAvgFrames_ << std::endl;
         }
 
+        // num of max missed frames for KF matching
+        if (!this->nh_->get_parameter(pname("max_missed_frames"), this->maxMissedFrames_)){
+            this->maxMissedFrames_ = 5;
+            std::cout << this->hint_ << ": No number of max missed frames for KF matching parameter found. Use default: 5." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Number of frames used in KF for observation is set to: " << this->kfAvgFrames_ << std::endl;
+        }
+        
+        // weights for matching
+        if (!this->nh_->get_parameter(pname("match_feat_weight"), this->matchFeatWeight_)){
+            this->matchFeatWeight_ = 1.0;
+            std::cout << this->hint_ << ": No match feature weight parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match feature weight is set to: " << this->matchFeatWeight_ << std::endl;
+        }
+
+        // weight for position difference in matching
+        if (!this->nh_->get_parameter(pname("match_pos_weight"), this->matchPosWeight_)){
+            this->matchPosWeight_ = 1.5;
+            std::cout << this->hint_ << ": No match position weight parameter found. Use default: 1.5." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match position weight is set to: " << this->matchPosWeight_ << std::endl;
+        }
+
+        // weight for point cloud difference in matching
+        if (!this->nh_->get_parameter(pname("match_pc_weight"), this->matchPcWeight_)){
+            this->matchPcWeight_ = 1.0;
+            std::cout << this->hint_ << ": No match point cloud weight parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match point cloud weight is set to: " << this->matchPcWeight_ << std::endl;
+        }
+
+        // weight for size difference in matching
+        if (!this->nh_->get_parameter(pname("match_size_weight"), this->matchSizeWeight_)){
+            this->matchSizeWeight_ = 1.0;
+            std::cout << this->hint_ << ": No match size weight parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match size weight is set to: " << this->matchSizeWeight_ << std::endl;
+        }
+
+        // weight for IOU in matching
+        if (!this->nh_->get_parameter(pname("match_iou_weight"), this->matchIouWeight_)){
+            this->matchIouWeight_ = 1.0;
+            std::cout << this->hint_ << ": No match IOU weight parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match IOU weight is set to: " << this->matchIouWeight_ << std::endl;
+        }
+
+        // minimum match score for matching
+        if (!this->nh_->get_parameter(pname("min_match_score"), this->minMatchScore_)){
+            this->minMatchScore_ = -2.5;
+            std::cout << this->hint_ << ": No minimum match score parameter found. Use default: -2.5." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Minimum match score is set to: " << this->minMatchScore_ << std::endl;
+        }
+
+        // weight for velocity difference in matching
+        if (!this->nh_->get_parameter(pname("match_vel_weight"), this->matchVelWeight_)){
+            this->matchVelWeight_ = 1.0;
+            std::cout << this->hint_ << ": No match velocity weight parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match velocity weight is set to: " << this->matchVelWeight_ << std::endl;
+        }
+
+        // thresholds for new track initialization
+        if (!this->nh_->get_parameter(pname("new_track_min_dist"), this->newTrackMinDist_)){
+            this->newTrackMinDist_ = 0.8;
+            std::cout << this->hint_ << ": No minimum distance for new track parameter found. Use default: 0.8." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Minimum distance for new track is set to: " << this->newTrackMinDist_ << std::endl;
+        }
+
+        // minimum point cloud distance for new track initialization
+        if (!this->nh_->get_parameter(pname("new_track_min_pc_dist"), this->newTrackMinPcDist_)){
+            this->newTrackMinPcDist_ = 1.0;
+            std::cout << this->hint_ << ": No minimum point cloud distance for new track parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Minimum point cloud distance for new track is set to: " << this->newTrackMinPcDist_ << std::endl;
+        }
+
+        // maximum velocity difference for matching
+        if (!this->nh_->get_parameter(pname("max_match_vel_diff"), this->maxMatchVelDiff_)){
+            this->maxMatchVelDiff_ = 3.0;
+            std::cout << this->hint_ << ": No maximum velocity difference for matching parameter found. Use default: 3.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Maximum velocity difference for matching is set to: " << this->maxMatchVelDiff_ << std::endl;
+        }
+
         // skip frame for classification
         if (!this->nh_->get_parameter(pname("frame_skip"), this->skipFrame_)){
             this->skipFrame_ = 5;
@@ -1274,17 +1373,20 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::trackingCB(){
-        // data association thread
-        std::vector<int> bestMatch; // for each current detection, which index of previous obstacle match
+        std::vector<int> bestMatch;
+
         this->boxAssociation(bestMatch);
-        // kalman filter tracking
-        if (bestMatch.size()){
+
+        if (!this->boxHist_.empty() || !this->filteredBBoxes_.empty()){
             this->kalmanFilterAndUpdateHist(bestMatch);
         }
-        else {
+        else{
             this->boxHist_.clear();
             this->pcHist_.clear();
             this->pcCenterHist_.clear();
+            this->filters_.clear();
+            this->missedFrames_.clear();
+            this->trackedBBoxes_.clear();
         }
     }
 
@@ -3087,6 +3189,33 @@ namespace onboardDetector{
         return IOV;
     }
 
+    double dynamicDetector::computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB){
+
+        double axMin = boxA.x - 0.5 * boxA.x_width;
+        double axMax = boxA.x + 0.5 * boxA.x_width;
+        double ayMin = boxA.y - 0.5 * boxA.y_width;
+        double ayMax = boxA.y + 0.5 * boxA.y_width;
+
+        double bxMin = boxB.x - 0.5 * boxB.x_width;
+        double bxMax = boxB.x + 0.5 * boxB.x_width;
+        double byMin = boxB.y - 0.5 * boxB.y_width;
+        double byMax = boxB.y + 0.5 * boxB.y_width;
+
+        double interX = std::max(0.0, std::min(axMax, bxMax) - std::max(axMin, bxMin));
+        double interY = std::max(0.0, std::min(ayMax, byMax) - std::max(ayMin, byMin));
+        double interArea = interX * interY;
+
+        double areaA = std::max(0.0, boxA.x_width) * std::max(0.0, boxA.y_width);
+        double areaB = std::max(0.0, boxB.x_width) * std::max(0.0, boxB.y_width);
+        double unionArea = areaA + areaB - interArea;
+
+        if (unionArea <= 1e-9){
+            return 0.0;
+        }
+
+        return interArea / unionArea;
+    }
+
     void dynamicDetector::boxAssociation(std::vector<int>& bestMatch){
         int numObjs = int(this->filteredBBoxes_.size()); // current detected bboxes
 
@@ -3094,6 +3223,7 @@ namespace onboardDetector{
             this->boxHist_.resize(numObjs);
             this->pcHist_.resize(numObjs);
             this->pcCenterHist_.resize(numObjs);
+            this->missedFrames_.resize(numObjs, 0);
             bestMatch.resize(this->filteredBBoxes_.size(), -1); // first detection no match
 
             for (int i=0 ; i<numObjs ; ++i){
@@ -3106,7 +3236,7 @@ namespace onboardDetector{
                 this->pcHist_[i].push_back(this->filteredPcClusters_[i]);
                 this->pcCenterHist_[i].push_back(this->filteredPcClusterCenters_[i]);
 
-                MatrixXd states, A, B, H, P, Q, R;       
+                MatrixXd states, A, B, H, P, Q, R;
                 this->kalmanFilterMatrixAcc(this->filteredBBoxes_[i], states, A, B, H, P, Q, R);
 
                 onboardDetector::kalman_filter newFilter;
@@ -3115,9 +3245,11 @@ namespace onboardDetector{
             }
         }
         else{
-            // start association only if a new detection is available
             if (this->newDetectFlag_){
                 this->boxAssociationHelper(bestMatch);
+            }
+            else{
+                bestMatch.clear();
             }
         }
 
@@ -3126,15 +3258,18 @@ namespace onboardDetector{
 
     void dynamicDetector::boxAssociationHelper(std::vector<int>& bestMatch){
         int numObjs = int(this->filteredBBoxes_.size());
+
         std::vector<onboardDetector::box3D> prevBBoxes;
         std::vector<Eigen::Vector3d> prevPcCenters;
         std::vector<Eigen::VectorXd> prevBBoxesFeat;
+
         std::vector<onboardDetector::box3D> propedBBoxes;
         std::vector<Eigen::Vector3d> propedPcCenters;
         std::vector<Eigen::VectorXd> propedBBoxesFeat;
+
         std::vector<Eigen::VectorXd> currBBoxesFeat;
         currBBoxesFeat.resize(numObjs);
-        bestMatch.resize(numObjs);
+        bestMatch.resize(numObjs, -1);
 
         // Features for current detected bboxes
         this->genFeatHelper(this->filteredBBoxes_, this->filteredPcClusterCenters_, currBBoxesFeat);
@@ -3143,23 +3278,29 @@ namespace onboardDetector{
         this->getPrevBBoxes(prevBBoxes, prevPcCenters);
         this->genFeatHelper(prevBBoxes, prevPcCenters, prevBBoxesFeat);
 
-        // Features for propogated bboxes
-        this->linearProp(propedBBoxes, propedPcCenters);
+        // Features for propagated bboxes from Kalman prediction
+        this->getPredictedBBoxesFromFilters(propedBBoxes, propedPcCenters);
         this->genFeatHelper(propedBBoxes, propedPcCenters, propedBBoxesFeat);
 
         // calculate association: find best match
-        this->findBestMatch(prevBBoxes, prevBBoxesFeat, propedBBoxes, propedBBoxesFeat, currBBoxesFeat, bestMatch);      
+        this->findBestMatch(prevBBoxesFeat,
+                            propedBBoxes,
+                            propedPcCenters,
+                            propedBBoxesFeat,
+                            currBBoxesFeat,
+                            bestMatch);
     }
 
-    void dynamicDetector::genFeatHelper( 
-        const std::vector<onboardDetector::box3D>& boxes,
-        const std::vector<Eigen::Vector3d>& pcCenters,
-        std::vector<Eigen::VectorXd>& features){ 
-        Eigen::VectorXd featureWeights = Eigen::VectorXd::Zero(9); // 3 pos + 3 size + 3 pc centers
+    void dynamicDetector::genFeatHelper(const std::vector<onboardDetector::box3D>& boxes,
+                                    const std::vector<Eigen::Vector3d>& pcCenters,
+                                    std::vector<Eigen::VectorXd>& features){
+        Eigen::VectorXd featureWeights = Eigen::VectorXd::Zero(9);
         featureWeights = this->featureWeights_;
         features.resize(boxes.size());
+
         for (size_t i = 0; i < boxes.size(); ++i) {
             Eigen::VectorXd feature = Eigen::VectorXd::Zero(9);
+
             feature(0) = (boxes[i].x - this->position_(0)) * featureWeights(0);
             feature(1) = (boxes[i].y - this->position_(1)) * featureWeights(1);
             feature(2) = (boxes[i].z - this->position_(2)) * featureWeights(2);
@@ -3170,12 +3311,12 @@ namespace onboardDetector{
             feature(7) = pcCenters[i](1) * featureWeights(7);
             feature(8) = pcCenters[i](2) * featureWeights(8);
 
-            // fix nan problem
-            for(int j = 0; j < feature.size(); ++j) {
+            for (int j = 0; j < feature.size(); ++j) {
                 if (std::isnan(feature(j)) || std::isinf(feature(j))) {
-                    feature(j) = 0;
+                    feature(j) = 0.0;
                 }
             }
+
             features[i] = feature;
         }
     }
@@ -3206,10 +3347,10 @@ namespace onboardDetector{
         }
     }
 
-    void dynamicDetector::findBestMatch(const std::vector<onboardDetector::box3D>& prevBBoxes,
-                                        const std::vector<Eigen::VectorXd>& prevBBoxesFeat, 
+    void dynamicDetector::findBestMatch(const std::vector<Eigen::VectorXd>& prevBBoxesFeat,
                                         const std::vector<onboardDetector::box3D>& propedBBoxes,
-                                        const std::vector<Eigen::VectorXd>& propedBBoxesFeat, 
+                                        const std::vector<Eigen::Vector3d>& propedPcCenters,
+                                        const std::vector<Eigen::VectorXd>& propedBBoxesFeat,
                                         const std::vector<Eigen::VectorXd>& currBBoxesFeat,
                                         std::vector<int>& bestMatch){
         int numObjs = static_cast<int>(this->filteredBBoxes_.size());
@@ -3219,10 +3360,12 @@ namespace onboardDetector{
         candidates.reserve(numObjs * std::max<size_t>(1, propedBBoxes.size()));
 
         for (int i = 0; i < numObjs; ++i){
-            onboardDetector::box3D currBBox = this->filteredBBoxes_[i];
+            const onboardDetector::box3D& currBBox = this->filteredBBoxes_[i];
+            const Eigen::Vector3d& currPcCenter = this->filteredPcClusterCenters_[i];
 
             for (size_t j = 0; j < propedBBoxes.size(); ++j){
-                onboardDetector::box3D propedBBox = propedBBoxes[j];
+                const onboardDetector::box3D& propedBBox = propedBBoxes[j];
+                const Eigen::Vector3d& propedPcCenter = propedPcCenters[j];
 
                 double propedWidth = std::max(propedBBox.x_width, propedBBox.y_width);
                 double currWidth = std::max(currBBox.x_width, currBBox.y_width);
@@ -3234,9 +3377,22 @@ namespace onboardDetector{
 
                 double dx = propedBBox.x - currBBox.x;
                 double dy = propedBBox.y - currBBox.y;
-                double dist = std::sqrt(dx * dx + dy * dy);
+                double posDist = std::sqrt(dx * dx + dy * dy);
 
-                if (dist >= this->maxMatchRange_){
+                if (posDist >= this->maxMatchRange_){
+                    continue;
+                }
+
+                double pcDx = propedPcCenter(0) - currPcCenter(0);
+                double pcDy = propedPcCenter(1) - currPcCenter(1);
+                double pcDz = propedPcCenter(2) - currPcCenter(2);
+                double pcDist = std::sqrt(pcDx * pcDx + pcDy * pcDy + pcDz * pcDz);
+
+                double velDx = propedBBox.Vx - currBBox.Vx;
+                double velDy = propedBBox.Vy - currBBox.Vy;
+                double velDiff = std::sqrt(velDx * velDx + velDy * velDy);
+
+                if (velDiff >= this->maxMatchVelDiff_){
                     continue;
                 }
 
@@ -3254,8 +3410,27 @@ namespace onboardDetector{
                     simProped = propedBBoxesFeat[j].dot(currBBoxesFeat[i]) / propedNorm;
                 }
 
-                // score combinato: favorisce similarità alta e distanza piccola
-                double score = simPrev + simProped;
+                double featScore = 0.5 * (simPrev + simProped);
+
+                double normPosDist = posDist / std::max(this->maxMatchRange_, 1e-6);
+                double normPcDist = pcDist / std::max(this->maxMatchRange_, 1e-6);
+                double normSizeDiff = sizeDiff / std::max(this->maxMatchSizeRange_, 1e-6);
+                double normVelDiff = velDiff / std::max(this->maxMatchVelDiff_, 1e-6);
+
+                double iou2D = this->computeBoxIoU2D(propedBBox, currBBox);
+
+                // IoU usato solo come piccolo bonus, non dominante
+                double score =
+                    this->matchFeatWeight_ * featScore
+                    - this->matchPosWeight_ * normPosDist
+                    - this->matchPcWeight_ * normPcDist
+                    - this->matchSizeWeight_ * normSizeDiff
+                    - this->matchVelWeight_ * normVelDiff
+                    + 0.2 * this->matchIouWeight_ * iou2D;
+
+                if (score < this->minMatchScore_){
+                    continue;
+                }
 
                 onboardDetector::matchCandidate candidate;
                 candidate.currIdx = i;
@@ -3286,36 +3461,39 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch){
-        std::vector<std::deque<onboardDetector::box3D>> boxHistTemp; 
+        std::vector<std::deque<onboardDetector::box3D>> boxHistTemp;
         std::vector<std::deque<std::vector<Eigen::Vector3d>>> pcHistTemp;
         std::vector<std::deque<Eigen::Vector3d>> pcCenterHistTemp;
         std::vector<onboardDetector::kalman_filter> filtersTemp;
-        std::deque<onboardDetector::box3D> newSingleBoxHist;
-        std::deque<std::vector<Eigen::Vector3d>> newSinglePcHist; 
-        std::deque<Eigen::Vector3d> newSinglePcCenterHist; 
-        onboardDetector::kalman_filter newFilter;
+        std::vector<int> missedFramesTemp;
         std::vector<onboardDetector::box3D> trackedBBoxesTemp;
 
-        newSingleBoxHist.resize(0);
-        newSinglePcHist.resize(0);
-        newSinglePcCenterHist.resize(0);
-        int numObjs = this->filteredBBoxes_.size();
+        std::deque<onboardDetector::box3D> newSingleBoxHist;
+        std::deque<std::vector<Eigen::Vector3d>> newSinglePcHist;
+        std::deque<Eigen::Vector3d> newSinglePcCenterHist;
+        onboardDetector::kalman_filter newFilter;
 
-        for (int i=0 ; i<numObjs ; i++){
-            onboardDetector::box3D newEstimatedBBox; // from kalman filter
+        int numObjs = static_cast<int>(this->filteredBBoxes_.size());
+        int prevTracks = static_cast<int>(this->boxHist_.size());
 
-            // inherit history. push history one by one
-            if (bestMatch[i] >= 0){
-                boxHistTemp.push_back(this->boxHist_[bestMatch[i]]);
-                pcHistTemp.push_back(this->pcHist_[bestMatch[i]]);
-                pcCenterHistTemp.push_back(this->pcCenterHist_[bestMatch[i]]);
-                filtersTemp.push_back(this->filters_[bestMatch[i]]);
+        std::vector<bool> prevMatched(prevTracks, false);
 
-                // kalman filter to get new state estimation
+        for (int i = 0; i < numObjs; ++i){
+            if (i < static_cast<int>(bestMatch.size()) && bestMatch[i] >= 0){
+                int matchIdx = bestMatch[i];
+                prevMatched[matchIdx] = true;
+
+                boxHistTemp.push_back(this->boxHist_[matchIdx]);
+                pcHistTemp.push_back(this->pcHist_[matchIdx]);
+                pcCenterHistTemp.push_back(this->pcCenterHist_[matchIdx]);
+                filtersTemp.push_back(this->filters_[matchIdx]);
+                missedFramesTemp.push_back(0);
+
                 onboardDetector::box3D currDetectedBBox = this->filteredBBoxes_[i];
+                onboardDetector::box3D newEstimatedBBox;
 
                 Eigen::MatrixXd Z;
-                this->getKalmanObservationAcc(currDetectedBBox, bestMatch[i], Z);
+                this->getKalmanObservationAcc(currDetectedBBox, matchIdx, Z);
                 filtersTemp.back().estimate(Z, MatrixXd::Zero(6,1));
 
                 newEstimatedBBox.x = filtersTemp.back().output(0);
@@ -3331,52 +3509,116 @@ namespace onboardDetector{
                 newEstimatedBBox.z_width = currDetectedBBox.z_width;
                 newEstimatedBBox.is_dynamic = currDetectedBBox.is_dynamic;
                 newEstimatedBBox.is_human = currDetectedBBox.is_human;
+                newEstimatedBBox.id = this->boxHist_[matchIdx][0].id;
 
-                // keep persistent id from matched previous track
-                newEstimatedBBox.id = this->boxHist_[bestMatch[i]][0].id;
+                if (int(boxHistTemp.back().size()) == this->histSize_){
+                    boxHistTemp.back().pop_back();
+                    pcHistTemp.back().pop_back();
+                    pcCenterHistTemp.back().pop_back();
+                }
+
+                boxHistTemp.back().push_front(newEstimatedBBox);
+                pcHistTemp.back().push_front(this->filteredPcClusters_[i]);
+                pcCenterHistTemp.back().push_front(this->filteredPcClusterCenters_[i]);
+
+                trackedBBoxesTemp.push_back(newEstimatedBBox);
             }
-            else{
-                boxHistTemp.push_back(newSingleBoxHist);
-                pcHistTemp.push_back(newSinglePcHist);
-                pcCenterHistTemp.push_back(newSinglePcCenterHist);
+        }
 
-                // create new kalman filter for this object
-                onboardDetector::box3D currDetectedBBox = this->filteredBBoxes_[i];
-                MatrixXd states, A, B, H, P, Q, R;
-                this->kalmanFilterMatrixAcc(currDetectedBBox, states, A, B, H, P, Q, R);
-
-                newFilter.setup(states, A, B, H, P, Q, R);
-                filtersTemp.push_back(newFilter);
-
-                newEstimatedBBox = currDetectedBBox;
-
-                // assign new persistent id
-                newEstimatedBBox.id = this->nextTrackId_;
-                this->nextTrackId_++;
+        // keep unmatched previous tracks alive for a few frames
+        for (int j = 0; j < prevTracks; ++j){
+            if (prevMatched[j]){
+                continue;
             }
 
-            // pop old data if len of hist > size limit
-            if (int(boxHistTemp[i].size()) == this->histSize_){
-                boxHistTemp[i].pop_back();
-                pcHistTemp[i].pop_back();
-                pcCenterHistTemp[i].pop_back();
+            int newMissed = this->missedFrames_[j] + 1;
+            if (newMissed > this->maxMissedFrames_){
+                continue;
             }
 
-            // push new data into history
-            boxHistTemp[i].push_front(newEstimatedBBox);
-            pcHistTemp[i].push_front(this->filteredPcClusters_[i]);
-            pcCenterHistTemp[i].push_front(this->filteredPcClusterCenters_[i]);
+            std::deque<onboardDetector::box3D> hist = this->boxHist_[j];
+            std::deque<std::vector<Eigen::Vector3d>> pcHist = this->pcHist_[j];
+            std::deque<Eigen::Vector3d> pcCenterHist = this->pcCenterHist_[j];
+            onboardDetector::kalman_filter filter = this->filters_[j];
 
-            // update new tracked bounding boxes
+            filter.predict(MatrixXd::Zero(6,1));
+
+            onboardDetector::box3D predictedBBox = hist.front();
+            predictedBBox.x = filter.output(0);
+            predictedBBox.y = filter.output(1);
+            predictedBBox.Vx = filter.output(2);
+            predictedBBox.Vy = filter.output(3);
+            predictedBBox.Ax = filter.output(4);
+            predictedBBox.Ay = filter.output(5);
+            predictedBBox.id = hist.front().id;
+
+            if (int(hist.size()) == this->histSize_){
+                hist.pop_back();
+                pcHist.pop_back();
+                pcCenterHist.pop_back();
+            }
+
+            hist.push_front(predictedBBox);
+
+            Eigen::Vector3d predictedPcCenter = pcCenterHist.front();
+            predictedPcCenter(0) = predictedBBox.x;
+            predictedPcCenter(1) = predictedBBox.y;
+            pcCenterHist.push_front(predictedPcCenter);
+
+            if (!pcHist.empty()){
+                pcHist.push_front(pcHist.front());
+            }
+
+            boxHistTemp.push_back(hist);
+            pcHistTemp.push_back(pcHist);
+            pcCenterHistTemp.push_back(pcCenterHist);
+            filtersTemp.push_back(filter);
+            missedFramesTemp.push_back(newMissed);
+            trackedBBoxesTemp.push_back(predictedBBox);
+        }
+
+        // create genuinely new tracks only if they are not too close to existing unmatched tracks
+        for (int i = 0; i < numObjs; ++i){
+            if (i < static_cast<int>(bestMatch.size()) && bestMatch[i] >= 0){
+                continue;
+            }
+
+            if (this->isCloseToExistingTrack(this->filteredBBoxes_[i],
+                                            this->filteredPcClusterCenters_[i],
+                                            prevMatched)){
+                continue;
+            }
+
+            boxHistTemp.push_back(newSingleBoxHist);
+            pcHistTemp.push_back(newSinglePcHist);
+            pcCenterHistTemp.push_back(newSinglePcCenterHist);
+
+            onboardDetector::box3D currDetectedBBox = this->filteredBBoxes_[i];
+            onboardDetector::box3D newEstimatedBBox = currDetectedBBox;
+
+            MatrixXd states, A, B, H, P, Q, R;
+            this->kalmanFilterMatrixAcc(currDetectedBBox, states, A, B, H, P, Q, R);
+
+            newFilter.setup(states, A, B, H, P, Q, R);
+            filtersTemp.push_back(newFilter);
+            missedFramesTemp.push_back(0);
+
+            newEstimatedBBox.id = this->nextTrackId_;
+            this->nextTrackId_++;
+
+            boxHistTemp.back().push_front(newEstimatedBBox);
+            pcHistTemp.back().push_front(this->filteredPcClusters_[i]);
+            pcCenterHistTemp.back().push_front(this->filteredPcClusterCenters_[i]);
+
             trackedBBoxesTemp.push_back(newEstimatedBBox);
         }
 
         if (boxHistTemp.size()){
-            for (size_t i=0; i<trackedBBoxesTemp.size(); ++i){
+            for (size_t i = 0; i < trackedBBoxesTemp.size(); ++i){
                 if (int(boxHistTemp[i].size()) >= this->fixSizeHistThresh_){
-                    if ((abs(trackedBBoxesTemp[i].x_width-boxHistTemp[i][1].x_width)/boxHistTemp[i][1].x_width) <= this->fixSizeDimThresh_ &&
-                        (abs(trackedBBoxesTemp[i].y_width-boxHistTemp[i][1].y_width)/boxHistTemp[i][1].y_width) <= this->fixSizeDimThresh_ &&
-                        (abs(trackedBBoxesTemp[i].z_width-boxHistTemp[i][1].z_width)/boxHistTemp[i][1].z_width) <= this->fixSizeDimThresh_){
+                    if ((abs(trackedBBoxesTemp[i].x_width - boxHistTemp[i][1].x_width) / std::max(boxHistTemp[i][1].x_width, 1e-6)) <= this->fixSizeDimThresh_ &&
+                        (abs(trackedBBoxesTemp[i].y_width - boxHistTemp[i][1].y_width) / std::max(boxHistTemp[i][1].y_width, 1e-6)) <= this->fixSizeDimThresh_ &&
+                        (abs(trackedBBoxesTemp[i].z_width - boxHistTemp[i][1].z_width) / std::max(boxHistTemp[i][1].z_width, 1e-6)) <= this->fixSizeDimThresh_){
                         trackedBBoxesTemp[i].x_width = boxHistTemp[i][1].x_width;
                         trackedBBoxesTemp[i].y_width = boxHistTemp[i][1].y_width;
                         trackedBBoxesTemp[i].z_width = boxHistTemp[i][1].z_width;
@@ -3388,13 +3630,11 @@ namespace onboardDetector{
             }
         }
 
-        // update history member variable
         this->boxHist_ = boxHistTemp;
         this->pcHist_ = pcHistTemp;
         this->pcCenterHist_ = pcCenterHistTemp;
         this->filters_ = filtersTemp;
-
-        // update tracked bounding boxes
+        this->missedFrames_ = missedFramesTemp;
         this->trackedBBoxes_ = trackedBBoxesTemp;
     }
 
@@ -3487,7 +3727,76 @@ namespace onboardDetector{
         Z(4) = (Z(2) - prevMatchBBox.Vx)/(this->dt_*k);
         Z(5) = (Z(3) - prevMatchBBox.Vy)/(this->dt_*k);
     }
- 
+
+    void dynamicDetector::getPredictedBBoxesFromFilters(std::vector<onboardDetector::box3D>& propedBBoxes,
+                                                        std::vector<Eigen::Vector3d>& propedPcCenters){
+        propedBBoxes.clear();
+        propedPcCenters.clear();
+
+        for (size_t i = 0; i < this->boxHist_.size(); ++i){
+            if (this->boxHist_[i].empty()){
+                continue;
+            }
+
+            onboardDetector::kalman_filter predictedFilter = this->filters_[i];
+            predictedFilter.predict(MatrixXd::Zero(6,1));
+
+            onboardDetector::box3D predBBox = this->boxHist_[i][0];
+            predBBox.x = predictedFilter.output(0);
+            predBBox.y = predictedFilter.output(1);
+            predBBox.Vx = predictedFilter.output(2);
+            predBBox.Vy = predictedFilter.output(3);
+            predBBox.Ax = predictedFilter.output(4);
+            predBBox.Ay = predictedFilter.output(5);
+
+            Eigen::Vector3d predPcCenter = this->pcCenterHist_[i][0];
+            predPcCenter(0) = predBBox.x;
+            predPcCenter(1) = predBBox.y;
+
+            propedBBoxes.push_back(predBBox);
+            propedPcCenters.push_back(predPcCenter);
+        }
+    }
+    
+    bool dynamicDetector::isCloseToExistingTrack(const onboardDetector::box3D& currDetectedBBox,
+                                                const Eigen::Vector3d& currPcCenter,
+                                                const std::vector<bool>& prevMatched){
+        for (size_t j = 0; j < this->boxHist_.size(); ++j){
+            if (j < prevMatched.size() && prevMatched[j]){
+                continue;
+            }
+
+            if (this->boxHist_[j].empty() || this->pcCenterHist_[j].empty()){
+                continue;
+            }
+
+            onboardDetector::kalman_filter predictedFilter = this->filters_[j];
+            predictedFilter.predict(MatrixXd::Zero(6,1));
+
+            double predX = predictedFilter.output(0);
+            double predY = predictedFilter.output(1);
+
+            double dx = predX - currDetectedBBox.x;
+            double dy = predY - currDetectedBBox.y;
+            double dist = std::sqrt(dx * dx + dy * dy);
+
+            Eigen::Vector3d predPcCenter = this->pcCenterHist_[j][0];
+            predPcCenter(0) = predX;
+            predPcCenter(1) = predY;
+
+            double pcDx = predPcCenter(0) - currPcCenter(0);
+            double pcDy = predPcCenter(1) - currPcCenter(1);
+            double pcDz = predPcCenter(2) - currPcCenter(2);
+            double pcDist = std::sqrt(pcDx * pcDx + pcDy * pcDy + pcDz * pcDz);
+
+            if (dist < this->newTrackMinDist_ || pcDist < this->newTrackMinPcDist_){
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     void dynamicDetector::getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc){
         Eigen::Vector3d curPoint;
         for (size_t i=0; i<this->filteredPcClusters_.size(); ++i){

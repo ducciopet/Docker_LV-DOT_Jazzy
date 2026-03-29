@@ -72,14 +72,14 @@ detector_node:
 
 
       # LiDAR Visual Filtering
-      visual_filtering_BBox_IOU_threshold: 0.3
-      visual_filtering_BBox_IOV_threshold: 0.4
+      visual_filtering_BBox_IOU_threshold: 0.4
+      visual_filtering_BBox_IOV_threshold: 0.5
 
       lidar_visual_filtering_BBox_IOU_threshold: 0.3
       lidar_visual_filtering_BBox_IOV_threshold: 0.4
 
-      samegroupIOU_threshold: 0.3 # threshold for merging boxes in the same group (for debugging)
-      samegroupIOV_threshold: 0.4 # threshold for merging boxes in the same group (for debugging)
+      samegroupIOU_threshold: 0.4 # threshold for merging boxes in the same group (for debugging)
+      samegroupIOV_threshold: 0.5 # threshold for merging boxes in the same group (for debugging)
 
       visual_merging_flag: "smaller" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
       uv_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
@@ -101,14 +101,25 @@ detector_node:
       fix_size_dimension_threshold: 0.4 # dimension threshold (size of proportional) to fix box size
       kalman_filter_param: [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
       kalman_filter_averaging_frames: 10
+      max_missed_frames: 5
+      match_feat_weight: 1.0
+      match_pos_weight: 1.5
+      match_pc_weight: 1.0
+      match_size_weight: 1.0
+      match_iou_weight: 1.0
+      min_match_score: -2.5
+      match_vel_weight: 1.0
+      new_track_min_dist: 0.8
+      new_track_min_pc_dist: 1.0
+      max_match_vel_diff: 3.0
 
       # Classification
       frame_skip: 5 # num of frames skiped when comparing 2 point clouds
       dynamic_velocity_threshold: 0.3
       dynamic_voting_threshold: 0.8
-      frames_force_dynamic: 15 # Range of searching dynamic obstacles in box history
+      frames_force_dynamic: 22 # Range of searching dynamic obstacles in box history
       frames_force_dynamic_check_range: 30 # threshold for forcing dynamic obstacles
-      dynamic_consistency_threshold: 10 # obstacles being voted as dynamic for continuous k frames are eligible to be classified as dynamic
+      dynamic_consistency_threshold: 20 # obstacles being voted as dynamic for continuous k frames are eligible to be classified as dynamic
 
       # Constrain size
       target_constrain_size: false
