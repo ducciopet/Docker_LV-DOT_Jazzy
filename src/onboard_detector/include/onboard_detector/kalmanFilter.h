@@ -16,7 +16,6 @@ namespace onboardDetector{
     class kalman_filter
     {
         private:
-        // members
         bool is_initialized;
         MatrixXd states;
         MatrixXd A; // state matrix
@@ -27,10 +26,8 @@ namespace onboardDetector{
         MatrixXd R; // observation noise
 
         public:
-        // constructor
         kalman_filter();
 
-        // set up the filter
         void setup(const MatrixXd& states,
                    const MatrixXd& A,
                    const MatrixXd& B,
@@ -39,16 +36,12 @@ namespace onboardDetector{
                    const MatrixXd& Q,
                    const MatrixXd& R);
 
-        // set A (sometimes sampling time will differ)
         void setA(const MatrixXd& A);
 
-        // prediction only
         void predict(const MatrixXd& u);
 
-        // state estimate
         void estimate(const MatrixXd& z, const MatrixXd& u);
 
-        // read output from the state
         double output(int state_index);
     };
 }

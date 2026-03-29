@@ -724,6 +724,82 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Maximum velocity difference for matching is set to: " << this->maxMatchVelDiff_ << std::endl;
         }
 
+        // weight for cluster consistency in matching
+        if (!this->nh_->get_parameter(pname("match_cluster_weight"), this->matchClusterWeight_)){
+            this->matchClusterWeight_ = 1.0;
+            std::cout << this->hint_ << ": No match cluster weight parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match cluster weight is set to: " << this->matchClusterWeight_ << std::endl;
+        }   
+
+        // thresholds for confirming and clearing dynamic status
+        if (!this->nh_->get_parameter(pname("confirm_min_hits"), this->confirmMinHits_)){
+            this->confirmMinHits_ = 3;
+            std::cout << this->hint_ << ": No minimum hits for confirming dynamic status parameter found. Use default: 3." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Minimum hits for confirming dynamic status is set to: " << this->confirmMinHits_ << std::endl;
+        }
+
+        // maximum missed frames for tentative dynamic status
+        if (!this->nh_->get_parameter(pname("tentative_max_missed_frames"), this->tentativeMaxMissedFrames_)){
+            this->tentativeMaxMissedFrames_ = 1;
+            std::cout << this->hint_ << ": No maximum missed frames for tentative dynamic status parameter found. Use default: 1." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Maximum missed frames for tentative dynamic status is set to: " << this->tentativeMaxMissedFrames_ << std::endl;
+        }
+
+        // hits for confirming dynamic status
+        if (!this->nh_->get_parameter(pname("dynamic_confirm_hits"), this->dynamicConfirmHits_)){
+            this->dynamicConfirmHits_ = 3;
+            std::cout << this->hint_ << ": No hits for confirming dynamic status parameter found. Use default: 3." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Hits for confirming dynamic status is set to: " << this->dynamicConfirmHits_ << std::endl;
+        }
+
+        // misses for clearing dynamic status
+        if (!this->nh_->get_parameter(pname("dynamic_clear_misses"), this->dynamicClearMisses_)){
+            this->dynamicClearMisses_ = 2;
+            std::cout << this->hint_ << ": No misses for clearing dynamic status parameter found. Use default: 2." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Misses for clearing dynamic status is set to: " << this->dynamicClearMisses_ << std::endl;
+        }
+
+        // minimum cluster points for dynamic classification
+        if (!this->nh_->get_parameter(pname("min_dynamic_cluster_points"), this->minDynamicClusterPoints_)){
+            this->minDynamicClusterPoints_ = 15;
+            std::cout << this->hint_ << ": No minimum dynamic cluster points parameter found. Use default: 15." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Minimum dynamic cluster points is set to: " << this->minDynamicClusterPoints_ << std::endl;
+        }
+
+        // maximum nearest neighbor distance for dynamic classification
+        if (!this->nh_->get_parameter(pname("dynamic_nn_max_dist"), this->dynamicNnMaxDist_)){
+            this->dynamicNnMaxDist_ = 1.0;
+            std::cout << this->hint_ << ": No maximum nearest neighbor distance for dynamic status parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Maximum nearest neighbor distance for dynamic status is set to: " << this->dynamicNnMaxDist_ << std::endl;
+        }
+
+        // direction cosine threshold for dynamic classification
+        if (!this->nh_->get_parameter(pname("dynamic_dir_cos_thresh"), this->dynamicDirCosThresh_)){
+            this->dynamicDirCosThresh_ = 0.2;
+            std::cout << this->hint_ << ": No direction cosine threshold for dynamic status parameter found. Use default: 0.2." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Direction cosine threshold for dynamic status is set to: " << this->dynamicDirCosThresh_ << std::endl;
+        }
+
+        this->dynamicMinBoxVel_ = this->dynaVelThresh_;
+        
+        this->dynamicMinKfVel_ = this->dynaVelThresh_;
+
         // skip frame for classification
         if (!this->nh_->get_parameter(pname("frame_skip"), this->skipFrame_)){
             this->skipFrame_ = 5;
@@ -745,7 +821,7 @@ namespace onboardDetector{
         // voting threshold for dynamic classification
         if (!this->nh_->get_parameter(pname("dynamic_voting_threshold"), this->dynaVoteThresh_)){
             this->dynaVoteThresh_ = 0.8;
-            std::cout << this->hint_ << ": No dynamic velocity threshold parameter found. Use default: 0.8." << std::endl;
+            std::cout << this->hint_ << ": No dynamic voting threshold parameter found. Use default: 0.8." << std::endl;
         }
         else{
             std::cout << this->hint_ << ": Voting threshold for dynamic classification is set to: " << this->dynaVoteThresh_ << std::endl;
@@ -3271,26 +3347,42 @@ namespace onboardDetector{
         currBBoxesFeat.resize(numObjs);
         bestMatch.resize(numObjs, -1);
 
-        // Features for current detected bboxes
+        std::vector<onboardDetector::clusterGeometry> prevFrameClusterGeometries;
+        std::vector<onboardDetector::clusterGeometry> currFrameClusterGeometries;
+
         this->genFeatHelper(this->filteredBBoxes_, this->filteredPcClusterCenters_, currBBoxesFeat);
 
-        // Features for previous time step bboxes
         this->getPrevBBoxes(prevBBoxes, prevPcCenters);
         this->genFeatHelper(prevBBoxes, prevPcCenters, prevBBoxesFeat);
 
-        // Features for propagated bboxes from Kalman prediction
         this->getPredictedBBoxesFromFilters(propedBBoxes, propedPcCenters);
         this->genFeatHelper(propedBBoxes, propedPcCenters, propedBBoxesFeat);
 
-        // calculate association: find best match
+        prevFrameClusterGeometries.resize(this->pcHist_.size());
+        for (size_t j = 0; j < this->pcHist_.size(); ++j){
+            if (!this->pcHist_[j].empty()){
+                prevFrameClusterGeometries[j] = this->computeClusterGeometry(this->pcHist_[j][0]);
+            }
+            else{
+                prevFrameClusterGeometries[j] = onboardDetector::clusterGeometry{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            }
+        }
+
+        currFrameClusterGeometries.resize(this->filteredPcClusters_.size());
+        for (size_t i = 0; i < this->filteredPcClusters_.size(); ++i){
+            currFrameClusterGeometries[i] = this->computeClusterGeometry(this->filteredPcClusters_[i]);
+        }
+
         this->findBestMatch(prevBBoxesFeat,
                             propedBBoxes,
                             propedPcCenters,
                             propedBBoxesFeat,
                             currBBoxesFeat,
+                            prevFrameClusterGeometries,
+                            currFrameClusterGeometries,
                             bestMatch);
     }
-
+        
     void dynamicDetector::genFeatHelper(const std::vector<onboardDetector::box3D>& boxes,
                                     const std::vector<Eigen::Vector3d>& pcCenters,
                                     std::vector<Eigen::VectorXd>& features){
@@ -3352,6 +3444,8 @@ namespace onboardDetector{
                                         const std::vector<Eigen::Vector3d>& propedPcCenters,
                                         const std::vector<Eigen::VectorXd>& propedBBoxesFeat,
                                         const std::vector<Eigen::VectorXd>& currBBoxesFeat,
+                                        const std::vector<onboardDetector::clusterGeometry>& prevFrameClusterGeometries,
+                                        const std::vector<onboardDetector::clusterGeometry>& currFrameClusterGeometries,
                                         std::vector<int>& bestMatch){
         int numObjs = static_cast<int>(this->filteredBBoxes_.size());
         bestMatch.assign(numObjs, -1);
@@ -3417,16 +3511,20 @@ namespace onboardDetector{
                 double normSizeDiff = sizeDiff / std::max(this->maxMatchSizeRange_, 1e-6);
                 double normVelDiff = velDiff / std::max(this->maxMatchVelDiff_, 1e-6);
 
-                double iou2D = this->computeBoxIoU2D(propedBBox, currBBox);
+                double clusterGeomSim = 0.0;
+                if (j < prevFrameClusterGeometries.size() &&
+                    static_cast<size_t>(i) < currFrameClusterGeometries.size()){
+                    clusterGeomSim = this->computeClusterGeometrySimilarity(prevFrameClusterGeometries[j],
+                                                                        currFrameClusterGeometries[static_cast<size_t>(i)]);
+                }
 
-                // IoU usato solo come piccolo bonus, non dominante
                 double score =
                     this->matchFeatWeight_ * featScore
                     - this->matchPosWeight_ * normPosDist
                     - this->matchPcWeight_ * normPcDist
                     - this->matchSizeWeight_ * normSizeDiff
                     - this->matchVelWeight_ * normVelDiff
-                    + 0.2 * this->matchIouWeight_ * iou2D;
+                    + this->matchClusterWeight_ * clusterGeomSim;
 
                 if (score < this->minMatchScore_){
                     continue;
@@ -3493,7 +3591,7 @@ namespace onboardDetector{
                 onboardDetector::box3D newEstimatedBBox;
 
                 Eigen::MatrixXd Z;
-                this->getKalmanObservationAcc(currDetectedBBox, matchIdx, Z);
+                this->getKalmanObservationPos(currDetectedBBox, Z);
                 filtersTemp.back().estimate(Z, MatrixXd::Zero(6,1));
 
                 newEstimatedBBox.x = filtersTemp.back().output(0);
@@ -3525,7 +3623,6 @@ namespace onboardDetector{
             }
         }
 
-        // keep unmatched previous tracks alive for a few frames
         for (int j = 0; j < prevTracks; ++j){
             if (prevMatched[j]){
                 continue;
@@ -3577,7 +3674,6 @@ namespace onboardDetector{
             trackedBBoxesTemp.push_back(predictedBBox);
         }
 
-        // create genuinely new tracks only if they are not too close to existing unmatched tracks
         for (int i = 0; i < numObjs; ++i){
             if (i < static_cast<int>(bestMatch.size()) && bestMatch[i] >= 0){
                 continue;
@@ -3663,33 +3759,55 @@ namespace onboardDetector{
 
     }
 
-    void dynamicDetector::kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R){
+    void dynamicDetector::kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox,
+                                                MatrixXd& states,
+                                                MatrixXd& A,
+                                                MatrixXd& B,
+                                                MatrixXd& H,
+                                                MatrixXd& P,
+                                                MatrixXd& Q,
+                                                MatrixXd& R){
         states.resize(6,1);
         states(0) = currDetectedBBox.x;
         states(1) = currDetectedBBox.y;
-        // init vel and acc to zeros
-        states(2) = 0.;
-        states(3) = 0.;
-        states(4) = 0.;
-        states(5) = 0.;
+        states(2) = 0.0;
+        states(3) = 0.0;
+        states(4) = 0.0;
+        states(5) = 0.0;
 
-        MatrixXd ATemp;
-        ATemp.resize(6, 6);
+        A.resize(6, 6);
+        A << 1, 0, this->dt_, 0, 0.5 * this->dt_ * this->dt_, 0,
+            0, 1, 0, this->dt_, 0, 0.5 * this->dt_ * this->dt_,
+            0, 0, 1, 0, this->dt_, 0,
+            0, 0, 0, 1, 0, this->dt_,
+            0, 0, 0, 0, 1, 0,
+            0, 0, 0, 0, 0, 1;
 
-        ATemp <<  1, 0, this->dt_, 0, 0.5*pow(this->dt_, 2), 0,
-                  0, 1, 0, this->dt_, 0, 0.5*pow(this->dt_, 2),
-                  0, 0, 1, 0, this->dt_, 0,
-                  0 ,0, 0, 1, 0, this->dt_,
-                  0, 0, 0, 0, 1, 0,
-                  0, 0, 0, 0, 0, 1;
-        A = ATemp;
         B = MatrixXd::Zero(6, 6);
-        H = MatrixXd::Identity(6, 6);
+
+        H.resize(2, 6);
+        H << 1, 0, 0, 0, 0, 0,
+            0, 1, 0, 0, 0, 0;
+
         P = MatrixXd::Identity(6, 6) * this->eP_;
+
         Q = MatrixXd::Identity(6, 6);
-        Q(0,0) *= this->eQPos_; Q(1,1) *= this->eQPos_; Q(2,2) *= this->eQVel_; Q(3,3) *= this->eQVel_; Q(4,4) *= this->eQAcc_; Q(5,5) *= this->eQAcc_;
-        R = MatrixXd::Identity(6, 6);
-        R(0,0) *= this->eRPos_; R(1,1) *= this->eRPos_; R(2,2) *= this->eRVel_; R(3,3) *= this->eRVel_; R(4,4) *= this->eRAcc_; R(5,5) *= this->eRAcc_;
+        Q(0,0) *= this->eQPos_;
+        Q(1,1) *= this->eQPos_;
+        Q(2,2) *= this->eQVel_;
+        Q(3,3) *= this->eQVel_;
+        Q(4,4) *= this->eQAcc_;
+        Q(5,5) *= this->eQAcc_;
+
+        R = MatrixXd::Identity(2, 2);
+        R(0,0) *= this->eRPos_;
+        R(1,1) *= this->eRPos_;
+    }
+
+    void dynamicDetector::getKalmanObservationPos(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z){
+        Z.resize(2, 1);
+        Z(0) = currDetectedBBox.x;
+        Z(1) = currDetectedBBox.y;
     }
 
     void dynamicDetector::getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z){
@@ -3795,6 +3913,115 @@ namespace onboardDetector{
         }
 
         return false;
+    }
+
+    onboardDetector::clusterGeometry dynamicDetector::computeClusterGeometry(const std::vector<Eigen::Vector3d>& cluster){
+        onboardDetector::clusterGeometry geom;
+        geom.numPoints = static_cast<double>(cluster.size());
+        geom.sizeX = 0.0;
+        geom.sizeY = 0.0;
+        geom.sizeZ = 0.0;
+        geom.varX = 0.0;
+        geom.varY = 0.0;
+        geom.varZ = 0.0;
+
+        if (cluster.empty()){
+            return geom;
+        }
+
+        double minX = cluster[0](0);
+        double maxX = cluster[0](0);
+        double minY = cluster[0](1);
+        double maxY = cluster[0](1);
+        double minZ = cluster[0](2);
+        double maxZ = cluster[0](2);
+
+        double meanX = 0.0;
+        double meanY = 0.0;
+        double meanZ = 0.0;
+
+        for (size_t i = 0; i < cluster.size(); ++i){
+            double x = cluster[i](0);
+            double y = cluster[i](1);
+            double z = cluster[i](2);
+
+            minX = std::min(minX, x);
+            maxX = std::max(maxX, x);
+            minY = std::min(minY, y);
+            maxY = std::max(maxY, y);
+            minZ = std::min(minZ, z);
+            maxZ = std::max(maxZ, z);
+
+            meanX += x;
+            meanY += y;
+            meanZ += z;
+        }
+
+        meanX /= static_cast<double>(cluster.size());
+        meanY /= static_cast<double>(cluster.size());
+        meanZ /= static_cast<double>(cluster.size());
+
+        double varX = 0.0;
+        double varY = 0.0;
+        double varZ = 0.0;
+
+        for (size_t i = 0; i < cluster.size(); ++i){
+            double dx = cluster[i](0) - meanX;
+            double dy = cluster[i](1) - meanY;
+            double dz = cluster[i](2) - meanZ;
+
+            varX += dx * dx;
+            varY += dy * dy;
+            varZ += dz * dz;
+        }
+
+        varX /= static_cast<double>(cluster.size());
+        varY /= static_cast<double>(cluster.size());
+        varZ /= static_cast<double>(cluster.size());
+
+        geom.sizeX = maxX - minX;
+        geom.sizeY = maxY - minY;
+        geom.sizeZ = maxZ - minZ;
+        geom.varX = varX;
+        geom.varY = varY;
+        geom.varZ = varZ;
+
+        return geom;
+    }
+
+    double dynamicDetector::computeClusterGeometrySimilarity(const onboardDetector::clusterGeometry& geomA,
+                                                            const onboardDetector::clusterGeometry& geomB)
+    {
+        double eps = 1e-6;
+
+        double numPointsDiff = std::abs(geomA.numPoints - geomB.numPoints) / std::max(std::max(geomA.numPoints, geomB.numPoints), 1.0);
+        double sizeXDiff = std::abs(geomA.sizeX - geomB.sizeX) / std::max(std::max(geomA.sizeX, geomB.sizeX), eps);
+        double sizeYDiff = std::abs(geomA.sizeY - geomB.sizeY) / std::max(std::max(geomA.sizeY, geomB.sizeY), eps);
+        double sizeZDiff = std::abs(geomA.sizeZ - geomB.sizeZ) / std::max(std::max(geomA.sizeZ, geomB.sizeZ), eps);
+
+        double varXDiff = std::abs(geomA.varX - geomB.varX) / std::max(std::max(geomA.varX, geomB.varX), eps);
+        double varYDiff = std::abs(geomA.varY - geomB.varY) / std::max(std::max(geomA.varY, geomB.varY), eps);
+        double varZDiff = std::abs(geomA.varZ - geomB.varZ) / std::max(std::max(geomA.varZ, geomB.varZ), eps);
+
+        double avgDiff =
+            (1.0 * numPointsDiff +
+            1.0 * sizeXDiff +
+            1.0 * sizeYDiff +
+            1.0 * sizeZDiff +
+            0.5 * varXDiff +
+            0.5 * varYDiff +
+            0.5 * varZDiff) / 5.5;
+
+        double similarity = 1.0 - avgDiff;
+
+        if (similarity < 0.0){
+            similarity = 0.0;
+        }
+        if (similarity > 1.0){
+            similarity = 1.0;
+        }
+
+        return similarity;
     }
 
     void dynamicDetector::getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc){

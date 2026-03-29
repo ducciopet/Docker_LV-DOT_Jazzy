@@ -12,7 +12,13 @@ namespace onboardDetector{
         this->is_initialized = false;
     }
 
-    void kalman_filter::setup(const MatrixXd& states, const MatrixXd& A, const MatrixXd& B, const MatrixXd& H, const MatrixXd& P, const MatrixXd& Q, const MatrixXd& R)
+    void kalman_filter::setup(const MatrixXd& states,
+                              const MatrixXd& A,
+                              const MatrixXd& B,
+                              const MatrixXd& H,
+                              const MatrixXd& P,
+                              const MatrixXd& Q,
+                              const MatrixXd& R)
     {
         this->states = states;
         this->A = A;
@@ -45,12 +51,10 @@ namespace onboardDetector{
             return;
         }
 
-        // predict
         this->predict(u);
 
-        // update
-        MatrixXd S = this->R + this->H * this->P * this->H.transpose(); // innovation matrix
-        MatrixXd K = this->P * this->H.transpose() * S.inverse(); // kalman gain
+        MatrixXd S = this->H * this->P * this->H.transpose() + this->R;
+        MatrixXd K = this->P * this->H.transpose() * S.inverse();
 
         this->states = this->states + K * (z - this->H * this->states);
         this->P = (MatrixXd::Identity(this->P.rows(), this->P.cols()) - K * this->H) * this->P;
@@ -58,13 +62,13 @@ namespace onboardDetector{
 
     double kalman_filter::output(int state_index)
     {
-        if(this->is_initialized)
+        if (this->is_initialized)
         {
             return this->states(state_index, 0);
         }
         else
         {
-            return 0;
+            return 0.0;
         }
     }
 }

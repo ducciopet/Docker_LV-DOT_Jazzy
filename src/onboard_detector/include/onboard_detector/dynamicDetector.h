@@ -196,6 +196,15 @@ namespace onboardDetector{
         double newTrackMinDist_;
         double newTrackMinPcDist_;
         double maxMatchVelDiff_;
+        double matchClusterWeight_;
+        
+        int confirmMinHits_;
+        int tentativeMaxMissedFrames_;
+        double dynamicNnMaxDist_;
+        double dynamicMinBoxVel_;
+        double dynamicMinKfVel_;
+        double dynamicDirCosThresh_;
+
 
         // Classification
         int skipFrame_;
@@ -255,6 +264,11 @@ namespace onboardDetector{
         std::vector<std::deque<std::vector<Eigen::Vector3d>>> pcHist_; // data association result: history of filtered pc clusteres for each pc cluster in current frame
         std::vector<std::deque<Eigen::Vector3d>> pcCenterHist_; 
         std::vector<onboardDetector::kalman_filter> filters_; // kalman filter for each objects
+        std::vector<int> trackHitCount_;
+        std::vector<int> trackAge_;
+        std::vector<bool> trackConfirmed_;
+        std::vector<int> dynamicHitStreak_;
+        std::vector<int> dynamicMissStreak_;
 
         // YOLO RESULTS
         vision_msgs::msg::Detection2DArray yoloDetectionResults_; // yolo detected 2D results
@@ -314,7 +328,7 @@ namespace onboardDetector{
         void genFeatHelper(const std::vector<onboardDetector::box3D>& boxes, const std::vector<Eigen::Vector3d>& pcCenters, std::vector<Eigen::VectorXd>& feature);
         void getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters);
         void linearProp(std::vector<onboardDetector::box3D>& propedBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);
-        void findBestMatch(const std::vector<Eigen::VectorXd>& prevBBoxesFeat, const std::vector<onboardDetector::box3D>& propedBBoxes, const std::vector<Eigen::Vector3d>& propedPcCenters, const std::vector<Eigen::VectorXd>& propedBBoxesFeat, const std::vector<Eigen::VectorXd>& currBBoxesFeat, std::vector<int>& bestMatch);
+        void findBestMatch(const std::vector<Eigen::VectorXd>& prevBBoxesFeat, const std::vector<onboardDetector::box3D>& propedBBoxes, const std::vector<Eigen::Vector3d>& propedPcCenters, const std::vector<Eigen::VectorXd>& propedBBoxesFeat, const std::vector<Eigen::VectorXd>& currBBoxesFeat, const std::vector<onboardDetector::clusterGeometry>& prevFrameClusterGeometries, const std::vector<onboardDetector::clusterGeometry>& currFrameClusterGeometries, std::vector<int>& bestMatch);
         void kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch);
         void kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
@@ -323,6 +337,9 @@ namespace onboardDetector{
         double computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB);
         void getPredictedBBoxesFromFilters(std::vector<onboardDetector::box3D>& propedBBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);
         bool isCloseToExistingTrack(const onboardDetector::box3D& currDetectedBBox, const Eigen::Vector3d& currPcCenter, const std::vector<bool>& prevMatched);
+        void getKalmanObservationPos(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z);
+        onboardDetector::clusterGeometry computeClusterGeometry(const std::vector<Eigen::Vector3d>& cluster);
+        double computeClusterGeometrySimilarity(const onboardDetector::clusterGeometry& geomA, const onboardDetector::clusterGeometry& geomB);
 
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);

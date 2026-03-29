@@ -38,6 +38,17 @@ namespace onboardDetector{
         double score;
     };
 
+    struct clusterGeometry
+    {
+        double numPoints;
+        double sizeX;
+        double sizeY;
+        double sizeZ;
+        double varX;
+        double varY;
+        double varZ;
+    };
+
     struct box3D
     {
         /* data */
