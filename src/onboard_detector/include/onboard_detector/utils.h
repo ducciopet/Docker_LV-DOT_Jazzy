@@ -12,6 +12,8 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <geometry_msgs/msg/quaternion.hpp>
 #include <Eigen/Eigen>
+#include <algorithm>
+#include <limits>
 
 namespace onboardDetector{
     const double PI_const = 3.1415926;
@@ -27,6 +29,13 @@ namespace onboardDetector{
         Node parent;
         Node child;
         double weight;
+    };
+
+    struct matchCandidate
+    {
+        int currIdx;
+        int prevIdx;
+        double score;
     };
 
     struct box3D

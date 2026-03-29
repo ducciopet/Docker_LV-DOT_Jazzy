@@ -1281,7 +1281,11 @@ namespace onboardDetector{
         if (bestMatch.size()){
             this->kalmanFilterAndUpdateHist(bestMatch);
         }
-        // else: do not clear histories, preserve track IDs and allow for re-association
+        else {
+            this->boxHist_.clear();
+            this->pcHist_.clear();
+            this->pcCenterHist_.clear();
+        }
     }
 
     void dynamicDetector::classificationCB(){
@@ -3085,18 +3089,26 @@ namespace onboardDetector{
 
     void dynamicDetector::boxAssociation(std::vector<int>& bestMatch){
         int numObjs = int(this->filteredBBoxes_.size()); // current detected bboxes
+
         if (this->boxHist_.size() == 0){ // initialize new bounding box history if no history exists
             this->boxHist_.resize(numObjs);
             this->pcHist_.resize(numObjs);
             this->pcCenterHist_.resize(numObjs);
             bestMatch.resize(this->filteredBBoxes_.size(), -1); // first detection no match
+
             for (int i=0 ; i<numObjs ; ++i){
+                // assign persistent track id
+                this->filteredBBoxes_[i].id = this->nextTrackId_;
+                this->nextTrackId_++;
+
                 // initialize history for bbox, pc and KF
                 this->boxHist_[i].push_back(this->filteredBBoxes_[i]);
                 this->pcHist_[i].push_back(this->filteredPcClusters_[i]);
                 this->pcCenterHist_[i].push_back(this->filteredPcClusterCenters_[i]);
+
                 MatrixXd states, A, B, H, P, Q, R;       
                 this->kalmanFilterMatrixAcc(this->filteredBBoxes_[i], states, A, B, H, P, Q, R);
+
                 onboardDetector::kalman_filter newFilter;
                 newFilter.setup(states, A, B, H, P, Q, R);
                 this->filters_.push_back(newFilter);
@@ -3147,7 +3159,7 @@ namespace onboardDetector{
         featureWeights = this->featureWeights_;
         features.resize(boxes.size());
         for (size_t i = 0; i < boxes.size(); ++i) {
-            Eigen::VectorXd feature = Eigen::VectorXd::Zero(10);
+            Eigen::VectorXd feature = Eigen::VectorXd::Zero(9);
             feature(0) = (boxes[i].x - this->position_(0)) * featureWeights(0);
             feature(1) = (boxes[i].y - this->position_(1)) * featureWeights(1);
             feature(2) = (boxes[i].z - this->position_(2)) * featureWeights(2);
@@ -3194,38 +3206,82 @@ namespace onboardDetector{
         }
     }
 
-    void dynamicDetector::findBestMatch(const std::vector<onboardDetector::box3D>& prevBBoxes, const std::vector<Eigen::VectorXd>& prevBBoxesFeat, 
-                                        const std::vector<onboardDetector::box3D>& propedBBoxes, const std::vector<Eigen::VectorXd>& propedBBoxesFeat, 
-                                        const std::vector<Eigen::VectorXd>& currBBoxesFeat, std::vector<int>& bestMatch){
-        int numObjs = this->filteredBBoxes_.size();
-        std::vector<double> bestSims; // best similarity
-        bestSims.resize(numObjs, 0);
+    void dynamicDetector::findBestMatch(const std::vector<onboardDetector::box3D>& prevBBoxes,
+                                        const std::vector<Eigen::VectorXd>& prevBBoxesFeat, 
+                                        const std::vector<onboardDetector::box3D>& propedBBoxes,
+                                        const std::vector<Eigen::VectorXd>& propedBBoxesFeat, 
+                                        const std::vector<Eigen::VectorXd>& currBBoxesFeat,
+                                        std::vector<int>& bestMatch){
+        int numObjs = static_cast<int>(this->filteredBBoxes_.size());
+        bestMatch.assign(numObjs, -1);
 
-        for (int i=0 ; i<numObjs ; i++){
-            double bestSim = -1.;
-            int bestMatchInd = -1;
+        std::vector<onboardDetector::matchCandidate> candidates;
+        candidates.reserve(numObjs * std::max<size_t>(1, propedBBoxes.size()));
+
+        for (int i = 0; i < numObjs; ++i){
             onboardDetector::box3D currBBox = this->filteredBBoxes_[i];
-            
-            for (size_t j=0 ; j<propedBBoxes.size() ; j++){
+
+            for (size_t j = 0; j < propedBBoxes.size(); ++j){
                 onboardDetector::box3D propedBBox = propedBBoxes[j];
+
                 double propedWidth = std::max(propedBBox.x_width, propedBBox.y_width);
                 double currWidth = std::max(currBBox.x_width, currBBox.y_width);
-                if (std::abs(propedWidth - currWidth) < this->maxMatchSizeRange_){
-                    if (pow(pow(propedBBox.x - currBBox.x, 2) + pow(propedBBox.y - currBBox.y, 2), 0.5) < this->maxMatchRange_){
-                        // calculate the velocity feature based on propedBBox and currBBox
-                        double simPrev = prevBBoxesFeat[j].dot(currBBoxesFeat[i])/(prevBBoxesFeat[j].norm()*currBBoxesFeat[i].norm());
-                        double simProped = propedBBoxesFeat[j].dot(currBBoxesFeat[i])/(propedBBoxesFeat[j].norm()*currBBoxesFeat[i].norm());
-                        double sim = simPrev + simProped;
-                        if (sim > bestSim){
-                            bestSim = sim;
-                            bestMatchInd = j;
-                        }
-                    }
+                double sizeDiff = std::abs(propedWidth - currWidth);
 
+                if (sizeDiff >= this->maxMatchSizeRange_){
+                    continue;
                 }
+
+                double dx = propedBBox.x - currBBox.x;
+                double dy = propedBBox.y - currBBox.y;
+                double dist = std::sqrt(dx * dx + dy * dy);
+
+                if (dist >= this->maxMatchRange_){
+                    continue;
+                }
+
+                double prevNorm = prevBBoxesFeat[j].norm() * currBBoxesFeat[i].norm();
+                double propedNorm = propedBBoxesFeat[j].norm() * currBBoxesFeat[i].norm();
+
+                double simPrev = 0.0;
+                double simProped = 0.0;
+
+                if (prevNorm > 1e-9){
+                    simPrev = prevBBoxesFeat[j].dot(currBBoxesFeat[i]) / prevNorm;
+                }
+
+                if (propedNorm > 1e-9){
+                    simProped = propedBBoxesFeat[j].dot(currBBoxesFeat[i]) / propedNorm;
+                }
+
+                // score combinato: favorisce similarità alta e distanza piccola
+                double score = simPrev + simProped;
+
+                onboardDetector::matchCandidate candidate;
+                candidate.currIdx = i;
+                candidate.prevIdx = static_cast<int>(j);
+                candidate.score = score;
+                candidates.push_back(candidate);
             }
-            bestSims[i] = bestSim;
-            bestMatch[i] = bestMatchInd;
+        }
+
+        std::sort(candidates.begin(), candidates.end(),
+                [](const onboardDetector::matchCandidate& a, const onboardDetector::matchCandidate& b){
+                    return a.score > b.score;
+                });
+
+        std::vector<bool> currAssigned(numObjs, false);
+        std::vector<bool> prevAssigned(propedBBoxes.size(), false);
+
+        for (size_t k = 0; k < candidates.size(); ++k){
+            int currIdx = candidates[k].currIdx;
+            int prevIdx = candidates[k].prevIdx;
+
+            if (!currAssigned[currIdx] && !prevAssigned[prevIdx]){
+                bestMatch[currIdx] = prevIdx;
+                currAssigned[currIdx] = true;
+                prevAssigned[prevIdx] = true;
+            }
         }
     }
 
@@ -3249,7 +3305,7 @@ namespace onboardDetector{
             onboardDetector::box3D newEstimatedBBox; // from kalman filter
 
             // inherit history. push history one by one
-            if (bestMatch[i] >= 0) {
+            if (bestMatch[i] >= 0){
                 boxHistTemp.push_back(this->boxHist_[bestMatch[i]]);
                 pcHistTemp.push_back(this->pcHist_[bestMatch[i]]);
                 pcCenterHistTemp.push_back(this->pcCenterHist_[bestMatch[i]]);
@@ -3275,9 +3331,11 @@ namespace onboardDetector{
                 newEstimatedBBox.z_width = currDetectedBBox.z_width;
                 newEstimatedBBox.is_dynamic = currDetectedBBox.is_dynamic;
                 newEstimatedBBox.is_human = currDetectedBBox.is_human;
-                // Propagate track ID from previous track
+
+                // keep persistent id from matched previous track
                 newEstimatedBBox.id = this->boxHist_[bestMatch[i]][0].id;
-            } else {
+            }
+            else{
                 boxHistTemp.push_back(newSingleBoxHist);
                 pcHistTemp.push_back(newSinglePcHist);
                 pcCenterHistTemp.push_back(newSinglePcCenterHist);
@@ -3289,9 +3347,12 @@ namespace onboardDetector{
 
                 newFilter.setup(states, A, B, H, P, Q, R);
                 filtersTemp.push_back(newFilter);
+
                 newEstimatedBBox = currDetectedBBox;
-                // Assign a new unique track ID
-                newEstimatedBBox.id = nextTrackId_++;
+
+                // assign new persistent id
+                newEstimatedBBox.id = this->nextTrackId_;
+                this->nextTrackId_++;
             }
 
             // pop old data if len of hist > size limit
@@ -3302,20 +3363,19 @@ namespace onboardDetector{
             }
 
             // push new data into history
-            boxHistTemp[i].push_front(newEstimatedBBox); 
+            boxHistTemp[i].push_front(newEstimatedBBox);
             pcHistTemp[i].push_front(this->filteredPcClusters_[i]);
             pcCenterHistTemp[i].push_front(this->filteredPcClusterCenters_[i]);
 
             // update new tracked bounding boxes
             trackedBBoxesTemp.push_back(newEstimatedBBox);
         }
-  
 
         if (boxHistTemp.size()){
-            for (size_t i=0; i<trackedBBoxesTemp.size(); ++i){ 
+            for (size_t i=0; i<trackedBBoxesTemp.size(); ++i){
                 if (int(boxHistTemp[i].size()) >= this->fixSizeHistThresh_){
                     if ((abs(trackedBBoxesTemp[i].x_width-boxHistTemp[i][1].x_width)/boxHistTemp[i][1].x_width) <= this->fixSizeDimThresh_ &&
-                        (abs(trackedBBoxesTemp[i].y_width-boxHistTemp[i][1].y_width)/boxHistTemp[i][1].y_width) <= this->fixSizeDimThresh_&&
+                        (abs(trackedBBoxesTemp[i].y_width-boxHistTemp[i][1].y_width)/boxHistTemp[i][1].y_width) <= this->fixSizeDimThresh_ &&
                         (abs(trackedBBoxesTemp[i].z_width-boxHistTemp[i][1].z_width)/boxHistTemp[i][1].z_width) <= this->fixSizeDimThresh_){
                         trackedBBoxesTemp[i].x_width = boxHistTemp[i][1].x_width;
                         trackedBBoxesTemp[i].y_width = boxHistTemp[i][1].y_width;
@@ -3324,11 +3384,10 @@ namespace onboardDetector{
                         boxHistTemp[i][0].y_width = trackedBBoxesTemp[i].y_width;
                         boxHistTemp[i][0].z_width = trackedBBoxesTemp[i].z_width;
                     }
-
                 }
             }
         }
-        
+
         // update history member variable
         this->boxHist_ = boxHistTemp;
         this->pcHist_ = pcHistTemp;
@@ -3336,7 +3395,7 @@ namespace onboardDetector{
         this->filters_ = filtersTemp;
 
         // update tracked bounding boxes
-        this->trackedBBoxes_=  trackedBBoxesTemp;
+        this->trackedBBoxes_ = trackedBBoxesTemp;
     }
 
     void dynamicDetector::kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R){

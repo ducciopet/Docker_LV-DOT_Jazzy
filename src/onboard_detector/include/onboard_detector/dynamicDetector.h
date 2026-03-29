@@ -38,8 +38,6 @@
 namespace onboardDetector{
     class dynamicDetector{
 
-        // Track ID counter for persistent unique IDs
-        int nextTrackId_ = 0;
     private:
         std::string ns_;
         std::string hint_;
@@ -171,6 +169,7 @@ namespace onboardDetector{
         bool visualUnmergedFlag_;
 
         // Tracking and data association
+        int nextTrackId_ = 0;
         double maxMatchRange_;
         double maxMatchSizeRange_;
         Eigen::VectorXd featureWeights_;
