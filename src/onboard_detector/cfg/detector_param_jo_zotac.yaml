@@ -123,14 +123,7 @@ detector_node:
       shape_score_weight: 0.02
       enable_tracking_debug_logs: true
 
-      min_track_confirm_hits: 3;              // hit minimi per confermare un track
-      max_unconfirmed_missed_frames: 1;       // un track non confermato viene eliminato presto se sparisce
-      static_check_history_frames: 4;         // quanti frame indietro guardare per stimare spostamento
-      static_like_frames_thresh: 5;           // dopo quanti frame static-like sopprimere il track
-      static_track_vel_thresh: 0.12;       // [m/s] soglia velocità sotto cui il track è considerabile statico
-      static_track_disp_thresh: 0.20;      // [m] spostamento minimo su history per non considerarlo statico
-      publish_only_confirmed_tracks: true;   // esporta solo i confirmed
-      suppress_static_tracks: true;         // sopprimi i track static-like non umani
+      
 
       # Classification
       frame_skip: 5 # num of frames skiped when comparing 2 point clouds

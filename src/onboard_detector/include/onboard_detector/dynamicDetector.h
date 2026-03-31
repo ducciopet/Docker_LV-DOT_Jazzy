@@ -186,10 +186,6 @@ namespace onboardDetector{
         int kfAvgFrames_;
         std::vector<int> missedFrames_;
         int maxMissedFrames_;
-        std::vector<int> trackHits_;               // numero totale di hit del track
-        std::vector<int> trackAge_;                // età in frame
-        std::vector<bool> trackConfirmed_;         // track confermato o no
-        std::vector<int> staticLikeFrames_;        // conteggio frame consecutivi static-like
 
         double matchFeatWeight_;
         double matchPosWeight_;
@@ -211,15 +207,21 @@ namespace onboardDetector{
         double shapeScoreWeight_;             // peso molto basso della forma cluster nel matching
         bool enableTrackingDebugLogs_; 
 
-        int minTrackConfirmHits_;              // hit minimi per confermare un track
-        int maxUnconfirmedMissedFrames_;       // un track non confermato viene eliminato presto se sparisce
-        int staticCheckHistoryFrames_;         // quanti frame indietro guardare per stimare spostamento
-        int staticLikeFramesThresh_;           // dopo quanti frame static-like sopprimere il track
-        double staticTrackVelThresh_;       // [m/s] soglia velocità sotto cui il track è considerabile statico
-        double staticTrackDispThresh_;      // [m] spostamento minimo su history per non considerarlo statico
-        bool publishOnlyConfirmedTracks_;   // esporta solo i confirmed
-        bool suppressStaticTracks_;         // sopprimi i track static-like non umani
+        // =========================
+        // Association robustness params
+        // =========================
+        double staticAssocSpeedThresh_ = 0.35;      // [m/s] sotto questa velocità il track è trattato come quasi-statico
+        double staticAssocDistThresh_ = 0.45;       // [m] gate stretto per track quasi-statici
+        double dynamicAssocDistBase_ = 0.60;        // [m] gate base per track dinamici
+        double dynamicAssocDistGain_ = 1.20;        // moltiplicatore su speed*dt per allargare il gate
+        double dynamicAssocDistMax_ = 2.50;         // [m] gate massimo per track veloci
 
+        double staticAssocMinIoU2D_ = 0.08;         // overlap XY minimo richiesto per track quasi-statici se non molto vicini
+        double assocMaxRelSizeDiff_ = 0.75;         // massimo size diff relativo ammesso
+        double matchFeatScoreWeight_ = 0.15;        // peso reale del featScore nel matching: molto basso
+        double matchIoU2DWeight_ = 0.20;            // piccolo bonus da overlap XY
+
+        
         
         // Classification
         int skipFrame_;
