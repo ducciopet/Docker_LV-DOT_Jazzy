@@ -91,7 +91,7 @@ namespace onboardDetector{
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr historyTrajPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr velVisPub_;
         rclcpp::Service<onboard_detector::srv::GetDynamicObstacles>::SharedPtr getDynamicObstacleServer_;
-    
+
         // DETECTOR
         std::shared_ptr<onboardDetector::UVdetector> uvDetector_;
         std::shared_ptr<onboardDetector::DBSCAN> dbCluster_;
@@ -186,26 +186,41 @@ namespace onboardDetector{
         int kfAvgFrames_;
         std::vector<int> missedFrames_;
         int maxMissedFrames_;
+        std::vector<int> trackHits_;               // numero totale di hit del track
+        std::vector<int> trackAge_;                // età in frame
+        std::vector<bool> trackConfirmed_;         // track confermato o no
+        std::vector<int> staticLikeFrames_;        // conteggio frame consecutivi static-like
+
         double matchFeatWeight_;
         double matchPosWeight_;
         double matchPcWeight_;
         double matchSizeWeight_;
         double matchIouWeight_;
-        double minMatchScore_;
+        double matchClusterWeight_;
         double matchVelWeight_;
+        double minMatchScore_;
+
         double newTrackMinDist_;
         double newTrackMinPcDist_;
         double maxMatchVelDiff_;
-        double matchClusterWeight_;
+
+        double duplicateTrackDistThresh_;      // [m] distanza XY per considerare una detection duplicata di un track esistente
+        double duplicateTrackIou2DThresh_;    // overlap XY minimo per considerare duplicato
+        double duplicateSizeRelThresh_;        // tolleranza relativa sulle dimensioni per controllo duplicato
+
+        double shapeScoreWeight_;             // peso molto basso della forma cluster nel matching
+        bool enableTrackingDebugLogs_; 
+
+        int minTrackConfirmHits_;              // hit minimi per confermare un track
+        int maxUnconfirmedMissedFrames_;       // un track non confermato viene eliminato presto se sparisce
+        int staticCheckHistoryFrames_;         // quanti frame indietro guardare per stimare spostamento
+        int staticLikeFramesThresh_;           // dopo quanti frame static-like sopprimere il track
+        double staticTrackVelThresh_;       // [m/s] soglia velocità sotto cui il track è considerabile statico
+        double staticTrackDispThresh_;      // [m] spostamento minimo su history per non considerarlo statico
+        bool publishOnlyConfirmedTracks_;   // esporta solo i confirmed
+        bool suppressStaticTracks_;         // sopprimi i track static-like non umani
+
         
-        int confirmMinHits_;
-        int tentativeMaxMissedFrames_;
-        double dynamicNnMaxDist_;
-        double dynamicMinBoxVel_;
-        double dynamicMinKfVel_;
-        double dynamicDirCosThresh_;
-
-
         // Classification
         int skipFrame_;
         double dynaVelThresh_;
@@ -264,11 +279,6 @@ namespace onboardDetector{
         std::vector<std::deque<std::vector<Eigen::Vector3d>>> pcHist_; // data association result: history of filtered pc clusteres for each pc cluster in current frame
         std::vector<std::deque<Eigen::Vector3d>> pcCenterHist_; 
         std::vector<onboardDetector::kalman_filter> filters_; // kalman filter for each objects
-        std::vector<int> trackHitCount_;
-        std::vector<int> trackAge_;
-        std::vector<bool> trackConfirmed_;
-        std::vector<int> dynamicHitStreak_;
-        std::vector<int> dynamicMissStreak_;
 
         // YOLO RESULTS
         vision_msgs::msg::Detection2DArray yoloDetectionResults_; // yolo detected 2D results
@@ -327,19 +337,22 @@ namespace onboardDetector{
         void mergeBoxesSet(const std::vector<onboardDetector::box3D>& boxes, const std::vector<std::vector<Eigen::Vector3d>>& clusters, const std::vector<int>& indices, onboardDetector::box3D& outBox, std::vector<Eigen::Vector3d>& outCluster, Eigen::Vector3d& center, Eigen::Vector3d& stddev);
         void genFeatHelper(const std::vector<onboardDetector::box3D>& boxes, const std::vector<Eigen::Vector3d>& pcCenters, std::vector<Eigen::VectorXd>& feature);
         void getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters);
-        void linearProp(std::vector<onboardDetector::box3D>& propedBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);
         void findBestMatch(const std::vector<Eigen::VectorXd>& prevBBoxesFeat, const std::vector<onboardDetector::box3D>& propedBBoxes, const std::vector<Eigen::Vector3d>& propedPcCenters, const std::vector<Eigen::VectorXd>& propedBBoxesFeat, const std::vector<Eigen::VectorXd>& currBBoxesFeat, const std::vector<onboardDetector::clusterGeometry>& prevFrameClusterGeometries, const std::vector<onboardDetector::clusterGeometry>& currFrameClusterGeometries, std::vector<int>& bestMatch);
         void kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch);
         void kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
         void getKalmanObservationAcc(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
-        double computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB);
+        double computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB) const;
         void getPredictedBBoxesFromFilters(std::vector<onboardDetector::box3D>& propedBBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);
         bool isCloseToExistingTrack(const onboardDetector::box3D& currDetectedBBox, const Eigen::Vector3d& currPcCenter, const std::vector<bool>& prevMatched);
         void getKalmanObservationPos(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z);
         onboardDetector::clusterGeometry computeClusterGeometry(const std::vector<Eigen::Vector3d>& cluster);
         double computeClusterGeometrySimilarity(const onboardDetector::clusterGeometry& geomA, const onboardDetector::clusterGeometry& geomB);
+        double computeRelativeSizeDiff(const onboardDetector::box3D& a, const onboardDetector::box3D& b) const;
+        bool areBoxesDuplicate2D(const onboardDetector::box3D& a, const onboardDetector::box3D& b) const;
+        bool isDuplicateOfTrackedThisFrame(const onboardDetector::box3D& currDetectedBBox, const std::vector<onboardDetector::box3D>& trackedBBoxesTemp, int& duplicateTrackId) const;
+        void logMatchCandidate(int currIdx, int prevIdx, int trackId, double posDist, double pcDist, double velDiff, double sizeDiff, double featScore, double clusterGeomSim, double score, const std::string& status) const;
 
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);
@@ -356,7 +369,6 @@ namespace onboardDetector{
         // helper function
         void transformBBox(const Eigen::Vector3d& center, const Eigen::Vector3d& size, const Eigen::Vector3d& position, const Eigen::Matrix3d& orientation,
                                   Eigen::Vector3d& newCenter, Eigen::Vector3d& newSize);
-        int getBestOverlapBBox(const onboardDetector::box3D& currBBox, const std::vector<onboardDetector::box3D>& targetBBoxes, double& bestIOU);
 
         // user functions
         void getDynamicObstacles(std::vector<onboardDetector::box3D>& incomeDynamicBBoxes, const Eigen::Vector3d &robotSize = Eigen::Vector3d(0.0,0.0,0.0));

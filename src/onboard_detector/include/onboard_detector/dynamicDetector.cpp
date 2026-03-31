@@ -733,73 +733,6 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Match cluster weight is set to: " << this->matchClusterWeight_ << std::endl;
         }   
 
-        // thresholds for confirming and clearing dynamic status
-        if (!this->nh_->get_parameter(pname("confirm_min_hits"), this->confirmMinHits_)){
-            this->confirmMinHits_ = 3;
-            std::cout << this->hint_ << ": No minimum hits for confirming dynamic status parameter found. Use default: 3." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Minimum hits for confirming dynamic status is set to: " << this->confirmMinHits_ << std::endl;
-        }
-
-        // maximum missed frames for tentative dynamic status
-        if (!this->nh_->get_parameter(pname("tentative_max_missed_frames"), this->tentativeMaxMissedFrames_)){
-            this->tentativeMaxMissedFrames_ = 1;
-            std::cout << this->hint_ << ": No maximum missed frames for tentative dynamic status parameter found. Use default: 1." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Maximum missed frames for tentative dynamic status is set to: " << this->tentativeMaxMissedFrames_ << std::endl;
-        }
-
-        // hits for confirming dynamic status
-        if (!this->nh_->get_parameter(pname("dynamic_confirm_hits"), this->dynamicConfirmHits_)){
-            this->dynamicConfirmHits_ = 3;
-            std::cout << this->hint_ << ": No hits for confirming dynamic status parameter found. Use default: 3." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Hits for confirming dynamic status is set to: " << this->dynamicConfirmHits_ << std::endl;
-        }
-
-        // misses for clearing dynamic status
-        if (!this->nh_->get_parameter(pname("dynamic_clear_misses"), this->dynamicClearMisses_)){
-            this->dynamicClearMisses_ = 2;
-            std::cout << this->hint_ << ": No misses for clearing dynamic status parameter found. Use default: 2." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Misses for clearing dynamic status is set to: " << this->dynamicClearMisses_ << std::endl;
-        }
-
-        // minimum cluster points for dynamic classification
-        if (!this->nh_->get_parameter(pname("min_dynamic_cluster_points"), this->minDynamicClusterPoints_)){
-            this->minDynamicClusterPoints_ = 15;
-            std::cout << this->hint_ << ": No minimum dynamic cluster points parameter found. Use default: 15." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Minimum dynamic cluster points is set to: " << this->minDynamicClusterPoints_ << std::endl;
-        }
-
-        // maximum nearest neighbor distance for dynamic classification
-        if (!this->nh_->get_parameter(pname("dynamic_nn_max_dist"), this->dynamicNnMaxDist_)){
-            this->dynamicNnMaxDist_ = 1.0;
-            std::cout << this->hint_ << ": No maximum nearest neighbor distance for dynamic status parameter found. Use default: 1.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Maximum nearest neighbor distance for dynamic status is set to: " << this->dynamicNnMaxDist_ << std::endl;
-        }
-
-        // direction cosine threshold for dynamic classification
-        if (!this->nh_->get_parameter(pname("dynamic_dir_cos_thresh"), this->dynamicDirCosThresh_)){
-            this->dynamicDirCosThresh_ = 0.2;
-            std::cout << this->hint_ << ": No direction cosine threshold for dynamic status parameter found. Use default: 0.2." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Direction cosine threshold for dynamic status is set to: " << this->dynamicDirCosThresh_ << std::endl;
-        }
-
-        this->dynamicMinBoxVel_ = this->dynaVelThresh_;
-        
-        this->dynamicMinKfVel_ = this->dynaVelThresh_;
-
         // skip frame for classification
         if (!this->nh_->get_parameter(pname("frame_skip"), this->skipFrame_)){
             this->skipFrame_ = 5;
@@ -900,6 +833,116 @@ namespace onboardDetector{
             }
             std::cout << "]." << std::endl;
         }
+
+        // Duplicate track distance threshold
+        if (!this->nh_->get_parameter(pname("duplicate_track_dist_threshold"), this->duplicateTrackDistThresh_)){
+            this->duplicateTrackDistThresh_ = 0.5;
+            std::cout << this->hint_ << ": No duplicate track distance threshold parameter found.   Use default: 0.5." << std::endl;        
+        }
+        else{
+            std::cout << this->hint_ << ": Duplicate track distance threshold is set to: " << this->duplicateTrackDistThresh_ << std::endl;
+        }
+
+        // Duplicate track IOU threshold
+        if (!this->nh_->get_parameter(pname("duplicate_track_iou_threshold"), this->duplicateTrackIou2DThresh_)){
+            this->duplicateTrackIou2DThresh_ = 0.3;
+            std::cout << this->hint_ << ": No duplicate track IOU threshold parameter found. Use default: 0.3." << std::endl;        
+        }
+        else{
+            std::cout << this->hint_ << ": Duplicate track IOU threshold is set to: " << this->duplicateTrackIou2DThresh_ << std::endl;
+        }
+
+        // Duplicate Size Rel Threshold
+        if (!this->nh_->get_parameter(pname("duplicate_size_rel_threshold"), this->duplicateSizeRelThresh_)){
+            this->duplicateSizeRelThresh_ = 0;
+            std::cout << this->hint_ << ": No duplicate size relative threshold parameter found. Use default: 0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Duplicate size relative threshold is set to: " << this->duplicateSizeRelThresh_ << std::endl;
+        }
+
+        // Shape Score Weight:
+        if (!this->nh_->get_parameter(pname("shape_score_weight"), this->shapeScoreWeight_)){
+            this->shapeScoreWeight_ = 0.2;
+            std::cout << this->hint_ << ": No shape score weight parameter found. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Shape score weight is set to: " << this->shapeScoreWeight_ << std::endl;
+        }
+
+        // Enable Tracking Debug Logs
+        if (!this->nh_->get_parameter(pname("enable_tracking_debug_logs"), this->enableTrackingDebugLogs_)){
+            this->enableTrackingDebugLogs_ = false;
+            std::cout << this->hint_ << ": No enable tracking debug logs parameter found. Use default: false." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Enable tracking debug logs is set to: " << (this->enableTrackingDebugLogs_ ? "true" : "false") << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("min_track_confirm_hits"), this->minTrackConfirmHits_)){
+            this->minTrackConfirmHits_ = 3;
+            std::cout << this->hint_ << ": No min track confirm hits parameter found. Use default: 3." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Min track confirm hits is set to: " << this->minTrackConfirmHits_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_unconfirmed_missed_frames"), this->maxUnconfirmedMissedFrames_)){
+            this->maxUnconfirmedMissedFrames_ = 1;
+            std::cout << this->hint_ << ": No max unconfirmed missed frames parameter found. Use default: 1." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max unconfirmed missed frames is set to: " << this->maxUnconfirmedMissedFrames_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("static_check_history_frames"), this->staticCheckHistoryFrames_)){
+            this->staticCheckHistoryFrames_ = 4;
+            std::cout << this->hint_ << ": No static check history frames parameter found. Use default: 4." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Static check history frames is set to: " << this->staticCheckHistoryFrames_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("static_like_frames_thresh"), this->staticLikeFramesThresh_)){
+            this->staticLikeFramesThresh_ = 5;
+            std::cout << this->hint_ << ": No static like frames thresh parameter found. Use default: 5." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Static like frames thresh is set to: " << this->staticLikeFramesThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("static_track_vel_thresh"), this->staticTrackVelThresh_)){
+            this->staticTrackVelThresh_ = 0.12;
+            std::cout << this->hint_ << ": No static track vel thresh parameter found. Use default: 0.12." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Static track vel thresh is set to: " << this->staticTrackVelThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("static_track_disp_thresh"), this->staticTrackDispThresh_)){
+            this->staticTrackDispThresh_ = 0.20;
+            std::cout << this->hint_ << ": No static track disp thresh parameter found. Use default: 0.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Static track disp thresh is set to: " << this->staticTrackDispThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("publish_only_confirmed_tracks"), this->publishOnlyConfirmedTracks_)){
+            this->publishOnlyConfirmedTracks_ = true;
+            std::cout << this->hint_ << ": No publish only confirmed tracks parameter found. Use default: true." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Publish only confirmed tracks is set to: " << (this->publishOnlyConfirmedTracks_ ? "true" : "false") << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("suppress_static_tracks"), this->suppressStaticTracks_)){
+            this->suppressStaticTracks_ = true;
+            std::cout << this->hint_ << ": No suppress static tracks parameter found. Use default: true." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Suppress static tracks is set to: " << (this->suppressStaticTracks_ ? "true" : "false") << std::endl;
+        }
+
     }
 
     bool dynamicDetector::lookupTfMatrix(const std::string& targetFrame, const std::string& sourceFrame, Eigen::Matrix4d& transformMatrix){
@@ -3265,8 +3308,9 @@ namespace onboardDetector{
         return IOV;
     }
 
-    double dynamicDetector::computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB){
-
+    double dynamicDetector::computeBoxIoU2D(const onboardDetector::box3D& boxA,
+                                            const onboardDetector::box3D& boxB) const
+    {
         double axMin = boxA.x - 0.5 * boxA.x_width;
         double axMax = boxA.x + 0.5 * boxA.x_width;
         double ayMin = boxA.y - 0.5 * boxA.y_width;
@@ -3290,7 +3334,7 @@ namespace onboardDetector{
         }
 
         return interArea / unionArea;
-    }
+    } 
 
     void dynamicDetector::boxAssociation(std::vector<int>& bestMatch){
         int numObjs = int(this->filteredBBoxes_.size()); // current detected bboxes
@@ -3424,21 +3468,6 @@ namespace onboardDetector{
         }
     }
       
-    void dynamicDetector::linearProp(std::vector<onboardDetector::box3D>& propedBBoxes, std::vector<Eigen::Vector3d>& propedPcCenters){
-        onboardDetector::box3D propedBBox;
-        for (size_t i=0 ; i<this->boxHist_.size() ; i++){
-            propedBBox = this->boxHist_[i][0];
-            propedBBox.x += propedBBox.Vx*this->dt_;
-            propedBBox.y += propedBBox.Vy*this->dt_;
-            propedBBoxes.push_back(propedBBox);
-
-            Eigen::Vector3d propedPcCenter = this->pcCenterHist_[i][0];
-            propedPcCenter(0) += propedBBox.Vx*this->dt_;
-            propedPcCenter(1) += propedBBox.Vy*this->dt_;
-            propedPcCenters.push_back(propedPcCenter);
-        }
-    }
-
     void dynamicDetector::findBestMatch(const std::vector<Eigen::VectorXd>& prevBBoxesFeat,
                                         const std::vector<onboardDetector::box3D>& propedBBoxes,
                                         const std::vector<Eigen::Vector3d>& propedPcCenters,
@@ -3446,7 +3475,8 @@ namespace onboardDetector{
                                         const std::vector<Eigen::VectorXd>& currBBoxesFeat,
                                         const std::vector<onboardDetector::clusterGeometry>& prevFrameClusterGeometries,
                                         const std::vector<onboardDetector::clusterGeometry>& currFrameClusterGeometries,
-                                        std::vector<int>& bestMatch){
+                                        std::vector<int>& bestMatch)
+    {
         int numObjs = static_cast<int>(this->filteredBBoxes_.size());
         bestMatch.assign(numObjs, -1);
 
@@ -3466,6 +3496,8 @@ namespace onboardDetector{
                 double sizeDiff = std::abs(propedWidth - currWidth);
 
                 if (sizeDiff >= this->maxMatchSizeRange_){
+                    this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
+                                            -1.0, -1.0, -1.0, sizeDiff, 0.0, 0.0, -1.0, "REJECT_SIZE");
                     continue;
                 }
 
@@ -3474,6 +3506,8 @@ namespace onboardDetector{
                 double posDist = std::sqrt(dx * dx + dy * dy);
 
                 if (posDist >= this->maxMatchRange_){
+                    this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
+                                            posDist, -1.0, -1.0, sizeDiff, 0.0, 0.0, -1.0, "REJECT_POS");
                     continue;
                 }
 
@@ -3487,6 +3521,8 @@ namespace onboardDetector{
                 double velDiff = std::sqrt(velDx * velDx + velDy * velDy);
 
                 if (velDiff >= this->maxMatchVelDiff_){
+                    this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
+                                            posDist, pcDist, velDiff, sizeDiff, 0.0, 0.0, -1.0, "REJECT_VEL");
                     continue;
                 }
 
@@ -3514,21 +3550,28 @@ namespace onboardDetector{
                 double clusterGeomSim = 0.0;
                 if (j < prevFrameClusterGeometries.size() &&
                     static_cast<size_t>(i) < currFrameClusterGeometries.size()){
-                    clusterGeomSim = this->computeClusterGeometrySimilarity(prevFrameClusterGeometries[j],
-                                                                        currFrameClusterGeometries[static_cast<size_t>(i)]);
+                    clusterGeomSim = this->computeClusterGeometrySimilarity(
+                        prevFrameClusterGeometries[j],
+                        currFrameClusterGeometries[static_cast<size_t>(i)]);
                 }
 
+                // Riduciamo drasticamente il peso reale della forma cluster
                 double score =
                     this->matchFeatWeight_ * featScore
                     - this->matchPosWeight_ * normPosDist
                     - this->matchPcWeight_ * normPcDist
                     - this->matchSizeWeight_ * normSizeDiff
                     - this->matchVelWeight_ * normVelDiff
-                    + this->matchClusterWeight_ * clusterGeomSim;
+                    + this->shapeScoreWeight_ * clusterGeomSim;
 
                 if (score < this->minMatchScore_){
+                    this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
+                                            posDist, pcDist, velDiff, sizeDiff, featScore, clusterGeomSim, score, "REJECT_SCORE");
                     continue;
                 }
+
+                this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
+                                        posDist, pcDist, velDiff, sizeDiff, featScore, clusterGeomSim, score, "CANDIDATE");
 
                 onboardDetector::matchCandidate candidate;
                 candidate.currIdx = i;
@@ -3554,6 +3597,21 @@ namespace onboardDetector{
                 bestMatch[currIdx] = prevIdx;
                 currAssigned[currIdx] = true;
                 prevAssigned[prevIdx] = true;
+
+                int trackId = -1;
+                if (prevIdx < static_cast<int>(this->boxHist_.size()) && !this->boxHist_[prevIdx].empty()){
+                    trackId = this->boxHist_[prevIdx][0].id;
+                }
+
+                if (this->enableTrackingDebugLogs_){
+                    RCLCPP_DEBUG(
+                        this->nh_->get_logger(),
+                        "[TRACK_ASSIGN] curr=%d prev=%d track_id=%d final_score=%.3f",
+                        currIdx,
+                        prevIdx,
+                        trackId,
+                        candidates[k].score);
+                }
             }
         }
     }
@@ -3674,14 +3732,27 @@ namespace onboardDetector{
             trackedBBoxesTemp.push_back(predictedBBox);
         }
 
-        for (int i = 0; i < numObjs; ++i){
+       for (int i = 0; i < numObjs; ++i){
             if (i < static_cast<int>(bestMatch.size()) && bestMatch[i] >= 0){
                 continue;
             }
 
-            if (this->isCloseToExistingTrack(this->filteredBBoxes_[i],
-                                            this->filteredPcClusterCenters_[i],
-                                            prevMatched)){
+            const onboardDetector::box3D& currDetectedBBox = this->filteredBBoxes_[i];
+            const Eigen::Vector3d& currPcCenter = this->filteredPcClusterCenters_[i];
+
+            if (this->isCloseToExistingTrack(currDetectedBBox, currPcCenter, prevMatched)){
+                continue;
+            }
+
+            int duplicateTrackId = -1;
+            if (this->isDuplicateOfTrackedThisFrame(currDetectedBBox, trackedBBoxesTemp, duplicateTrackId)){
+                if (this->enableTrackingDebugLogs_){
+                    RCLCPP_DEBUG(
+                        this->nh_->get_logger(),
+                        "[TRACK_NEW_BLOCKED_BY_CURRENT_FRAME] det=%d duplicate_of_track_id=%d",
+                        i,
+                        duplicateTrackId);
+                }
                 continue;
             }
 
@@ -3689,7 +3760,6 @@ namespace onboardDetector{
             pcHistTemp.push_back(newSinglePcHist);
             pcCenterHistTemp.push_back(newSinglePcCenterHist);
 
-            onboardDetector::box3D currDetectedBBox = this->filteredBBoxes_[i];
             onboardDetector::box3D newEstimatedBBox = currDetectedBBox;
 
             MatrixXd states, A, B, H, P, Q, R;
@@ -3707,6 +3777,17 @@ namespace onboardDetector{
             pcCenterHistTemp.back().push_front(this->filteredPcClusterCenters_[i]);
 
             trackedBBoxesTemp.push_back(newEstimatedBBox);
+
+            if (this->enableTrackingDebugLogs_){
+                RCLCPP_INFO(
+                    this->nh_->get_logger(),
+                    "[TRACK_NEW] det=%d new_track_id=%.3f x=%.3f y=%.3f z=%.3f",
+                    i,
+                    newEstimatedBBox.id,
+                    newEstimatedBBox.x,
+                    newEstimatedBBox.y,
+                    newEstimatedBBox.z);
+            }
         }
 
         if (boxHistTemp.size()){
@@ -3878,12 +3959,11 @@ namespace onboardDetector{
     
     bool dynamicDetector::isCloseToExistingTrack(const onboardDetector::box3D& currDetectedBBox,
                                                 const Eigen::Vector3d& currPcCenter,
-                                                const std::vector<bool>& prevMatched){
-        for (size_t j = 0; j < this->boxHist_.size(); ++j){
-            if (j < prevMatched.size() && prevMatched[j]){
-                continue;
-            }
+                                                const std::vector<bool>& prevMatched)
+    {
+        (void)prevMatched; // in questo step non lo usiamo più per escludere track già matchati
 
+        for (size_t j = 0; j < this->boxHist_.size(); ++j){
             if (this->boxHist_[j].empty() || this->pcCenterHist_[j].empty()){
                 continue;
             }
@@ -3893,6 +3973,14 @@ namespace onboardDetector{
 
             double predX = predictedFilter.output(0);
             double predY = predictedFilter.output(1);
+
+            onboardDetector::box3D predBox = this->boxHist_[j][0];
+            predBox.x = predX;
+            predBox.y = predY;
+            predBox.Vx = predictedFilter.output(2);
+            predBox.Vy = predictedFilter.output(3);
+            predBox.Ax = predictedFilter.output(4);
+            predBox.Ay = predictedFilter.output(5);
 
             double dx = predX - currDetectedBBox.x;
             double dy = predY - currDetectedBBox.y;
@@ -3907,7 +3995,21 @@ namespace onboardDetector{
             double pcDz = predPcCenter(2) - currPcCenter(2);
             double pcDist = std::sqrt(pcDx * pcDx + pcDy * pcDy + pcDz * pcDz);
 
-            if (dist < this->newTrackMinDist_ || pcDist < this->newTrackMinPcDist_){
+            bool duplicate2D = this->areBoxesDuplicate2D(currDetectedBBox, predBox);
+
+            if (dist < this->newTrackMinDist_ ||
+                pcDist < this->newTrackMinPcDist_ ||
+                duplicate2D)
+            {
+                if (this->enableTrackingDebugLogs_){
+                    RCLCPP_DEBUG(
+                        this->nh_->get_logger(),
+                        "[TRACK_NEW_BLOCKED_BY_EXISTING] candidate_bbox close_to_track_id=%.3f dist=%.3f pcDist=%.3f duplicate2D=%d",
+                        this->boxHist_[j][0].id,
+                        dist,
+                        pcDist,
+                        duplicate2D ? 1 : 0);
+                }
                 return true;
             }
         }
@@ -4022,6 +4124,87 @@ namespace onboardDetector{
         }
 
         return similarity;
+    }
+
+    double dynamicDetector::computeRelativeSizeDiff(const onboardDetector::box3D& a,
+                                                    const onboardDetector::box3D& b) const
+    {
+        const double eps = 1e-6;
+
+        double dx = std::abs(a.x_width - b.x_width) / std::max(std::max(a.x_width, b.x_width), eps);
+        double dy = std::abs(a.y_width - b.y_width) / std::max(std::max(a.y_width, b.y_width), eps);
+        double dz = std::abs(a.z_width - b.z_width) / std::max(std::max(a.z_width, b.z_width), eps);
+
+        return (dx + dy + dz) / 3.0;
+    }
+
+    bool dynamicDetector::areBoxesDuplicate2D(const onboardDetector::box3D& a,
+                                            const onboardDetector::box3D& b) const
+    {
+        double dx = a.x - b.x;
+        double dy = a.y - b.y;
+        double dist = std::sqrt(dx * dx + dy * dy);
+
+        double iou2d = this->computeBoxIoU2D(a, b);
+        double relSizeDiff = this->computeRelativeSizeDiff(a, b);
+
+        if (dist < this->duplicateTrackDistThresh_ &&
+            iou2d > this->duplicateTrackIou2DThresh_ &&
+            relSizeDiff < this->duplicateSizeRelThresh_)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    bool dynamicDetector::isDuplicateOfTrackedThisFrame(
+        const onboardDetector::box3D& currDetectedBBox,
+        const std::vector<onboardDetector::box3D>& trackedBBoxesTemp,
+        int& duplicateTrackId) const
+    {
+        duplicateTrackId = -1;
+
+        for (const auto& trackedBox : trackedBBoxesTemp){
+            if (this->areBoxesDuplicate2D(currDetectedBBox, trackedBox)){
+                duplicateTrackId = trackedBox.id;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void dynamicDetector::logMatchCandidate(int currIdx,
+                                            int prevIdx,
+                                            int trackId,
+                                            double posDist,
+                                            double pcDist,
+                                            double velDiff,
+                                            double sizeDiff,
+                                            double featScore,
+                                            double clusterGeomSim,
+                                            double score,
+                                            const std::string& status) const
+    {
+        if (!this->enableTrackingDebugLogs_){
+            return;
+        }
+
+        RCLCPP_DEBUG(
+            this->nh_->get_logger(),
+            "[TRACK_%s] curr=%d prev=%d track_id=%d posDist=%.3f pcDist=%.3f velDiff=%.3f sizeDiff=%.3f featScore=%.3f shapeSim=%.3f score=%.3f",
+            status.c_str(),
+            currIdx,
+            prevIdx,
+            trackId,
+            posDist,
+            pcDist,
+            velDiff,
+            sizeDiff,
+            featScore,
+            clusterGeomSim,
+            score);
     }
 
     void dynamicDetector::getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc){
@@ -4392,20 +4575,6 @@ namespace onboardDetector{
         newSize(0) = xmax - xmin;
         newSize(1) = ymax - ymin;
         newSize(2) = zmax - zmin;
-    }
-
-    int dynamicDetector::getBestOverlapBBox(const onboardDetector::box3D& currBBox, const std::vector<onboardDetector::box3D>& targetBBoxes, double& bestIOU){
-        bestIOU = 0.0;
-        int bestIOUIdx = -1; // no match
-        for (size_t i=0; i<targetBBoxes.size(); ++i){
-            onboardDetector::box3D targetBBox = targetBBoxes[i];
-            double IOU = this->calBoxIOU(currBBox, targetBBox);
-            if (IOU > bestIOU){
-                bestIOU = IOU;
-                bestIOUIdx = i;
-            }
-        }
-        return bestIOUIdx;
     }
 
     // user functions

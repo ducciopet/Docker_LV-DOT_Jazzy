@@ -93,14 +93,14 @@ detector_node:
       local_lidar_range: [10.0, 10.0, 5.0] # x, y, z range for LiDAR (meters)
 
       # Tracking and data association
-      max_match_range: 0.5 # max match range between time steps in meters
-      max_size_diff_range: 0.5 #  in meter
-      feature_weight: [3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0.0, 0.0, 0.0] # weight for feagent 3pos + 3size +  3 pc centroid
+      max_match_range: 2.0 # max match range between time steps in meters
+      max_size_diff_range: 2.0 #  in meter
+      feature_weight: [3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0.05, 0.05, 0.01] # weight for feagent 3pos + 3size +  3 pc centroid
       history_size: 100 # size of tracking history. history[0] is current detection
       fix_size_history_threshold: 20 # History threshold (num of frames) to fix box size
       fix_size_dimension_threshold: 0.4 # dimension threshold (size of proportional) to fix box size
       # kalman_filter_param: [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
-      kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05, 0.0, 0.0]
+      kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05]
       kalman_filter_averaging_frames: 10
       max_missed_frames: 5
       match_feat_weight: 1.0
@@ -108,22 +108,29 @@ detector_node:
       match_pc_weight: 1.0
       match_size_weight: 1.0
       match_iou_weight: 1.0
-      min_match_score: -2.5
+      match_cluster_weight: 0.8
       match_vel_weight: 1.0
+
+      min_match_score: -2.5
+
       new_track_min_dist: 0.8
       new_track_min_pc_dist: 1.0
       max_match_vel_diff: 3.0
-      match_cluster_weight: 0.8
 
-      confirm_min_hits: 3
-      tentative_max_missed_frames: 1
+      duplicate_track_dist_thresh: 0.8
+      duplicate_track_iou2d_thresh: 0.25
+      duplicate_size_rel_thresh: 0.6
+      shape_score_weight: 0.02
+      enable_tracking_debug_logs: true
 
-      dynamic_confirm_hits: 3
-      dynamic_clear_misses: 2
-      min_dynamic_cluster_points: 15  
-
-      dynamic_nn_max_dist: 1.0
-      dynamic_dir_cos_thresh: 0.2
+      min_track_confirm_hits: 3;              // hit minimi per confermare un track
+      max_unconfirmed_missed_frames: 1;       // un track non confermato viene eliminato presto se sparisce
+      static_check_history_frames: 4;         // quanti frame indietro guardare per stimare spostamento
+      static_like_frames_thresh: 5;           // dopo quanti frame static-like sopprimere il track
+      static_track_vel_thresh: 0.12;       // [m/s] soglia velocità sotto cui il track è considerabile statico
+      static_track_disp_thresh: 0.20;      // [m] spostamento minimo su history per non considerarlo statico
+      publish_only_confirmed_tracks: true;   // esporta solo i confirmed
+      suppress_static_tracks: true;         // sopprimi i track static-like non umani
 
       # Classification
       frame_skip: 5 # num of frames skiped when comparing 2 point clouds
