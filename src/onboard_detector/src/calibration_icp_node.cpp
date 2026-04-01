@@ -32,7 +32,7 @@ class CalibrationICPNode : public rclcpp::Node {
 public:
     CalibrationICPNode() : Node("calibration_icp_node") {
         depth_topic_ = this->declare_parameter(
-            "depth_topic", std::string("/camera1/rs1/depth/image_rect_raw"));
+            "depth_topic", std::string("/front_camera/camera/depth/image_rect_raw"));
         lidar_topic_ = this->declare_parameter(
             "velodyne_topic", std::string("/velodyne_points"));
 
@@ -46,8 +46,8 @@ public:
         depth_skip_ = this->declare_parameter("onboard_detector.depth_skip_pixel", 2);
 
         lidar_frame_ = this->declare_parameter("lidar_frame", std::string("velodyne"));
-        camera_frame_initial_guess_ = this->declare_parameter("camera_frame_initial_guess", std::string("rs1_link_initial_guess")); 
-        refined_camera_frame_ = this->declare_parameter("refined_camera_frame", "rs1_link_refined");
+        camera_frame_initial_guess_ = this->declare_parameter("camera_frame_initial_guess", std::string("camera_initial_guess")); 
+        refined_camera_frame_ = this->declare_parameter("refined_camera_frame", "camera_refined");
 
         icp_max_corr_dist_ = this->declare_parameter("icp_max_correspondence_distance", 0.2);
         icp_max_iter_ = this->declare_parameter("icp_max_iteration", 100);
@@ -412,7 +412,7 @@ private:
                         Eigen::Vector3d& translation,
                         Eigen::Vector3d& rpy) {
         if (!fetchInitialGuessFromTF(depth_msg->header.stamp)) {
-            status_message = "Cannot start calibration without initial TF guess velodyne->rs1_link";
+            status_message = "Cannot start calibration without initial TF guess velodyne->camera_link";
             RCLCPP_ERROR(this->get_logger(), "%s", status_message.c_str());
             return false;
         }

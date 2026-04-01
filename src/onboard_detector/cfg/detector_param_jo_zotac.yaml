@@ -5,18 +5,18 @@ detector_node:
       localization_mode: 0 # 0: pose (default) 1: odom
 
       # ROS Topics
-      depth_image_topic: /camera1/rs1/depth/image_rect_raw
-      color_image_topic: /camera1/rs1/color/image_raw
+      depth_image_topic: /front_camera/camera/depth/image_rect_raw
+      color_image_topic: /front_camera/camera/color/image_raw
       lidar_pointcloud_topic: /velodyne_points
-      pose_topic: /pose
+      pose_topic: /glim_ros/lidar_pose
       odom_topic: /odom
       use_tf_pose: true
       tf_map_frame: map
       tf_lidar_frame: velodyne
-      tf_depth_frame: rs1_link_refined
-      tf_color_frame: rs1_link_refined
-      urdf_camera_frame: rs1_link
-      camera_frame_initial_guess: rs1_link_initial_guess
+      tf_depth_frame: camera_refined
+      tf_color_frame: camera_refined
+      urdf_camera_frame: camera
+      camera_frame_initial_guess: camera_initial_guess
       output_detected_image_topic: /onboard_detector/detected_image
       output_detected_bboxes_topic: /onboard_detector/detected_bounding_boxes
       output_obstacles_topic: /onboard_detector/obstacles         
@@ -33,12 +33,12 @@ detector_node:
       image_rows: 480 #depth_image_cols
 
       # System
-      time_step: 0.033
+      time_step: 0.12
 
       # DBSCAN Common
       voxel_size: 0.1 # Size of voxel grid for filtering (meters)
-      ground_height: 0.2 # height of ground to remove ground points
-      roof_height: 5.0 # relative height of roof to remove roof points
+      ground_height: -0.6 # height of ground to remove ground points
+      roof_height: 4.0 # relative height of roof to remove roof points
 
       # DBSCAN visual param
       voxel_occupied_thresh: 5.0 # min num of points for a voxel to be occupied in voxel filter
@@ -123,7 +123,7 @@ detector_node:
       shape_score_weight: 0.02
       enable_tracking_debug_logs: true
 
-      
+
 
       # Classification
       frame_skip: 5 # num of frames skiped when comparing 2 point clouds
@@ -140,12 +140,12 @@ detector_node:
 
 calibration_icp_node:
   ros__parameters:
-    depth_topic: /camera1/rs1/depth/image_rect_raw
+    depth_topic: /front_camera/camera/depth/image_rect_raw
     velodyne_topic: /velodyne_points
     lidar_frame: velodyne
-    urdf_camera_frame: rs1_link
-    camera_frame_initial_guess: rs1_link_initial_guess
-    refined_camera_frame: rs1_link_refined
+    urdf_camera_frame: camera
+    camera_frame_initial_guess: camera_initial_guess
+    refined_camera_frame: camera_refined
     icp_max_correspondence_distance: 0.2
     icp_max_iteration: 100
     icp_voxel_size: 0.05
@@ -165,7 +165,7 @@ calibration_icp_node:
 
 yolov11_detector_node:
   ros__parameters:
-    image_topic: /camera1/rs1/color/image_raw
+    image_topic: /front_camera/camera/color/image_raw
     detected_image_topic: yolo_detector/detected_image
     detected_bboxes_topic: yolo_detector/detected_bounding_boxes
     inference_time_topic: yolo_detector/yolo_time
