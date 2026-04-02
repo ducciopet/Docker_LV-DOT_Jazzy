@@ -160,7 +160,10 @@ namespace onboardDetector{
         int dbscanRefineMaxDepth_;
         bool dbscanRefineRecursive_;
         double dbscanRefineMinBoxVolume_;
-        
+
+        // UV detection param 
+        double uvBoxMaxDiagonal_;
+
         // LiDAR Visual Filtering
         double visualboxIOUThresh_;
         double visualboxIOVThresh_;
@@ -219,6 +222,9 @@ namespace onboardDetector{
 
         double shapeScoreWeight_;             // peso molto basso della forma cluster nel matching
         bool enableTrackingDebugLogs_; 
+        
+        double matchPrevObsPosScoreWeight_ = 0.25;   // peso secondario della distanza rispetto all'ultima bbox osservata
+        double matchPrevObsIou2DScoreWeight_ = 0.10; // piccolo bonus IoU2D rispetto all'ultima bbox osservata
 
         // =========================
         // Association robustness params
@@ -351,7 +357,7 @@ namespace onboardDetector{
         void mergeBoxesSet(const std::vector<onboardDetector::box3D>& boxes, const std::vector<std::vector<Eigen::Vector3d>>& clusters, const std::vector<int>& indices, onboardDetector::box3D& outBox, std::vector<Eigen::Vector3d>& outCluster, Eigen::Vector3d& center, Eigen::Vector3d& stddev);
         void genFeatHelper(const std::vector<onboardDetector::box3D>& boxes, const std::vector<Eigen::Vector3d>& pcCenters, std::vector<Eigen::VectorXd>& feature);
         void getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters);
-        void findBestMatch(const std::vector<Eigen::VectorXd>& prevBBoxesFeat, const std::vector<onboardDetector::box3D>& propedBBoxes, const std::vector<Eigen::Vector3d>& propedPcCenters, const std::vector<Eigen::VectorXd>& propedBBoxesFeat, const std::vector<Eigen::VectorXd>& currBBoxesFeat, const std::vector<onboardDetector::clusterGeometry>& prevFrameClusterGeometries, const std::vector<onboardDetector::clusterGeometry>& currFrameClusterGeometries, std::vector<int>& bestMatch);
+        void findBestMatch(const std::vector<onboardDetector::box3D>& predictedBBoxes, const std::vector<onboardDetector::box3D>& previousObservedBBoxes, std::vector<int>& bestMatch);
         void kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch);
         void kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
@@ -374,15 +380,21 @@ namespace onboardDetector{
                                       double& relSizeDiff) const;
 
         double computeAssociationScore(const onboardDetector::box3D& predictedBox,
+                               const onboardDetector::box3D& previousObservedBox,
                                const onboardDetector::box3D& currentBox,
                                double dt,
-                               double& posDist,
+                               double& predPosDist,
                                double& requiredSpeed,
                                double& relSizeDiff,
-                               double& iou2d,
+                               double& predIou2d,
+                               double& prevObsPosDist,
+                               double& prevObsIou2d,
                                std::string& rejectReason) const;
 
         double clampPositive(double value, double minValue) const;
+        int findTrackHistoryIndexById(const std::vector<std::deque<onboardDetector::box3D>>& boxHist,
+                              int trackId) const;
+        void getPreviousObservedBBoxes(std::vector<onboardDetector::box3D>& previousObservedBBoxes) const;
 
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);

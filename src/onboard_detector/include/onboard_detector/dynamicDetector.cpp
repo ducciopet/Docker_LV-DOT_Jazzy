@@ -441,6 +441,14 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": DBSCAN refine min box volume: " << this->dbscanRefineMinBoxVolume_ << std::endl;
         }
 
+        // UV bounding box diagonal filter
+        if (!this->nh_->get_parameter(pname("uv_box_max_diagonal"), this->uvBoxMaxDiagonal_)){
+            this->uvBoxMaxDiagonal_ = 2.0; // meters, default
+            std::cout << this->hint_ << ": No UV box max diagonal param found. Use default: 2.0." << std::endl;
+        } else {
+            std::cout << this->hint_ << ": UV box max diagonal is set to: " << this->uvBoxMaxDiagonal_ << std::endl;
+        }
+
         // Visual IOU threshold
         if (!this->nh_->get_parameter(pname("visual_filtering_BBox_IOU_threshold"), this->visualboxIOUThresh_)){
             this->visualboxIOUThresh_ = 0.5;
@@ -1754,6 +1762,16 @@ namespace onboardDetector{
         // 3. cluster points and get bounding boxes
         this->clusterPointsAndBBoxes(this->filteredDepthPoints_, this->dbBBoxes_, this->pcClustersVisual_, 
                                      this->pcClusterCentersVisual_, this->pcClusterStdsVisual_);
+
+        // 4. Filter UV detected boxes by diagonal size
+        std::vector<onboardDetector::box3D> filteredUVBBoxes;
+        for (const auto& box : this->uvBBoxes_) {
+            double diag = std::sqrt(box.x_width * box.x_width + box.y_width * box.y_width);
+            if (diag <= this->uvBoxMaxDiagonal_) {
+                filteredUVBBoxes.push_back(box);
+            }
+        }
+        this->uvBBoxes_ = filteredUVBBoxes;
     }
 
 
@@ -2863,6 +2881,7 @@ namespace onboardDetector{
                 // *Case 3: multiple yolo boxes correspond to one 3D box
                 } else {
                     std::vector<Eigen::Vector3d> cloudCluster = filteredPcClustersTemp[idx3D];
+                    const onboardDetector::box3D& parentBox = filteredBBoxesTemp[idx3D];
 
                     // iterate to assign all points
                     int allowMargin = 0; // pixel 
@@ -2871,50 +2890,39 @@ namespace onboardDetector{
                         Eigen::Vector3d ptWorld = cloudCluster[i];
                         Eigen::Vector3d ptCam = this->orientationColor_.inverse() * (ptWorld - this->positionColor_);
 
+                        if (ptCam(2) <= 0){
+                            continue;
+                        }
+
                         int u = (this->fxC_ * ptCam(0) + this->cxC_ * ptCam(2)) / ptCam(2);
-                        int v = (this->fyC_ * ptCam(1) + this->cyC_ * ptCam(2)) / ptCam(2);
 
                         int closestDist = std::numeric_limits<int>::max();
                         for (int yidx : yoloIndices){
                             int XTargetWid = int(this->yoloDetectionResults_.detections[yidx].bbox.size_x);
-                            int YTargetWid = int(this->yoloDetectionResults_.detections[yidx].bbox.size_y);
+
                             // Extract YOLO bbox top-left corner from hypothesis pose
-                            int XTarget = 0, YTarget = 0;
+                            int XTarget = 0;
                             if (this->yoloDetectionResults_.detections[yidx].results.size() > 0) {
                                 XTarget = int(this->yoloDetectionResults_.detections[yidx].results[0].pose.pose.position.x);
-                                YTarget = int(this->yoloDetectionResults_.detections[yidx].results[0].pose.pose.position.y);
                             }
+
                             int xMin = XTarget;
                             int xMax = XTarget + XTargetWid;
-                            int yMin = YTarget;
-                            int yMax = YTarget + YTargetWid;
 
-                            if (u >= xMin-allowMargin && u <= xMax+allowMargin && v >= yMin-allowMargin && v <= yMax+allowMargin) {
-                                // Horizontal signed distance
-                                int horizontalDistance = 0;
-                                if (u < xMin) {
-                                    horizontalDistance = xMin - u; // Outside on the left
-                                } else if (u > xMax) {
-                                    horizontalDistance = u - xMax; // Outside on the right
-                                } else {
-                                    horizontalDistance = std::max(xMin - u, u - xMax); // Inside horizontally
-                                }
+                            // Use only horizontal image information to split the cluster.
+                            // Do NOT use YOLO bbox height to avoid changing 3D bbox height.
+                            int distance = 0;
+                            if (u < xMin - allowMargin) {
+                                distance = (xMin - allowMargin) - u;
+                            } else if (u > xMax + allowMargin) {
+                                distance = u - (xMax + allowMargin);
+                            } else {
+                                distance = 0;
+                            }
 
-                                // Compute signed distance to the closest edge
-                                int signedDistance;
-                                if (u < xMin || u > xMax || v < yMin || v > yMax) {
-                                    // Outside: Take the larger of horizontal or vertical distance
-                                    signedDistance = horizontalDistance;
-                                } else {
-                                    // Inside: Take the negative of the minimum distance to any edge
-                                    signedDistance = horizontalDistance;
-                                }
-          
-                                int distance = signedDistance;
-                                if (distance < closestDist){
-                                    assignment[i] = yidx;
-                                    closestDist = distance;
-                                }
+                            if (distance < closestDist){
+                                assignment[i] = yidx;
+                                closestDist = distance;
                             }
                         }
                     }
@@ -2932,6 +2940,7 @@ namespace onboardDetector{
                                 flag[i] = true;
                             }
                         }
+
                         if (subCloud.size() != 0){
                             onboardDetector::box3D newBox;
                             Eigen::Vector3d center, stddev;
@@ -2939,24 +2948,26 @@ namespace onboardDetector{
 
                             double xMin = std::numeric_limits<double>::max(), xMax = std::numeric_limits<double>::lowest();
                             double yMin = std::numeric_limits<double>::max(), yMax = std::numeric_limits<double>::lowest();
-                            double zMin = std::numeric_limits<double>::max(), zMax = std::numeric_limits<double>::lowest();
 
                             for (const auto &pt : subCloud) {
                                 xMin = std::min(xMin, pt.x());
                                 xMax = std::max(xMax, pt.x());
                                 yMin = std::min(yMin, pt.y());
                                 yMax = std::max(yMax, pt.y());
-                                zMin = std::min(zMin, pt.z());
-                                zMax = std::max(zMax, pt.z());
                             }
+
                             // create a new bounding box
                             newBox.x = (xMin + xMax) / 2.;
                             newBox.y = (yMin + yMax) / 2.;
-                            newBox.z = (zMin + zMax) / 2.;
+
+                            // Keep original height unchanged
+                            newBox.z = parentBox.z;
+                            newBox.z_width = parentBox.z_width;
+
                             newBox.x_width = xMax - xMin;
                             newBox.y_width = yMax - yMin;
-                            newBox.z_width = zMax - zMin;
-                            if (newBox.x_width <= 0 or newBox.y_width <= 0 or newBox.x_width <= 0){
+
+                            if (newBox.x_width <= 0 || newBox.y_width <= 0 || newBox.z_width <= 0){
                                 continue;
                             }
 
@@ -3080,21 +3091,16 @@ namespace onboardDetector{
         pcClusterCenters.clear();
         pcClusterStds.clear();
 
-        if (points.empty()){
-            return;
-        }
 
         std::vector<onboardDetector::Point> pointsDB;
         this->eigenToDBPointVec(points, pointsDB, points.size());
-
         this->dbCluster_.reset(new DBSCAN(
             this->dbMinPointsCluster_,
             this->dbEpsilon_,
             pointsDB));
 
-        // Camera: refinement OFF
         this->dbCluster_->setRefinementParams(
-            false,
+            this->dbscanRefinementEnable_,
             this->dbscanRefineMaxDiagonal_,
             this->dbscanRefineMinDensity_,
             this->dbscanRefineSplitMinPts_,
@@ -3107,65 +3113,100 @@ namespace onboardDetector{
 
         this->dbCluster_->run();
 
-        int clusterNum = 0;
-        for (size_t i = 0; i < this->dbCluster_->m_points.size(); ++i){
-            onboardDetector::Point pDB = this->dbCluster_->m_points[i];
-            if (pDB.clusterID > clusterNum){
-                clusterNum = pDB.clusterID;
+        if (this->dbscanRefinementEnable_) {
+            // Use refined clusters with AABB
+            std::vector<onboardDetector::ClusterRefined> refinedClusters;
+            this->dbCluster_->getRefinedClustersWithAABB(refinedClusters);
+            for (size_t i = 0; i < refinedClusters.size(); ++i) {
+                const auto& ref = refinedClusters[i];
+                onboardDetector::box3D box;
+                box.id = static_cast<int>(i);
+                box.x = (ref.box.min_pt(0) + ref.box.max_pt(0)) / 2.0;
+                box.y = (ref.box.min_pt(1) + ref.box.max_pt(1)) / 2.0;
+                box.z = (ref.box.min_pt(2) + ref.box.max_pt(2)) / 2.0;
+                box.x_width = std::max(ref.box.max_pt(0) - ref.box.min_pt(0), 0.1);
+                box.y_width = std::max(ref.box.max_pt(1) - ref.box.min_pt(1), 0.1);
+                box.z_width = ref.box.max_pt(2) - ref.box.min_pt(2);
+                box.Vx = 0.0;
+                box.Vy = 0.0;
+
+                if (box.x_width > this->maxObjectSize_(0) ||
+                    box.y_width > this->maxObjectSize_(1) ||
+                    box.z_width > this->maxObjectSize_(2)) {
+                    continue;
+                }
+
+                bboxes.push_back(box);
+                pcClusters.push_back(ref.points);
+            }
+        } else {
+            // Use raw clusters as before
+            int clusterNum = 0;
+            for (size_t i = 0; i < this->dbCluster_->m_points.size(); ++i) {
+                onboardDetector::Point pDB = this->dbCluster_->m_points[i];
+                if (pDB.clusterID > clusterNum) {
+                    clusterNum = pDB.clusterID;
+                }
+            }
+
+            std::vector<std::vector<Eigen::Vector3d>> pcClustersTemp;
+            pcClustersTemp.resize(clusterNum);
+
+            for (size_t i = 0; i < this->dbCluster_->m_points.size(); ++i) {
+                onboardDetector::Point pDB = this->dbCluster_->m_points[i];
+                if (pDB.clusterID > 0) {
+                    Eigen::Vector3d p = this->dbPointToEigen(pDB);
+                    pcClustersTemp[pDB.clusterID - 1].push_back(p);
+                }
+            }
+
+            for (size_t i = 0; i < pcClustersTemp.size(); ++i) {
+                onboardDetector::box3D box;
+                double xmin = pcClustersTemp[i][0](0);
+                double ymin = pcClustersTemp[i][0](1);
+                double zmin = pcClustersTemp[i][0](2);
+                double xmax = pcClustersTemp[i][0](0);
+                double ymax = pcClustersTemp[i][0](1);
+                double zmax = pcClustersTemp[i][0](2);
+
+                for (size_t j = 0; j < pcClustersTemp[i].size(); ++j) {
+                    xmin = (pcClustersTemp[i][j](0) < xmin) ? pcClustersTemp[i][j](0) : xmin;
+                    ymin = (pcClustersTemp[i][j](1) < ymin) ? pcClustersTemp[i][j](1) : ymin;
+                    zmin = (pcClustersTemp[i][j](2) < zmin) ? pcClustersTemp[i][j](2) : zmin;
+                    xmax = (pcClustersTemp[i][j](0) > xmax) ? pcClustersTemp[i][j](0) : xmax;
+                    ymax = (pcClustersTemp[i][j](1) > ymax) ? pcClustersTemp[i][j](1) : ymax;
+                    zmax = (pcClustersTemp[i][j](2) > zmax) ? pcClustersTemp[i][j](2) : zmax;
+                }
+
+                box.id = static_cast<int>(i);
+                box.x = (xmax + xmin) / 2.0;
+                box.y = (ymax + ymin) / 2.0;
+                box.z = (zmax + zmin) / 2.0;
+                box.x_width = (xmax - xmin) > 0.1 ? (xmax - xmin) : 0.1;
+                box.y_width = (ymax - ymin) > 0.1 ? (ymax - ymin) : 0.1;
+                box.z_width = (zmax - zmin);
+                box.Vx = 0.0;
+                box.Vy = 0.0;
+
+                if (box.x_width > this->maxObjectSize_(0) ||
+                    box.y_width > this->maxObjectSize_(1) ||
+                    box.z_width > this->maxObjectSize_(2)) {
+                    continue;
+                }
+
+                bboxes.push_back(box);
+                pcClusters.push_back(pcClustersTemp[i]);
             }
         }
 
-        std::vector<std::vector<Eigen::Vector3d>> pcClustersTemp;
-        pcClustersTemp.resize(clusterNum);
-
-        for (size_t i = 0; i < this->dbCluster_->m_points.size(); ++i){
-            onboardDetector::Point pDB = this->dbCluster_->m_points[i];
-            if (pDB.clusterID > 0){
-                Eigen::Vector3d p = this->dbPointToEigen(pDB);
-                pcClustersTemp[pDB.clusterID - 1].push_back(p);
-            }
+        // Calculate cluster centers and stds for all clusters
+        for (size_t i = 0; i < pcClusters.size(); ++i) {
+            Eigen::Vector3d pcClusterCenter(0., 0., 0.);
+            Eigen::Vector3d pcClusterStd(0., 0., 0.);
+            this->calcPcFeat(pcClusters[i], pcClusterCenter, pcClusterStd);
+            pcClusterCenters.push_back(pcClusterCenter);
+            pcClusterStds.push_back(pcClusterStd);
         }
-
-        for (size_t i=0; i<pcClustersTemp.size(); ++i)
-        { 
-            onboardDetector::box3D box; 
-            double xmin = pcClustersTemp[i][0](0); 
-            double ymin = pcClustersTemp[i][0](1); 
-            double zmin = pcClustersTemp[i][0](2); 
-            double xmax = pcClustersTemp[i][0](0); 
-            double ymax = pcClustersTemp[i][0](1); 
-            double zmax = pcClustersTemp[i][0](2); 
-
-            for (size_t j=0; j<pcClustersTemp[i].size(); ++j)
-            { 
-                xmin = (pcClustersTemp[i][j](0)<xmin)?pcClustersTemp[i][j](0):xmin; 
-                ymin = (pcClustersTemp[i][j](1)<ymin)?pcClustersTemp[i][j](1):ymin; 
-                zmin = (pcClustersTemp[i][j](2)<zmin)?pcClustersTemp[i][j](2):zmin; 
-                xmax = (pcClustersTemp[i][j](0)>xmax)?pcClustersTemp[i][j](0):xmax; 
-                ymax = (pcClustersTemp[i][j](1)>ymax)?pcClustersTemp[i][j](1):ymax; 
-                zmax = (pcClustersTemp[i][j](2)>zmax)?pcClustersTemp[i][j](2):zmax; 
-            } 
-
-            box.id = static_cast<int>(i);
-            box.x = (xmax + xmin) / 2.0;
-            box.y = (ymax + ymin) / 2.0;
-            box.z = (zmax + zmin) / 2.0;
-            box.x_width = (xmax - xmin) > 0.1 ? (xmax - xmin) : 0.1;
-            box.y_width = (ymax - ymin) > 0.1 ? (ymax - ymin) : 0.1;
-            box.z_width = (zmax - zmin);
-            box.Vx = 0.0;
-            box.Vy = 0.0;
-
-            if (box.x_width > this->maxObjectSize_(0) ||
-                box.y_width > this->maxObjectSize_(1) ||
-                box.z_width > this->maxObjectSize_(2)){
-                continue;
-            }
-
-            bboxes.push_back(box);
-            pcClusters.push_back(pcClustersTemp[i]);
-        }
-
         for (size_t i = 0; i < pcClusters.size(); ++i){
             Eigen::Vector3d pcClusterCenter(0., 0., 0.);
             Eigen::Vector3d pcClusterStd(0., 0., 0.);
@@ -3295,12 +3336,12 @@ namespace onboardDetector{
         }
 
         if (!this->groundEstimated_){
-            this->groundHeight_    = bestZ;
+            this->groundHeight_    = bestZ + 0.1;
             this->groundEstimated_ = true;
         }
         else{
             const double alpha  = 0.05;
-            this->groundHeight_ = (1.0 - alpha) * this->groundHeight_ + alpha * bestZ;
+            this->groundHeight_ = (1.0 - alpha) * this->groundHeight_ + alpha * (bestZ + 0.1);
         }
 
         this->roofHeight_ = this->groundHeight_ + this->groundRoofOffset_;
@@ -3486,57 +3527,32 @@ namespace onboardDetector{
         this->newDetectFlag_ = false; // the most recent detection has been associated
     }
 
-    void dynamicDetector::boxAssociationHelper(std::vector<int>& bestMatch){
-        int numObjs = int(this->filteredBBoxes_.size());
 
-        std::vector<onboardDetector::box3D> prevBBoxes;
-        std::vector<Eigen::Vector3d> prevPcCenters;
-        std::vector<Eigen::VectorXd> prevBBoxesFeat;
+    void dynamicDetector::boxAssociationHelper(std::vector<int>& bestMatch)
+    {
+        std::vector<onboardDetector::box3D> predictedBBoxes;
+        std::vector<Eigen::Vector3d> predictedPcCenters;
+        std::vector<onboardDetector::box3D> previousObservedBBoxes;
 
-        std::vector<onboardDetector::box3D> propedBBoxes;
-        std::vector<Eigen::Vector3d> propedPcCenters;
-        std::vector<Eigen::VectorXd> propedBBoxesFeat;
+        this->getPredictedBBoxesFromFilters(predictedBBoxes, predictedPcCenters);
+        this->getPreviousObservedBBoxes(previousObservedBBoxes);
 
-        std::vector<Eigen::VectorXd> currBBoxesFeat;
-        currBBoxesFeat.resize(numObjs);
-        bestMatch.resize(numObjs, -1);
-
-        std::vector<onboardDetector::clusterGeometry> prevFrameClusterGeometries;
-        std::vector<onboardDetector::clusterGeometry> currFrameClusterGeometries;
-
-        this->genFeatHelper(this->filteredBBoxes_, this->filteredPcClusterCenters_, currBBoxesFeat);
-
-        this->getPrevBBoxes(prevBBoxes, prevPcCenters);
-        this->genFeatHelper(prevBBoxes, prevPcCenters, prevBBoxesFeat);
-
-        this->getPredictedBBoxesFromFilters(propedBBoxes, propedPcCenters);
-        this->genFeatHelper(propedBBoxes, propedPcCenters, propedBBoxesFeat);
-
-        prevFrameClusterGeometries.resize(this->pcHist_.size());
-        for (size_t j = 0; j < this->pcHist_.size(); ++j){
-            if (!this->pcHist_[j].empty()){
-                prevFrameClusterGeometries[j] = this->computeClusterGeometry(this->pcHist_[j][0]);
-            }
-            else{
-                prevFrameClusterGeometries[j] = onboardDetector::clusterGeometry{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-            }
-        }
-
-        currFrameClusterGeometries.resize(this->filteredPcClusters_.size());
-        for (size_t i = 0; i < this->filteredPcClusters_.size(); ++i){
-            currFrameClusterGeometries[i] = this->computeClusterGeometry(this->filteredPcClusters_[i]);
-        }
-
-        this->findBestMatch(prevBBoxesFeat,
-                            propedBBoxes,
-                            propedPcCenters,
-                            propedBBoxesFeat,
-                            currBBoxesFeat,
-                            prevFrameClusterGeometries,
-                            currFrameClusterGeometries,
-                            bestMatch);
+        this->findBestMatch(predictedBBoxes, previousObservedBBoxes, bestMatch);
     }
-        
+
+    void dynamicDetector::getPreviousObservedBBoxes(std::vector<onboardDetector::box3D>& previousObservedBBoxes) const
+    {
+        previousObservedBBoxes.clear();
+        previousObservedBBoxes.reserve(this->boxHist_.size());
+
+        for (size_t i = 0; i < this->boxHist_.size(); ++i){
+            if (this->boxHist_[i].empty()){
+                continue;
+            }
+            previousObservedBBoxes.push_back(this->boxHist_[i][0]);
+        }
+    }
+
     void dynamicDetector::genFeatHelper(const std::vector<onboardDetector::box3D>& boxes,
                                     const std::vector<Eigen::Vector3d>& pcCenters,
                                     std::vector<Eigen::VectorXd>& features){
@@ -3578,50 +3594,44 @@ namespace onboardDetector{
         }
     }
       
-    void dynamicDetector::findBestMatch(const std::vector<Eigen::VectorXd>& prevBBoxesFeat,
-                                        const std::vector<onboardDetector::box3D>& propedBBoxes,
-                                        const std::vector<Eigen::Vector3d>& propedPcCenters,
-                                        const std::vector<Eigen::VectorXd>& propedBBoxesFeat,
-                                        const std::vector<Eigen::VectorXd>& currBBoxesFeat,
-                                        const std::vector<onboardDetector::clusterGeometry>& prevFrameClusterGeometries,
-                                        const std::vector<onboardDetector::clusterGeometry>& currFrameClusterGeometries,
+    void dynamicDetector::findBestMatch(const std::vector<onboardDetector::box3D>& predictedBBoxes,
+                                        const std::vector<onboardDetector::box3D>& previousObservedBBoxes,
                                         std::vector<int>& bestMatch)
     {
-        (void)prevBBoxesFeat;
-        (void)propedPcCenters;
-        (void)propedBBoxesFeat;
-        (void)currBBoxesFeat;
-        (void)prevFrameClusterGeometries;
-        (void)currFrameClusterGeometries;
-
-        int numObjs = static_cast<int>(this->filteredBBoxes_.size());
+        const int numObjs = static_cast<int>(this->filteredBBoxes_.size());
         bestMatch.assign(numObjs, -1);
 
         std::vector<onboardDetector::matchCandidate> candidates;
-        candidates.reserve(numObjs * std::max<size_t>(1, propedBBoxes.size()));
+        candidates.reserve(numObjs * std::max<size_t>(1, predictedBBoxes.size()));
 
         const double dt = this->clampPositive(this->dt_, 1e-3);
 
         for (int i = 0; i < numObjs; ++i){
             const onboardDetector::box3D& currBBox = this->filteredBBoxes_[i];
 
-            for (size_t j = 0; j < propedBBoxes.size(); ++j){
-                const onboardDetector::box3D& predBBox = propedBBoxes[j];
+            for (size_t j = 0; j < predictedBBoxes.size(); ++j){
+                const onboardDetector::box3D& predBBox = predictedBBoxes[j];
+                const onboardDetector::box3D& prevObsBBox = previousObservedBBoxes[j];
 
-                double posDist = 0.0;
+                double predPosDist = 0.0;
                 double requiredSpeed = 0.0;
                 double relSizeDiff = 0.0;
-                double iou2d = 0.0;
+                double predIou2d = 0.0;
+                double prevObsPosDist = 0.0;
+                double prevObsIou2d = 0.0;
                 std::string rejectReason;
 
-                double score = this->computeAssociationScore(predBBox,
-                                                            currBBox,
-                                                            dt,
-                                                            posDist,
-                                                            requiredSpeed,
-                                                            relSizeDiff,
-                                                            iou2d,
-                                                            rejectReason);
+                const double score = this->computeAssociationScore(predBBox,
+                                                                prevObsBBox,
+                                                                currBBox,
+                                                                dt,
+                                                                predPosDist,
+                                                                requiredSpeed,
+                                                                relSizeDiff,
+                                                                predIou2d,
+                                                                prevObsPosDist,
+                                                                prevObsIou2d,
+                                                                rejectReason);
 
                 int trackId = -1;
                 if (j < this->boxHist_.size() && !this->boxHist_[j].empty()){
@@ -3632,15 +3642,17 @@ namespace onboardDetector{
                     if (this->enableTrackingDebugLogs_){
                         RCLCPP_DEBUG(
                             this->nh_->get_logger(),
-                            "[TRACK_%s] curr=%d prev=%d track_id=%d posDist=%.3f reqSpeed=%.3f relSizeDiff=%.3f iou2d=%.3f score=%.3f",
+                            "[TRACK_%s] curr=%d prev=%d track_id=%d predPosDist=%.3f reqSpeed=%.3f relSizeDiff=%.3f predIou2d=%.3f prevObsPosDist=%.3f prevObsIou2d=%.3f score=%.3f",
                             rejectReason.c_str(),
                             i,
                             static_cast<int>(j),
                             trackId,
-                            posDist,
+                            predPosDist,
                             requiredSpeed,
                             relSizeDiff,
-                            iou2d,
+                            predIou2d,
+                            prevObsPosDist,
+                            prevObsIou2d,
                             score);
                     }
                     continue;
@@ -3649,14 +3661,16 @@ namespace onboardDetector{
                 if (this->enableTrackingDebugLogs_){
                     RCLCPP_DEBUG(
                         this->nh_->get_logger(),
-                        "[TRACK_CANDIDATE] curr=%d prev=%d track_id=%d posDist=%.3f reqSpeed=%.3f relSizeDiff=%.3f iou2d=%.3f score=%.3f",
+                        "[TRACK_CANDIDATE] curr=%d prev=%d track_id=%d predPosDist=%.3f reqSpeed=%.3f relSizeDiff=%.3f predIou2d=%.3f prevObsPosDist=%.3f prevObsIou2d=%.3f score=%.3f",
                         i,
                         static_cast<int>(j),
                         trackId,
-                        posDist,
+                        predPosDist,
                         requiredSpeed,
                         relSizeDiff,
-                        iou2d,
+                        predIou2d,
+                        prevObsPosDist,
+                        prevObsIou2d,
                         score);
                 }
 
@@ -3674,11 +3688,11 @@ namespace onboardDetector{
                 });
 
         std::vector<bool> currAssigned(numObjs, false);
-        std::vector<bool> prevAssigned(propedBBoxes.size(), false);
+        std::vector<bool> prevAssigned(predictedBBoxes.size(), false);
 
         for (size_t k = 0; k < candidates.size(); ++k){
-            int currIdx = candidates[k].currIdx;
-            int prevIdx = candidates[k].prevIdx;
+            const int currIdx = candidates[k].currIdx;
+            const int prevIdx = candidates[k].prevIdx;
 
             if (!currAssigned[currIdx] && !prevAssigned[prevIdx]){
                 bestMatch[currIdx] = prevIdx;
@@ -3721,6 +3735,7 @@ namespace onboardDetector{
 
         std::vector<bool> prevMatched(prevTracks, false);
 
+        // 1) Update delle track matchate: restano in output
         for (int i = 0; i < numObjs; ++i){
             if (i < static_cast<int>(bestMatch.size()) && bestMatch[i] >= 0){
                 int matchIdx = bestMatch[i];
@@ -3765,9 +3780,21 @@ namespace onboardDetector{
                 pcCenterHistTemp.back().push_front(this->filteredPcClusterCenters_[i]);
 
                 trackedBBoxesTemp.push_back(newEstimatedBBox);
+
+                if (this->enableTrackingDebugLogs_){
+                    RCLCPP_DEBUG(
+                        this->nh_->get_logger(),
+                        "[TRACK_UPDATE_MATCHED] track_id=%d x=%.3f y=%.3f vx=%.3f vy=%.3f",
+                        static_cast<int>(newEstimatedBBox.id),
+                        newEstimatedBBox.x,
+                        newEstimatedBBox.y,
+                        newEstimatedBBox.Vx,
+                        newEstimatedBBox.Vy);
+                }
             }
         }
 
+        // 2) Track non matchate: propagate internamente, ma NON in output
         for (int j = 0; j < prevTracks; ++j){
             if (prevMatched[j]){
                 continue;
@@ -3775,6 +3802,15 @@ namespace onboardDetector{
 
             int newMissed = this->missedFrames_[j] + 1;
             if (newMissed > this->maxMissedFrames_){
+                if (this->enableTrackingDebugLogs_){
+                    int oldTrackId = (!this->boxHist_[j].empty()) ? static_cast<int>(this->boxHist_[j][0].id) : -1;
+                    RCLCPP_DEBUG(
+                        this->nh_->get_logger(),
+                        "[TRACK_DROP_MISSED] track_id=%d missed=%d maxMissed=%d",
+                        oldTrackId,
+                        newMissed,
+                        this->maxMissedFrames_);
+                }
                 continue;
             }
 
@@ -3816,9 +3852,21 @@ namespace onboardDetector{
             pcCenterHistTemp.push_back(pcCenterHist);
             filtersTemp.push_back(filter);
             missedFramesTemp.push_back(newMissed);
-            trackedBBoxesTemp.push_back(predictedBBox);
+
+            if (this->enableTrackingDebugLogs_){
+                RCLCPP_DEBUG(
+                    this->nh_->get_logger(),
+                    "[TRACK_PROPAGATE_INTERNAL] track_id=%d x=%.3f y=%.3f vx=%.3f vy=%.3f missed=%d",
+                    static_cast<int>(predictedBBox.id),
+                    predictedBBox.x,
+                    predictedBBox.y,
+                    predictedBBox.Vx,
+                    predictedBBox.Vy,
+                    newMissed);
+            }
         }
 
+        // 3) Detection non matchate: se non duplicate, diventano nuove track e vanno in output
         for (int i = 0; i < numObjs; ++i){
             if (i < static_cast<int>(bestMatch.size()) && bestMatch[i] >= 0){
                 continue;
@@ -3849,7 +3897,7 @@ namespace onboardDetector{
 
             onboardDetector::box3D newEstimatedBBox = currDetectedBBox;
 
-            MatrixXd states, A, B, H, P, Q, R;
+            Eigen::MatrixXd states, A, B, H, P, Q, R;
             this->kalmanFilterMatrixAcc(currDetectedBBox, states, A, B, H, P, Q, R);
 
             newFilter.setup(states, A, B, H, P, Q, R);
@@ -3877,18 +3925,80 @@ namespace onboardDetector{
             }
         }
 
-        if (boxHistTemp.size()){
+        // 4) Stabilizzazione dimensioni SOLO sulle box effettivamente in output,
+        //    usando il track_id per ritrovare la history corretta
+        if (!trackedBBoxesTemp.empty() && !boxHistTemp.empty()){
             for (size_t i = 0; i < trackedBBoxesTemp.size(); ++i){
-                if (int(boxHistTemp[i].size()) >= this->fixSizeHistThresh_){
-                    if ((abs(trackedBBoxesTemp[i].x_width - boxHistTemp[i][1].x_width) / std::max(boxHistTemp[i][1].x_width, 1e-6)) <= this->fixSizeDimThresh_ &&
-                        (abs(trackedBBoxesTemp[i].y_width - boxHistTemp[i][1].y_width) / std::max(boxHistTemp[i][1].y_width, 1e-6)) <= this->fixSizeDimThresh_ &&
-                        (abs(trackedBBoxesTemp[i].z_width - boxHistTemp[i][1].z_width) / std::max(boxHistTemp[i][1].z_width, 1e-6)) <= this->fixSizeDimThresh_){
-                        trackedBBoxesTemp[i].x_width = boxHistTemp[i][1].x_width;
-                        trackedBBoxesTemp[i].y_width = boxHistTemp[i][1].y_width;
-                        trackedBBoxesTemp[i].z_width = boxHistTemp[i][1].z_width;
-                        boxHistTemp[i][0].x_width = trackedBBoxesTemp[i].x_width;
-                        boxHistTemp[i][0].y_width = trackedBBoxesTemp[i].y_width;
-                        boxHistTemp[i][0].z_width = trackedBBoxesTemp[i].z_width;
+                const int trackId = static_cast<int>(trackedBBoxesTemp[i].id);
+                const int histIdx = this->findTrackHistoryIndexById(boxHistTemp, trackId);
+
+                if (histIdx < 0){
+                    if (this->enableTrackingDebugLogs_){
+                        RCLCPP_DEBUG(
+                            this->nh_->get_logger(),
+                            "[TRACK_FIX_SIZE_SKIP] track_id=%d reason=history_not_found",
+                            trackId);
+                    }
+                    continue;
+                }
+
+                if (static_cast<int>(boxHistTemp[histIdx].size()) < this->fixSizeHistThresh_){
+                    if (this->enableTrackingDebugLogs_){
+                        RCLCPP_DEBUG(
+                            this->nh_->get_logger(),
+                            "[TRACK_FIX_SIZE_SKIP] track_id=%d reason=short_history hist_size=%zu thresh=%d",
+                            trackId,
+                            boxHistTemp[histIdx].size(),
+                            this->fixSizeHistThresh_);
+                    }
+                    continue;
+                }
+
+                if (boxHistTemp[histIdx].size() < 2){
+                    continue;
+                }
+
+                const onboardDetector::box3D& prevBox = boxHistTemp[histIdx][1];
+
+                const double relDx = std::abs(trackedBBoxesTemp[i].x_width - prevBox.x_width) / std::max(prevBox.x_width, 1e-6);
+                const double relDy = std::abs(trackedBBoxesTemp[i].y_width - prevBox.y_width) / std::max(prevBox.y_width, 1e-6);
+                const double relDz = std::abs(trackedBBoxesTemp[i].z_width - prevBox.z_width) / std::max(prevBox.z_width, 1e-6);
+
+                if (relDx <= this->fixSizeDimThresh_ &&
+                    relDy <= this->fixSizeDimThresh_ &&
+                    relDz <= this->fixSizeDimThresh_)
+                {
+                    trackedBBoxesTemp[i].x_width = prevBox.x_width;
+                    trackedBBoxesTemp[i].y_width = prevBox.y_width;
+                    trackedBBoxesTemp[i].z_width = prevBox.z_width;
+
+                    boxHistTemp[histIdx][0].x_width = trackedBBoxesTemp[i].x_width;
+                    boxHistTemp[histIdx][0].y_width = trackedBBoxesTemp[i].y_width;
+                    boxHistTemp[histIdx][0].z_width = trackedBBoxesTemp[i].z_width;
+
+                    if (this->enableTrackingDebugLogs_){
+                        RCLCPP_DEBUG(
+                            this->nh_->get_logger(),
+                            "[TRACK_FIX_SIZE_APPLY] track_id=%d relDx=%.3f relDy=%.3f relDz=%.3f newSize=(%.3f,%.3f,%.3f)",
+                            trackId,
+                            relDx,
+                            relDy,
+                            relDz,
+                            trackedBBoxesTemp[i].x_width,
+                            trackedBBoxesTemp[i].y_width,
+                            trackedBBoxesTemp[i].z_width);
+                    }
+                }
+                else{
+                    if (this->enableTrackingDebugLogs_){
+                        RCLCPP_DEBUG(
+                            this->nh_->get_logger(),
+                            "[TRACK_FIX_SIZE_SKIP] track_id=%d reason=size_jump relDx=%.3f relDy=%.3f relDz=%.3f thresh=%.3f",
+                            trackId,
+                            relDx,
+                            relDy,
+                            relDz,
+                            this->fixSizeDimThresh_);
                     }
                 }
             }
@@ -4105,6 +4215,38 @@ namespace onboardDetector{
         return false;
     }
 
+    bool dynamicDetector::isDetectionDuplicateOfPrediction(const onboardDetector::box3D& currDetectedBBox,
+                                                        const onboardDetector::box3D& predictedBox,
+                                                        double& centerDist,
+                                                        double& iou2d,
+                                                        double& relSizeDiff) const
+    {
+        const double dx = predictedBox.x - currDetectedBBox.x;
+        const double dy = predictedBox.y - currDetectedBBox.y;
+        centerDist = std::sqrt(dx * dx + dy * dy);
+
+        iou2d = this->computeBoxIoU2D(currDetectedBBox, predictedBox);
+        relSizeDiff = this->computeRelativeSizeDiff(currDetectedBBox, predictedBox);
+
+        const bool duplicateByStrongOverlap =
+            (centerDist < this->duplicateTrackDistThresh_) &&
+            (iou2d > this->duplicateTrackIou2DThresh_) &&
+            (relSizeDiff < this->duplicateSizeRelThresh_);
+
+        return duplicateByStrongOverlap;
+    }
+
+    int dynamicDetector::findTrackHistoryIndexById(const std::vector<std::deque<onboardDetector::box3D>>& boxHist,
+                                                int trackId) const
+    {
+        for (size_t i = 0; i < boxHist.size(); ++i){
+            if (!boxHist[i].empty() && static_cast<int>(boxHist[i][0].id) == trackId){
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    }
+
     onboardDetector::clusterGeometry dynamicDetector::computeClusterGeometry(const std::vector<Eigen::Vector3d>& cluster){
         onboardDetector::clusterGeometry geom;
         geom.numPoints = static_cast<double>(cluster.size());
@@ -4301,27 +4443,30 @@ namespace onboardDetector{
     }
 
     double dynamicDetector::computeAssociationScore(const onboardDetector::box3D& predictedBox,
+                                                    const onboardDetector::box3D& previousObservedBox,
                                                     const onboardDetector::box3D& currentBox,
                                                     double dt,
-                                                    double& posDist,
+                                                    double& predPosDist,
                                                     double& requiredSpeed,
                                                     double& relSizeDiff,
-                                                    double& iou2d,
+                                                    double& predIou2d,
+                                                    double& prevObsPosDist,
+                                                    double& prevObsIou2d,
                                                     std::string& rejectReason) const
     {
         rejectReason.clear();
 
-        const double dx = predictedBox.x - currentBox.x;
-        const double dy = predictedBox.y - currentBox.y;
-        posDist = std::sqrt(dx * dx + dy * dy);
+        const double dxPred = predictedBox.x - currentBox.x;
+        const double dyPred = predictedBox.y - currentBox.y;
+        predPosDist = std::sqrt(dxPred * dxPred + dyPred * dyPred);
 
-        if (posDist >= this->maxMatchRange_){
+        if (predPosDist >= this->maxMatchRange_){
             rejectReason = "REJECT_POS";
             return -1e9;
         }
 
         dt = this->clampPositive(dt, 1e-3);
-        requiredSpeed = posDist / dt;
+        requiredSpeed = predPosDist / dt;
 
         if (requiredSpeed >= this->maxMatchSpeed_){
             rejectReason = "REJECT_SPEED";
@@ -4334,14 +4479,22 @@ namespace onboardDetector{
             return -1e9;
         }
 
-        iou2d = this->computeBoxIoU2D(predictedBox, currentBox);
+        predIou2d = this->computeBoxIoU2D(predictedBox, currentBox);
 
-        const double normPosDist = posDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+        const double dxPrev = previousObservedBox.x - currentBox.x;
+        const double dyPrev = previousObservedBox.y - currentBox.y;
+        prevObsPosDist = std::sqrt(dxPrev * dxPrev + dyPrev * dyPrev);
+        prevObsIou2d = this->computeBoxIoU2D(previousObservedBox, currentBox);
 
-        double score =
-            - this->matchPosScoreWeight_ * normPosDist
+        const double normPredPosDist = predPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+        const double normPrevObsPosDist = prevObsPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+
+        const double score =
+            - this->matchPosScoreWeight_ * normPredPosDist
             - this->matchSizeScoreWeight_ * relSizeDiff
-            + this->matchIou2DScoreWeight_ * iou2d;
+            + this->matchIou2DScoreWeight_ * predIou2d
+            - this->matchPrevObsPosScoreWeight_ * normPrevObsPosDist
+            + this->matchPrevObsIou2DScoreWeight_ * prevObsIou2d;
 
         if (score < this->minMatchScore_){
             rejectReason = "REJECT_SCORE";
@@ -4349,28 +4502,6 @@ namespace onboardDetector{
         }
 
         return score;
-    }
-
-    bool dynamicDetector::isDetectionDuplicateOfPrediction(const onboardDetector::box3D& currDetectedBBox,
-                                                        const onboardDetector::box3D& predictedBox,
-                                                        double& centerDist,
-                                                        double& iou2d,
-                                                        double& relSizeDiff) const
-    {
-        const double dx = predictedBox.x - currDetectedBBox.x;
-        const double dy = predictedBox.y - currDetectedBBox.y;
-        centerDist = std::sqrt(dx * dx + dy * dy);
-
-        iou2d = this->computeBoxIoU2D(currDetectedBBox, predictedBox);
-        relSizeDiff = this->computeRelativeSizeDiff(currDetectedBBox, predictedBox);
-
-        const bool veryCloseCenter = (centerDist < this->newTrackMinDist_);
-        const bool duplicateByOverlap =
-            (centerDist < this->duplicateTrackDistThresh_) &&
-            (iou2d > this->duplicateTrackIou2DThresh_) &&
-            (relSizeDiff < this->duplicateSizeRelThresh_);
-
-        return (veryCloseCenter || duplicateByOverlap);
     }
 
     void dynamicDetector::getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc){

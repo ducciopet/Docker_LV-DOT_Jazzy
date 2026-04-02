@@ -236,7 +236,9 @@ namespace onboardDetector {
 
     double DBSCAN::computeDiagonal(const AABB& box) const
     {
-        return (box.max_pt - box.min_pt).norm();
+        // Only consider x and y dimensions for diagonal
+        Eigen::Vector2d diff_xy = (box.max_pt - box.min_pt).head<2>();
+        return diff_xy.norm();
     }
 
     bool DBSCAN::shouldSplit(const std::vector<Eigen::Vector3d>& pts,

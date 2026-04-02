@@ -54,20 +54,14 @@ detector_node:
 
       # DBSCAN refinement param
       dbscan_refinement_enable: true
-
-      dbscan_refine_max_diagonal: 1.8   # ↓ forza il refine prima
-      dbscan_refine_min_density: 80.0   # ↑ elimina cluster sparsi
-
+      dbscan_refine_max_diagonal: 2.5      # Allow large boxes if density is high
+      dbscan_refine_min_density: 120.0     # Require high density for large boxes
       dbscan_refine_split_min_pts: 10
-      dbscan_refine_split_eps: 0.14     # ↑ separa meglio oggetti vicini
-
-      dbscan_refine_min_subcluster_pts: 18  # ↑ niente pezzi sporchi
-
-      dbscan_refine_axis_slice_width: 0.45  # ↓ trova colli di bottiglia
-
-      dbscan_refine_max_depth: 2
-      dbscan_refine_recursive: true     
-
+      dbscan_refine_split_eps: 0.07
+      dbscan_refine_min_subcluster_pts: 12
+      dbscan_refine_axis_slice_width: 0.25
+      dbscan_refine_max_depth: 3
+      dbscan_refine_recursive: true
       dbscan_refine_min_box_volume: 0.0001
 
 
@@ -82,9 +76,9 @@ detector_node:
       samegroupIOV_threshold: 0.5 # threshold for merging boxes in the same group (for debugging)
 
       visual_merging_flag: "smaller" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
-      uv_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
+      uv_unmerged_flag: false # whether to visualize unmerged boxes (for debugging);
       db_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
-      lidar_visual_merging_flag: "bigger" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
+      lidar_visual_merging_flag: "smaller" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
       visual_unmerged_flag: true # discard or not visual boxes that don't have enough overlap with LiDAR boxes (for debugging)
       lidar_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
 
