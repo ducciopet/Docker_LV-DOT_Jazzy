@@ -196,6 +196,12 @@ namespace onboardDetector{
         double matchVelWeight_;
         double minMatchScore_;
 
+        double maxMatchSpeed_ = 8.0;             // [m/s] velocità massima fisicamente plausibile per associare
+        double matchPosScoreWeight_ = 1.0;       // peso distanza
+        double matchSizeScoreWeight_ = 0.35;     // peso differenza size
+        double matchIou2DScoreWeight_ = 0.15;    // peso IoU2D (tenuto basso)
+        double maxRelativeSizeDiffMatch_ = 0.60; // soglia gating sulla differenza relativa media delle dimensioni
+
         double newTrackMinDist_;
         double newTrackMinPcDist_;
         double maxMatchVelDiff_;
@@ -220,9 +226,7 @@ namespace onboardDetector{
         double assocMaxRelSizeDiff_ = 0.75;         // massimo size diff relativo ammesso
         double matchFeatScoreWeight_ = 0.15;        // peso reale del featScore nel matching: molto basso
         double matchIoU2DWeight_ = 0.20;            // piccolo bonus da overlap XY
-
-        
-        
+    
         // Classification
         int skipFrame_;
         double dynaVelThresh_;
@@ -355,6 +359,22 @@ namespace onboardDetector{
         bool areBoxesDuplicate2D(const onboardDetector::box3D& a, const onboardDetector::box3D& b) const;
         bool isDuplicateOfTrackedThisFrame(const onboardDetector::box3D& currDetectedBBox, const std::vector<onboardDetector::box3D>& trackedBBoxesTemp, int& duplicateTrackId) const;
         void logMatchCandidate(int currIdx, int prevIdx, int trackId, double posDist, double pcDist, double velDiff, double sizeDiff, double featScore, double clusterGeomSim, double score, const std::string& status) const;
+        bool isDetectionDuplicateOfPrediction(const onboardDetector::box3D& currDetectedBBox,
+                                      const onboardDetector::box3D& predictedBox,
+                                      double& centerDist,
+                                      double& iou2d,
+                                      double& relSizeDiff) const;
+
+        double computeAssociationScore(const onboardDetector::box3D& predictedBox,
+                               const onboardDetector::box3D& currentBox,
+                               double dt,
+                               double& posDist,
+                               double& requiredSpeed,
+                               double& relSizeDiff,
+                               double& iou2d,
+                               std::string& rejectReason) const;
+
+        double clampPositive(double value, double minValue) const;
 
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);

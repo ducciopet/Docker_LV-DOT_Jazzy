@@ -3413,101 +3413,78 @@ namespace onboardDetector{
                                         const std::vector<onboardDetector::clusterGeometry>& currFrameClusterGeometries,
                                         std::vector<int>& bestMatch)
     {
+        (void)prevBBoxesFeat;
+        (void)propedPcCenters;
+        (void)propedBBoxesFeat;
+        (void)currBBoxesFeat;
+        (void)prevFrameClusterGeometries;
+        (void)currFrameClusterGeometries;
+
         int numObjs = static_cast<int>(this->filteredBBoxes_.size());
         bestMatch.assign(numObjs, -1);
 
         std::vector<onboardDetector::matchCandidate> candidates;
         candidates.reserve(numObjs * std::max<size_t>(1, propedBBoxes.size()));
 
+        const double dt = this->clampPositive(this->dt_, 1e-3);
+
         for (int i = 0; i < numObjs; ++i){
             const onboardDetector::box3D& currBBox = this->filteredBBoxes_[i];
-            const Eigen::Vector3d& currPcCenter = this->filteredPcClusterCenters_[i];
 
             for (size_t j = 0; j < propedBBoxes.size(); ++j){
-                const onboardDetector::box3D& propedBBox = propedBBoxes[j];
-                const Eigen::Vector3d& propedPcCenter = propedPcCenters[j];
+                const onboardDetector::box3D& predBBox = propedBBoxes[j];
 
-                double propedWidth = std::max(propedBBox.x_width, propedBBox.y_width);
-                double currWidth = std::max(currBBox.x_width, currBBox.y_width);
-                double sizeDiff = std::abs(propedWidth - currWidth);
+                double posDist = 0.0;
+                double requiredSpeed = 0.0;
+                double relSizeDiff = 0.0;
+                double iou2d = 0.0;
+                std::string rejectReason;
 
-                if (sizeDiff >= this->maxMatchSizeRange_){
-                    this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
-                                            -1.0, -1.0, -1.0, sizeDiff, 0.0, 0.0, -1.0, "REJECT_SIZE");
+                double score = this->computeAssociationScore(predBBox,
+                                                            currBBox,
+                                                            dt,
+                                                            posDist,
+                                                            requiredSpeed,
+                                                            relSizeDiff,
+                                                            iou2d,
+                                                            rejectReason);
+
+                int trackId = -1;
+                if (j < this->boxHist_.size() && !this->boxHist_[j].empty()){
+                    trackId = this->boxHist_[j][0].id;
+                }
+
+                if (!rejectReason.empty()){
+                    if (this->enableTrackingDebugLogs_){
+                        RCLCPP_DEBUG(
+                            this->nh_->get_logger(),
+                            "[TRACK_%s] curr=%d prev=%d track_id=%d posDist=%.3f reqSpeed=%.3f relSizeDiff=%.3f iou2d=%.3f score=%.3f",
+                            rejectReason.c_str(),
+                            i,
+                            static_cast<int>(j),
+                            trackId,
+                            posDist,
+                            requiredSpeed,
+                            relSizeDiff,
+                            iou2d,
+                            score);
+                    }
                     continue;
                 }
 
-                double dx = propedBBox.x - currBBox.x;
-                double dy = propedBBox.y - currBBox.y;
-                double posDist = std::sqrt(dx * dx + dy * dy);
-
-                if (posDist >= this->maxMatchRange_){
-                    this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
-                                            posDist, -1.0, -1.0, sizeDiff, 0.0, 0.0, -1.0, "REJECT_POS");
-                    continue;
+                if (this->enableTrackingDebugLogs_){
+                    RCLCPP_DEBUG(
+                        this->nh_->get_logger(),
+                        "[TRACK_CANDIDATE] curr=%d prev=%d track_id=%d posDist=%.3f reqSpeed=%.3f relSizeDiff=%.3f iou2d=%.3f score=%.3f",
+                        i,
+                        static_cast<int>(j),
+                        trackId,
+                        posDist,
+                        requiredSpeed,
+                        relSizeDiff,
+                        iou2d,
+                        score);
                 }
-
-                double pcDx = propedPcCenter(0) - currPcCenter(0);
-                double pcDy = propedPcCenter(1) - currPcCenter(1);
-                double pcDz = propedPcCenter(2) - currPcCenter(2);
-                double pcDist = std::sqrt(pcDx * pcDx + pcDy * pcDy + pcDz * pcDz);
-
-                double velDx = propedBBox.Vx - currBBox.Vx;
-                double velDy = propedBBox.Vy - currBBox.Vy;
-                double velDiff = std::sqrt(velDx * velDx + velDy * velDy);
-
-                if (velDiff >= this->maxMatchVelDiff_){
-                    this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
-                                            posDist, pcDist, velDiff, sizeDiff, 0.0, 0.0, -1.0, "REJECT_VEL");
-                    continue;
-                }
-
-                double prevNorm = prevBBoxesFeat[j].norm() * currBBoxesFeat[i].norm();
-                double propedNorm = propedBBoxesFeat[j].norm() * currBBoxesFeat[i].norm();
-
-                double simPrev = 0.0;
-                double simProped = 0.0;
-
-                if (prevNorm > 1e-9){
-                    simPrev = prevBBoxesFeat[j].dot(currBBoxesFeat[i]) / prevNorm;
-                }
-
-                if (propedNorm > 1e-9){
-                    simProped = propedBBoxesFeat[j].dot(currBBoxesFeat[i]) / propedNorm;
-                }
-
-                double featScore = 0.5 * (simPrev + simProped);
-
-                double normPosDist = posDist / std::max(this->maxMatchRange_, 1e-6);
-                double normPcDist = pcDist / std::max(this->maxMatchRange_, 1e-6);
-                double normSizeDiff = sizeDiff / std::max(this->maxMatchSizeRange_, 1e-6);
-                double normVelDiff = velDiff / std::max(this->maxMatchVelDiff_, 1e-6);
-
-                double clusterGeomSim = 0.0;
-                if (j < prevFrameClusterGeometries.size() &&
-                    static_cast<size_t>(i) < currFrameClusterGeometries.size()){
-                    clusterGeomSim = this->computeClusterGeometrySimilarity(
-                        prevFrameClusterGeometries[j],
-                        currFrameClusterGeometries[static_cast<size_t>(i)]);
-                }
-
-                // Riduciamo drasticamente il peso reale della forma cluster
-                double score =
-                    this->matchFeatWeight_ * featScore
-                    - this->matchPosWeight_ * normPosDist
-                    - this->matchPcWeight_ * normPcDist
-                    - this->matchSizeWeight_ * normSizeDiff
-                    - this->matchVelWeight_ * normVelDiff
-                    + this->shapeScoreWeight_ * clusterGeomSim;
-
-                if (score < this->minMatchScore_){
-                    this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
-                                            posDist, pcDist, velDiff, sizeDiff, featScore, clusterGeomSim, score, "REJECT_SCORE");
-                    continue;
-                }
-
-                this->logMatchCandidate(i, static_cast<int>(j), propedBBox.id,
-                                        posDist, pcDist, velDiff, sizeDiff, featScore, clusterGeomSim, score, "CANDIDATE");
 
                 onboardDetector::matchCandidate candidate;
                 candidate.currIdx = i;
@@ -3668,7 +3645,7 @@ namespace onboardDetector{
             trackedBBoxesTemp.push_back(predictedBBox);
         }
 
-       for (int i = 0; i < numObjs; ++i){
+        for (int i = 0; i < numObjs; ++i){
             if (i < static_cast<int>(bestMatch.size()) && bestMatch[i] >= 0){
                 continue;
             }
@@ -3717,9 +3694,9 @@ namespace onboardDetector{
             if (this->enableTrackingDebugLogs_){
                 RCLCPP_INFO(
                     this->nh_->get_logger(),
-                    "[TRACK_NEW] det=%d new_track_id=%.3f x=%.3f y=%.3f z=%.3f",
+                    "[TRACK_NEW] det=%d new_track_id=%d x=%.3f y=%.3f z=%.3f",
                     i,
-                    newEstimatedBBox.id,
+                    static_cast<int>(newEstimatedBBox.id),
                     newEstimatedBBox.x,
                     newEstimatedBBox.y,
                     newEstimatedBBox.z);
@@ -3897,54 +3874,55 @@ namespace onboardDetector{
                                                 const Eigen::Vector3d& currPcCenter,
                                                 const std::vector<bool>& prevMatched)
     {
-        (void)prevMatched; // in questo step non lo usiamo più per escludere track già matchati
+        (void)currPcCenter;
+        (void)prevMatched;
 
         for (size_t j = 0; j < this->boxHist_.size(); ++j){
-            if (this->boxHist_[j].empty() || this->pcCenterHist_[j].empty()){
+            if (this->boxHist_[j].empty()){
                 continue;
             }
 
             onboardDetector::kalman_filter predictedFilter = this->filters_[j];
             predictedFilter.predict(MatrixXd::Zero(6,1));
 
-            double predX = predictedFilter.output(0);
-            double predY = predictedFilter.output(1);
+            onboardDetector::box3D predictedBox = this->boxHist_[j][0];
+            predictedBox.x = predictedFilter.output(0);
+            predictedBox.y = predictedFilter.output(1);
+            predictedBox.Vx = predictedFilter.output(2);
+            predictedBox.Vy = predictedFilter.output(3);
+            predictedBox.Ax = predictedFilter.output(4);
+            predictedBox.Ay = predictedFilter.output(5);
 
-            onboardDetector::box3D predBox = this->boxHist_[j][0];
-            predBox.x = predX;
-            predBox.y = predY;
-            predBox.Vx = predictedFilter.output(2);
-            predBox.Vy = predictedFilter.output(3);
-            predBox.Ax = predictedFilter.output(4);
-            predBox.Ay = predictedFilter.output(5);
+            double centerDist = 0.0;
+            double iou2d = 0.0;
+            double relSizeDiff = 0.0;
 
-            double dx = predX - currDetectedBBox.x;
-            double dy = predY - currDetectedBBox.y;
-            double dist = std::sqrt(dx * dx + dy * dy);
+            const bool isDuplicate = this->isDetectionDuplicateOfPrediction(currDetectedBBox,
+                                                                            predictedBox,
+                                                                            centerDist,
+                                                                            iou2d,
+                                                                            relSizeDiff);
 
-            Eigen::Vector3d predPcCenter = this->pcCenterHist_[j][0];
-            predPcCenter(0) = predX;
-            predPcCenter(1) = predY;
+            if (this->enableTrackingDebugLogs_){
+                RCLCPP_DEBUG(
+                    this->nh_->get_logger(),
+                    "[TRACK_NEW_CHECK] candidate_vs_track_id=%d centerDist=%.3f iou2d=%.3f relSizeDiff=%.3f duplicate=%d",
+                    static_cast<int>(this->boxHist_[j][0].id),
+                    centerDist,
+                    iou2d,
+                    relSizeDiff,
+                    isDuplicate ? 1 : 0);
+            }
 
-            double pcDx = predPcCenter(0) - currPcCenter(0);
-            double pcDy = predPcCenter(1) - currPcCenter(1);
-            double pcDz = predPcCenter(2) - currPcCenter(2);
-            double pcDist = std::sqrt(pcDx * pcDx + pcDy * pcDy + pcDz * pcDz);
-
-            bool duplicate2D = this->areBoxesDuplicate2D(currDetectedBBox, predBox);
-
-            if (dist < this->newTrackMinDist_ ||
-                pcDist < this->newTrackMinPcDist_ ||
-                duplicate2D)
-            {
+            if (isDuplicate){
                 if (this->enableTrackingDebugLogs_){
                     RCLCPP_DEBUG(
                         this->nh_->get_logger(),
-                        "[TRACK_NEW_BLOCKED_BY_EXISTING] candidate_bbox close_to_track_id=%.3f dist=%.3f pcDist=%.3f duplicate2D=%d",
-                        this->boxHist_[j][0].id,
-                        dist,
-                        pcDist,
-                        duplicate2D ? 1 : 0);
+                        "[TRACK_NEW_BLOCKED_BY_EXISTING] candidate_bbox duplicate_of_track_id=%d centerDist=%.3f iou2d=%.3f relSizeDiff=%.3f",
+                        static_cast<int>(this->boxHist_[j][0].id),
+                        centerDist,
+                        iou2d,
+                        relSizeDiff);
                 }
                 return true;
             }
@@ -4143,6 +4121,84 @@ namespace onboardDetector{
             score);
     }
 
+    double dynamicDetector::clampPositive(double value, double minValue) const
+    {
+        return (value < minValue) ? minValue : value;
+    }
+
+    double dynamicDetector::computeAssociationScore(const onboardDetector::box3D& predictedBox,
+                                                    const onboardDetector::box3D& currentBox,
+                                                    double dt,
+                                                    double& posDist,
+                                                    double& requiredSpeed,
+                                                    double& relSizeDiff,
+                                                    double& iou2d,
+                                                    std::string& rejectReason) const
+    {
+        rejectReason.clear();
+
+        const double dx = predictedBox.x - currentBox.x;
+        const double dy = predictedBox.y - currentBox.y;
+        posDist = std::sqrt(dx * dx + dy * dy);
+
+        if (posDist >= this->maxMatchRange_){
+            rejectReason = "REJECT_POS";
+            return -1e9;
+        }
+
+        dt = this->clampPositive(dt, 1e-3);
+        requiredSpeed = posDist / dt;
+
+        if (requiredSpeed >= this->maxMatchSpeed_){
+            rejectReason = "REJECT_SPEED";
+            return -1e9;
+        }
+
+        relSizeDiff = this->computeRelativeSizeDiff(predictedBox, currentBox);
+        if (relSizeDiff >= this->maxRelativeSizeDiffMatch_){
+            rejectReason = "REJECT_SIZE";
+            return -1e9;
+        }
+
+        iou2d = this->computeBoxIoU2D(predictedBox, currentBox);
+
+        const double normPosDist = posDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+
+        double score =
+            - this->matchPosScoreWeight_ * normPosDist
+            - this->matchSizeScoreWeight_ * relSizeDiff
+            + this->matchIou2DScoreWeight_ * iou2d;
+
+        if (score < this->minMatchScore_){
+            rejectReason = "REJECT_SCORE";
+            return score;
+        }
+
+        return score;
+    }
+
+    bool dynamicDetector::isDetectionDuplicateOfPrediction(const onboardDetector::box3D& currDetectedBBox,
+                                                        const onboardDetector::box3D& predictedBox,
+                                                        double& centerDist,
+                                                        double& iou2d,
+                                                        double& relSizeDiff) const
+    {
+        const double dx = predictedBox.x - currDetectedBBox.x;
+        const double dy = predictedBox.y - currDetectedBBox.y;
+        centerDist = std::sqrt(dx * dx + dy * dy);
+
+        iou2d = this->computeBoxIoU2D(currDetectedBBox, predictedBox);
+        relSizeDiff = this->computeRelativeSizeDiff(currDetectedBBox, predictedBox);
+
+        const bool veryCloseCenter = (centerDist < this->newTrackMinDist_);
+        const bool duplicateByOverlap =
+            (centerDist < this->duplicateTrackDistThresh_) &&
+            (iou2d > this->duplicateTrackIou2DThresh_) &&
+            (relSizeDiff < this->duplicateSizeRelThresh_);
+
+        return (veryCloseCenter || duplicateByOverlap);
+    }
+
     void dynamicDetector::getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc){
         Eigen::Vector3d curPoint;
         for (size_t i=0; i<this->filteredPcClusters_.size(); ++i){
@@ -4205,8 +4261,8 @@ namespace onboardDetector{
 
 
     void dynamicDetector::publish3dBox(const std::vector<box3D>& boxes,
-                                   const rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr& publisher,
-                                   double r, double g, double b){
+                                const rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr& publisher,
+                                double r, double g, double b){
         visualization_msgs::msg::MarkerArray markers;
 
         for (size_t i = 0; i < boxes.size(); i++)
@@ -4227,30 +4283,29 @@ namespace onboardDetector{
             line.pose.orientation.y = 0.0;
             line.pose.orientation.z = 0.0;
             line.pose.orientation.w = 1.0;
+
             line.pose.position.x = boxes[i].x;
             line.pose.position.y = boxes[i].y;
-            double x_width = boxes[i].x_width;
-            double y_width = boxes[i].y_width;
+            line.pose.position.z = boxes[i].z;
 
-            double top = boxes[i].z + boxes[i].z_width / 2.0;
-            double z_width = top / 2.0;
-            line.pose.position.z = z_width; 
+            double half_x = boxes[i].x_width / 2.0;
+            double half_y = boxes[i].y_width / 2.0;
+            double half_z = boxes[i].z_width / 2.0;
 
             geometry_msgs::msg::Point corner[8];
-            corner[0].x = -x_width / 2.0; corner[0].y = -y_width / 2.0; corner[0].z = -z_width;
-            corner[1].x = -x_width / 2.0; corner[1].y =  y_width / 2.0; corner[1].z = -z_width;
-            corner[2].x =  x_width / 2.0; corner[2].y =  y_width / 2.0; corner[2].z = -z_width;
-            corner[3].x =  x_width / 2.0; corner[3].y = -y_width / 2.0; corner[3].z = -z_width;
-
-            corner[4].x = -x_width / 2.0; corner[4].y = -y_width / 2.0; corner[4].z =  z_width;
-            corner[5].x = -x_width / 2.0; corner[5].y =  y_width / 2.0; corner[5].z =  z_width;
-            corner[6].x =  x_width / 2.0; corner[6].y =  y_width / 2.0; corner[6].z =  z_width;
-            corner[7].x =  x_width / 2.0; corner[7].y = -y_width / 2.0; corner[7].z =  z_width;
+            corner[0].x = -half_x; corner[0].y = -half_y; corner[0].z = -half_z;
+            corner[1].x = -half_x; corner[1].y =  half_y; corner[1].z = -half_z;
+            corner[2].x =  half_x; corner[2].y =  half_y; corner[2].z = -half_z;
+            corner[3].x =  half_x; corner[3].y = -half_y; corner[3].z = -half_z;
+            corner[4].x = -half_x; corner[4].y = -half_y; corner[4].z =  half_z;
+            corner[5].x = -half_x; corner[5].y =  half_y; corner[5].z =  half_z;
+            corner[6].x =  half_x; corner[6].y =  half_y; corner[6].z =  half_z;
+            corner[7].x =  half_x; corner[7].y = -half_y; corner[7].z =  half_z;
 
             int edgeIdx[12][2] = {
-                {0,1}, {1,2}, {2,3}, {3,0},  
-                {4,5}, {5,6}, {6,7}, {7,4},  
-                {0,4}, {1,5}, {2,6}, {3,7}   
+                {0,1}, {1,2}, {2,3}, {3,0},
+                {4,5}, {5,6}, {6,7}, {7,4},
+                {0,4}, {1,5}, {2,6}, {3,7}
             };
 
             for (int e = 0; e < 12; e++)
