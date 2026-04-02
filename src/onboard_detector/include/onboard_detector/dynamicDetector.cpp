@@ -276,6 +276,36 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": DBSCAN Minimum point in each cluster is set to: " << this->dbMinPointsCluster_ << std::endl;
         }
 
+        // ground/roof offset (roofHeight_ = groundHeight_ + offset)
+        if (!this->nh_->get_parameter(pname("ground_roof_offset"), this->groundRoofOffset_)){
+            this->groundRoofOffset_ = 5.0;
+            std::cout << this->hint_ << ": No ground_roof_offset parameter. Use default: 5.0m." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Ground roof offset is set to: " << this->groundRoofOffset_ << std::endl;
+        }
+
+        // bottom fraction of the image used to estimate the ground plane
+        if (!this->nh_->get_parameter(pname("ground_estim_bottom_fraction"), this->groundEstimBottomFraction_)){
+            this->groundEstimBottomFraction_ = 4; // use bottom 1/4 of the image
+            std::cout << this->hint_ << ": No ground_estim_bottom_fraction. Use default: 4." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Ground estimation bottom fraction: " << this->groundEstimBottomFraction_ << std::endl;
+        }
+
+        // RANSAC minimum inliers for ground plane acceptance
+        if (!this->nh_->get_parameter(pname("ground_estim_min_inliers"), this->groundEstimMinInliers_)){
+            this->groundEstimMinInliers_ = 50;
+            std::cout << this->hint_ << ": No ground_estim_min_inliers. Use default: 50." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Ground estimation min inliers: " << this->groundEstimMinInliers_ << std::endl;
+        }
+
+        // initialize with safe defaults until first estimation runs
+        this->groundEstimated_ = false;
+
         // search range
         if (!this->nh_->get_parameter(pname("dbscan_search_range_epsilon"), this->dbEpsilon_)){
             this->dbEpsilon_ = 0.3;
@@ -297,7 +327,7 @@ namespace onboardDetector{
         // lidar dbscan search range
         if (!this->nh_->get_parameter(pname("lidar_DBSCAN_epsilon"), this->lidarDBEpsilon_)){
             this->lidarDBEpsilon_ = 0.2;
-            std::cout << this->hint_ << ": No lidar DBSCAN epsilon parameter. Use default: 0.5." << std::endl;
+            std::cout << this->hint_ << ": No lidar DBSCAN epsilon parameter. Use default: 0.2." << std::endl;
         }
         else{
             std::cout << this->hint_ << ": Lidar DBSCAN epsilon is set to: " << this->lidarDBEpsilon_ << std::endl;
@@ -902,6 +932,7 @@ namespace onboardDetector{
             transformMatrix(1, 3) = t.y;
             transformMatrix(2, 3) = t.z;
 
+
             return true;
         }
         catch (const tf2::TransformException&) {
@@ -1128,6 +1159,7 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::depthPoseCB(const sensor_msgs::msg::Image::ConstSharedPtr& img, const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose){
+
         // store current depth image
         cv_bridge::CvImagePtr imgPtr = cv_bridge::toCvCopy(img, img->encoding);
         if (img->encoding == sensor_msgs::image_encodings::TYPE_32FC1){
@@ -1156,9 +1188,14 @@ namespace onboardDetector{
         this->positionColor_(1) = camPoseColorMatrix(1, 3);
         this->positionColor_(2) = camPoseColorMatrix(2, 3);
         this->orientationColor_ = camPoseColorMatrix.block<3, 3>(0, 0);
+
+        if(this->lidarToDepthCamOk_){
+            this->estimateGroundHeight();
+        }
     }
 
     void dynamicDetector::depthOdomCB(const sensor_msgs::msg::Image::ConstSharedPtr& img, const nav_msgs::msg::Odometry::ConstSharedPtr& odom){
+        
         // store current depth image
         cv_bridge::CvImagePtr imgPtr = cv_bridge::toCvCopy(img, img->encoding);
         if (img->encoding == sensor_msgs::image_encodings::TYPE_32FC1){
@@ -1187,6 +1224,10 @@ namespace onboardDetector{
         this->positionColor_(1) = camPoseColorMatrix(1, 3);
         this->positionColor_(2) = camPoseColorMatrix(2, 3);
         this->orientationColor_ = camPoseColorMatrix.block<3, 3>(0, 0);
+
+        if(this->lidarToDepthCamOk_){
+            this->estimateGroundHeight();
+        }
     }
 
     void dynamicDetector::lidarPoseCB(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloudMsg, const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose){
@@ -1407,19 +1448,36 @@ namespace onboardDetector{
 
     void dynamicDetector::colorImgCB(const sensor_msgs::msg::Image::ConstSharedPtr& img){
         cv_bridge::CvImagePtr imgPtr = cv_bridge::toCvCopy(img, img->encoding);
+        
         imgPtr->image.copyTo(this->detectedColorImage_);
     }
 
     void dynamicDetector::yoloDetectionCB(const vision_msgs::msg::Detection2DArray::ConstSharedPtr& detections){
+
+        if(this->lidarToDepthCamOk_ == false){
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
+            return;
+        }
+
         this->yoloDetectionResults_ = *detections;
     }
-
    
     void dynamicDetector::lidarDetectionCB(){
+
+        if(this->lidarToDepthCamOk_ == false){
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
+            return;
+        }
+
         this->lidarDetect();
     }
 
     void dynamicDetector::detectionCB(){
+
+        if(this->lidarToDepthCamOk_ == false){
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
+            return;
+        }
         // detection thread
         this->dbscanDetect();
         this->uvDetect();
@@ -1428,6 +1486,12 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::trackingCB(){
+
+        if(this->lidarToDepthCamOk_ == false){
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
+            return;
+        }
+
         std::vector<int> bestMatch;
 
         this->boxAssociation(bestMatch);
@@ -1446,6 +1510,12 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::classificationCB(){
+
+        if(this->lidarToDepthCamOk_ == false){
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
+            return;
+        }
+
         // Identification thread
         std::vector<onboardDetector::box3D> dynamicBBoxesTemp;
 
@@ -2989,6 +3059,7 @@ namespace onboardDetector{
         this->voxelFilter(points, voxelFilteredPoints);
 
         filteredPoints.clear();
+        std::cout<<"Ground Height is: "<<this->groundHeight_<<", Roof Height is: "<<this->roofHeight_<<std::endl;
         for (const auto& point : voxelFilteredPoints){
             if (point.z() <= this->roofHeight_ && point.z() >= this->groundHeight_){
                 filteredPoints.push_back(point);
@@ -3130,6 +3201,109 @@ namespace onboardDetector{
                 }
             }
         } 
+    }
+
+    void dynamicDetector::estimateGroundHeight(){
+        if (this->depthImage_.empty()){
+            return;
+        }
+
+        // sanity check: if the depth camera's z-axis in the map frame
+        // is far from horizontal, the bottom rows don't reliably see ground.
+        // orientationDepth_ columns are the camera axes expressed in map frame.
+        // column 1 (camera y-down) projected onto map z should be near +1.
+        Eigen::Vector3d camYinMap = this->orientationDepth_.col(1);
+        if (std::abs(camYinMap(2)) < 0.5){
+            // camera is too tilted; skip this frame
+            return;
+        }
+
+        int rows = this->depthImage_.rows;
+        int cols = this->depthImage_.cols;
+        int startRow = rows - rows / this->groundEstimBottomFraction_;
+
+        const double inv_factor = 1.0 / this->depthScale_;
+        const double inv_fx     = 1.0 / this->fx_;
+        const double inv_fy     = 1.0 / this->fy_;
+
+        std::vector<double> zValues;
+        zValues.reserve(
+            (rows - startRow) * cols /
+            (this->skipPixel_ * this->skipPixel_));
+
+        for (int v = startRow; v < rows; v += this->skipPixel_){
+            const uint16_t* rowPtr = this->depthImage_.ptr<uint16_t>(v);
+            for (int u = 0; u < cols; u += this->skipPixel_){
+                double depth = rowPtr[u] * inv_factor;
+                if (depth < this->depthMinValue_ || depth > this->depthMaxValue_){
+                    continue;
+                }
+                Eigen::Vector3d ptCam;
+                ptCam(0) = (u - this->cx_) * depth * inv_fx;
+                ptCam(1) = (v - this->cy_) * depth * inv_fy;
+                ptCam(2) = depth;
+
+                // project into map frame — z is height above map origin
+                Eigen::Vector3d ptMap =
+                    this->orientationDepth_ * ptCam + this->positionDepth_;
+
+                // keep only points that are plausibly on the floor:
+                // below the camera and within a reasonable absolute height range
+                if (ptMap(2) > this->positionDepth_(2)){
+                    continue; // above the camera, skip
+                }
+
+                zValues.push_back(ptMap(2));
+            }
+        }
+
+        if ((int)zValues.size() < this->groundEstimMinInliers_){
+            return;
+        }
+
+        // RANSAC on z = c (horizontal plane in map frame)
+        const double inlierThresh = 0.05; // 5 cm
+        const int    maxIter      = 60;
+
+        int    bestInliers = 0;
+        double bestZ       = 0.0;
+
+        std::mt19937 rng(42);
+        std::uniform_int_distribution<int> dist(
+            0, static_cast<int>(zValues.size()) - 1);
+
+        for (int iter = 0; iter < maxIter; ++iter){
+            double zHyp = zValues[dist(rng)];
+
+            int    inliers = 0;
+            double zSum    = 0.0;
+            for (double z : zValues){
+                if (std::abs(z - zHyp) < inlierThresh){
+                    ++inliers;
+                    zSum += z;
+                }
+            }
+
+            if (inliers > bestInliers){
+                bestInliers = inliers;
+                bestZ       = zSum / inliers;
+            }
+        }
+
+        if (bestInliers < this->groundEstimMinInliers_){
+            return;
+        }
+
+        if (!this->groundEstimated_){
+            this->groundHeight_    = bestZ;
+            this->groundEstimated_ = true;
+        }
+        else{
+            const double alpha  = 0.05;
+            this->groundHeight_ = (1.0 - alpha) * this->groundHeight_ + alpha * bestZ;
+        }
+
+        this->roofHeight_ = this->groundHeight_ + this->groundRoofOffset_;
     }
 
     void dynamicDetector::calcPcFeat(const std::vector<Eigen::Vector3d>& pcCluster, Eigen::Vector3d& pcClusterCenter, Eigen::Vector3d& pcClusterStd){

@@ -33,7 +33,7 @@
 #include <onboard_detector/kalmanFilter.h>
 #include <onboard_detector/utils.h>
 #include <onboard_detector/srv/get_dynamic_obstacles.hpp>
-
+#include <random>
 
 namespace onboardDetector{
     class dynamicDetector{
@@ -109,6 +109,8 @@ namespace onboardDetector{
         // CAMERA COLOR
         double fxC_, fyC_, cxC_, cyC_;
 
+        bool lidarToDepthCamOk_ = false;
+
         // PARAMETETER
         // Topics
         int localizationMode_;
@@ -129,7 +131,12 @@ namespace onboardDetector{
         // DBSCAN Common
         double groundHeight_;
         double roofHeight_;
-        
+        double groundRoofOffset_;
+        bool groundEstimated_;
+        int groundEstimBottomFraction_; // fraction of image rows used (e.g. 4 = bottom 1/4)
+        int groundEstimMinInliers_;     // RANSAC minimum inliers
+
+                
         // DBSCAN visual param
         double voxelOccThresh_;
         double voxelSize_ = 0.1; // default voxel size (meters)
@@ -334,6 +341,7 @@ namespace onboardDetector{
         void calcPcFeat(const std::vector<Eigen::Vector3d>& pcCluster, Eigen::Vector3d& pcClusterCenter, Eigen::Vector3d& pcClusterStd);
         double calBoxIOU(const onboardDetector::box3D& box1, const onboardDetector::box3D& box2, bool ignoreZmin=false);
         double calBoxIOV(const onboardDetector::box3D& box1, const onboardDetector::box3D& box2, bool ignoreZmin=false);
+        void estimateGroundHeight();
 
         // Data association and tracking functions
         void boxAssociation(std::vector<int>& bestMatch);
@@ -467,10 +475,10 @@ namespace onboardDetector{
 
         // Compose the rest of the chain using TF (velodyne to camera frames)
         Eigen::Matrix4d lidarToDepthCam, lidarToColorCam;
-        bool lidarToDepthCamOk = this->lookupTfMatrix(this->tfLidarFrame_, this->tfDepthFrame_, lidarToDepthCam);
+        this->lidarToDepthCamOk_ = this->lookupTfMatrix(this->tfLidarFrame_, this->tfDepthFrame_, lidarToDepthCam);
         bool lidarToColorCamOk = this->lookupTfMatrix(this->tfLidarFrame_, this->tfColorFrame_, lidarToColorCam);
 
-        if (lidarToDepthCamOk && lidarToColorCamOk) {
+        if (this->lidarToDepthCamOk_ && lidarToColorCamOk) {
             camPoseDepthMatrix = mapToLidar * lidarToDepthCam;
             camPoseColorMatrix = mapToLidar * lidarToColorCam;
             return;
@@ -486,10 +494,10 @@ namespace onboardDetector{
         Eigen::Matrix4d lidarToColorCam;
 
         bool mapToLidarOk = this->lookupTfMatrix(this->tfMapFrame_, this->tfLidarFrame_, mapToLidar);
-        bool lidarToDepthCamOk = this->lookupTfMatrix(this->tfLidarFrame_, this->tfDepthFrame_, lidarToDepthCam);
+        this->lidarToDepthCamOk_ = this->lookupTfMatrix(this->tfLidarFrame_, this->tfDepthFrame_, lidarToDepthCam);
         bool lidarToColorCamOk = this->lookupTfMatrix(this->tfLidarFrame_, this->tfColorFrame_, lidarToColorCam);
 
-        if (mapToLidarOk && lidarToDepthCamOk && lidarToColorCamOk) {
+        if (mapToLidarOk && this->lidarToDepthCamOk_ && lidarToColorCamOk) {
             camPoseDepthMatrix = mapToLidar * lidarToDepthCam;
             camPoseColorMatrix = mapToLidar * lidarToColorCam;
             return;
