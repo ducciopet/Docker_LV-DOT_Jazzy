@@ -214,7 +214,8 @@ namespace onboardDetector{
         double matchSizeScoreWeight_ = 0.35;     // peso differenza size
         double matchIou2DScoreWeight_ = 0.15;    // peso IoU2D (tenuto basso)
         double maxRelativeSizeDiffMatch_ = 0.60; // soglia gating sulla differenza relativa media delle dimensioni
-
+        double matchVelocityDirectionScoreWeight_ = 0.12; // peso direzione velocità
+        
         double newTrackMinDist_;
         double newTrackMinPcDist_;
         double maxMatchVelDiff_;
@@ -257,6 +258,18 @@ namespace onboardDetector{
         double maxVelocityDirectionErrorConfirm_ = 1.20;
         double maxVelocityDirectionErrorTracked_ = 2.50;
         double stationarySpeedThresh_ = 0.10;
+
+        double confirmedTrackAssocBonus_ = 0.20;
+        double dynamicTrackAssocBonus_ = 0.25;
+
+        double maxNaturalInnovationConfirmed_ = 1.00;
+        double maxNaturalInnovationDynamic_ = 1.20;
+
+        double maxVelocityDirectionErrorConfirmDynamic_ = 2.20;
+        double maxVelocityDirectionErrorTrackedDynamic_ = 4.00;
+
+        double minMatchScoreConfirmed_ = -1.20;
+        double minMatchScoreDynamic_ = -1.50;
     
         // Classification
         int skipFrame_;
@@ -450,6 +463,14 @@ namespace onboardDetector{
         bool passesVelocityDirectionGate(int trackIdx,
                                         const onboardDetector::box3D& currDetectedBBox,
                                         bool alreadyConfirmed) const;
+
+        bool isTrackConfirmedByIdx(int trackIdx) const;
+
+        double getAdaptiveMaxInnovation(int trackIdx,
+                                        const onboardDetector::box3D& currDetectedBBox) const;
+
+        double getAdaptiveMinMatchScore(int trackIdx,
+                                        const onboardDetector::box3D& currentBox) const;
 
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);

@@ -3763,7 +3763,8 @@ namespace onboardDetector{
             std::sqrt((currDetectedBBox.x - predX) * (currDetectedBBox.x - predX) +
                     (currDetectedBBox.y - predY) * (currDetectedBBox.y - predY));
 
-        if (innovation > this->maxNaturalInnovation_){
+        const double maxInnovation = this->getAdaptiveMaxInnovation(trackIdx, currDetectedBBox);
+        if (innovation > maxInnovation){
             return false;
         }
 
@@ -3780,7 +3781,16 @@ namespace onboardDetector{
             const double denom = std::max(obsSpeed * prevSpeed, 1e-6);
             const double cosSim = dot / denom;
 
-            if (cosSim < this->minDirectionConsistencyCos_){
+            // più tolleranza per dinamici o già confirmed
+            double minCos = this->minDirectionConsistencyCos_;
+            if (currDetectedBBox.is_dynamic || currDetectedBBox.is_human){
+                minCos = std::min(-0.60, this->minDirectionConsistencyCos_);
+            }
+            else if (this->isTrackConfirmedByIdx(trackIdx)){
+                minCos = std::min(-0.40, this->minDirectionConsistencyCos_);
+            }
+
+            if (cosSim < minCos){
                 return false;
             }
         }
@@ -3869,8 +3879,7 @@ namespace onboardDetector{
         const double predVy = predictedFilter.output(3);
         const double predSpeed = std::sqrt(predVx * predVx + predVy * predVy);
 
-        // Caso chiave:
-        // track già confermata e oggetto praticamente fermo -> passa
+        // Track già confermata e quasi ferma -> passa sempre
         if (alreadyConfirmed &&
             obsSpeed < this->stationarySpeedThresh_ &&
             predSpeed < this->stationarySpeedThresh_)
@@ -3880,11 +3889,57 @@ namespace onboardDetector{
 
         const double err = this->computeVelocityDirectionError(trackIdx, currDetectedBBox);
 
+        // dinamici/umani: molto più permissivi
+        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_human){
+            if (alreadyConfirmed){
+                return err <= this->maxVelocityDirectionErrorTrackedDynamic_;
+            }
+            return err <= this->maxVelocityDirectionErrorConfirmDynamic_;
+        }
+
+        // track già buona: permissiva
         if (alreadyConfirmed){
             return err <= this->maxVelocityDirectionErrorTracked_;
         }
 
+        // nuove/non confermate: severa
         return err <= this->maxVelocityDirectionErrorConfirm_;
+    }
+
+    bool dynamicDetector::isTrackConfirmedByIdx(int trackIdx) const
+    {
+        if (trackIdx < 0 || trackIdx >= static_cast<int>(this->confirmedTracks_.size())){
+            return false;
+        }
+        return this->confirmedTracks_[trackIdx];
+    }
+
+    double dynamicDetector::getAdaptiveMaxInnovation(int trackIdx,
+                                                    const onboardDetector::box3D& currDetectedBBox) const
+    {
+        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_human){
+            return this->maxNaturalInnovationDynamic_;
+        }
+
+        if (this->isTrackConfirmedByIdx(trackIdx)){
+            return this->maxNaturalInnovationConfirmed_;
+        }
+
+        return this->maxNaturalInnovation_;
+    }
+
+    double dynamicDetector::getAdaptiveMinMatchScore(int trackIdx,
+                                                    const onboardDetector::box3D& currentBox) const
+    {
+        if (currentBox.is_dynamic || currentBox.is_human){
+            return this->minMatchScoreDynamic_;
+        }
+
+        if (this->isTrackConfirmedByIdx(trackIdx)){
+            return this->minMatchScoreConfirmed_;
+        }
+
+        return this->minMatchScore_;
     }
 
     bool dynamicDetector::shouldConfirmTrack(int trackIdx,
@@ -4912,97 +4967,109 @@ namespace onboardDetector{
     }
 
     double dynamicDetector::computeAssociationScore(const onboardDetector::box3D& predictedBox,
-                                                    const onboardDetector::box3D& previousObservedBox,
-                                                    const onboardDetector::box3D& currentBox,
-                                                    double dt,
-                                                    double& predPosDist,
-                                                    double& requiredSpeed,
-                                                    double& relSizeDiff,
-                                                    double& predIou2d,
-                                                    double& prevObsPosDist,
-                                                    double& prevObsIou2d,
-                                                    std::string& rejectReason) const
-    {
-        rejectReason.clear();
+                                                const onboardDetector::box3D& previousObservedBox,
+                                                const onboardDetector::box3D& currentBox,
+                                                double dt,
+                                                double& predPosDist,
+                                                double& requiredSpeed,
+                                                double& relSizeDiff,
+                                                double& predIou2d,
+                                                double& prevObsPosDist,
+                                                double& prevObsIou2d,
+                                                std::string& rejectReason) const
+{
+    rejectReason.clear();
 
-        const double dxPred = predictedBox.x - currentBox.x;
-        const double dyPred = predictedBox.y - currentBox.y;
-        predPosDist = std::sqrt(dxPred * dxPred + dyPred * dyPred);
+    const double dxPred = predictedBox.x - currentBox.x;
+    const double dyPred = predictedBox.y - currentBox.y;
+    predPosDist = std::sqrt(dxPred * dxPred + dyPred * dyPred);
 
-        if (predPosDist >= this->maxMatchRange_){
-            rejectReason = "REJECT_POS";
+    if (predPosDist >= this->maxMatchRange_){
+        rejectReason = "REJECT_POS";
+        return -1e9;
+    }
+
+    dt = this->clampPositive(dt, 1e-3);
+    requiredSpeed = predPosDist / dt;
+
+    if (requiredSpeed >= this->maxMatchSpeed_){
+        rejectReason = "REJECT_SPEED";
+        return -1e9;
+    }
+
+    relSizeDiff = this->computeRelativeSizeDiff(predictedBox, currentBox);
+    if (relSizeDiff >= this->maxRelativeSizeDiffMatch_){
+        rejectReason = "REJECT_SIZE";
+        return -1e9;
+    }
+
+    predIou2d = this->computeBoxIoU2D(predictedBox, currentBox);
+
+    const double dxPrev = previousObservedBox.x - currentBox.x;
+    const double dyPrev = previousObservedBox.y - currentBox.y;
+    prevObsPosDist = std::sqrt(dxPrev * dxPrev + dyPrev * dyPrev);
+    prevObsIou2d = this->computeBoxIoU2D(previousObservedBox, currentBox);
+
+    const double normPredPosDist = predPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+    const double normPrevObsPosDist = prevObsPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+
+    double velDirPenalty = 0.0;
+    bool foundTrackIdx = false;
+    bool alreadyConfirmed = false;
+    int matchedTrackIdx = -1;
+
+    for (size_t j = 0; j < this->boxHist_.size(); ++j){
+        if (this->boxHist_[j].empty()){
+            continue;
+        }
+
+        if (this->boxHist_[j][0].id == predictedBox.id){
+            matchedTrackIdx = static_cast<int>(j);
+            foundTrackIdx = true;
+            if (j < this->confirmedTracks_.size()){
+                alreadyConfirmed = this->confirmedTracks_[j];
+            }
+            break;
+        }
+    }
+
+    if (foundTrackIdx){
+        if (!this->passesVelocityDirectionGate(matchedTrackIdx, currentBox, alreadyConfirmed)){
+            rejectReason = alreadyConfirmed ? "REJECT_VELDIR_TRACKED" : "REJECT_VELDIR_CONFIRM";
             return -1e9;
         }
 
-        dt = this->clampPositive(dt, 1e-3);
-        requiredSpeed = predPosDist / dt;
+        velDirPenalty = this->computeVelocityDirectionError(matchedTrackIdx, currentBox);
+    }
 
-        if (requiredSpeed >= this->maxMatchSpeed_){
-            rejectReason = "REJECT_SPEED";
-            return -1e9;
+    double score =
+        - this->matchPosScoreWeight_ * normPredPosDist
+        - this->matchSizeScoreWeight_ * relSizeDiff
+        + this->matchIou2DScoreWeight_ * predIou2d
+        - this->matchPrevObsPosScoreWeight_ * normPrevObsPosDist
+        + this->matchPrevObsIou2DScoreWeight_ * prevObsIou2d
+        - this->matchVelocityDirectionScoreWeight_ * velDirPenalty;
+
+    if (foundTrackIdx){
+        if (alreadyConfirmed){
+            score += this->confirmedTrackAssocBonus_;
         }
-
-        relSizeDiff = this->computeRelativeSizeDiff(predictedBox, currentBox);
-        if (relSizeDiff >= this->maxRelativeSizeDiffMatch_){
-            rejectReason = "REJECT_SIZE";
-            return -1e9;
+        if (currentBox.is_dynamic || currentBox.is_human){
+            score += this->dynamicTrackAssocBonus_;
         }
+    }
 
-        predIou2d = this->computeBoxIoU2D(predictedBox, currentBox);
+    const double adaptiveMinScore =
+        foundTrackIdx ? this->getAdaptiveMinMatchScore(matchedTrackIdx, currentBox)
+                      : this->minMatchScore_;
 
-        const double dxPrev = previousObservedBox.x - currentBox.x;
-        const double dyPrev = previousObservedBox.y - currentBox.y;
-        prevObsPosDist = std::sqrt(dxPrev * dxPrev + dyPrev * dyPrev);
-        prevObsIou2d = this->computeBoxIoU2D(previousObservedBox, currentBox);
-
-        const double normPredPosDist = predPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
-        const double normPrevObsPosDist = prevObsPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
-
-        double velDirPenalty = 0.0;
-        bool foundTrackIdx = false;
-        bool alreadyConfirmed = false;
-        int matchedTrackIdx = -1;
-
-        for (size_t j = 0; j < this->boxHist_.size(); ++j){
-            if (this->boxHist_[j].empty()){
-                continue;
-            }
-
-            if (this->boxHist_[j][0].id == predictedBox.id){
-                matchedTrackIdx = static_cast<int>(j);
-                foundTrackIdx = true;
-                if (j < this->confirmedTracks_.size()){
-                    alreadyConfirmed = this->confirmedTracks_[j];
-                }
-                break;
-            }
-        }
-
-        if (foundTrackIdx){
-            if (!this->passesVelocityDirectionGate(matchedTrackIdx, currentBox, alreadyConfirmed)){
-                rejectReason = alreadyConfirmed ? "REJECT_VELDIR_TRACKED" : "REJECT_VELDIR_CONFIRM";
-                return -1e9;
-            }
-
-            velDirPenalty = this->computeVelocityDirectionError(matchedTrackIdx, currentBox);
-        }
-
-        const double score =
-            - this->matchPosScoreWeight_ * normPredPosDist
-            - this->matchSizeScoreWeight_ * relSizeDiff
-            + this->matchIou2DScoreWeight_ * predIou2d
-            - this->matchPrevObsPosScoreWeight_ * normPrevObsPosDist
-            + this->matchPrevObsIou2DScoreWeight_ * prevObsIou2d
-            - 0.2 * velDirPenalty;
-
-        if (score < this->minMatchScore_){
-            rejectReason = "REJECT_SCORE";
-            return score;
-        }
-
+    if (score < adaptiveMinScore){
+        rejectReason = "REJECT_SCORE";
         return score;
     }
 
+    return score;
+}
 
     bool dynamicDetector::tryAugmentDetectionMatch(int detIdx,
                                                 const std::vector<std::vector<int>>& candidatePrevIdxByCurr,
