@@ -140,6 +140,7 @@ namespace onboardDetector{
     // UVdetector     
     UVdetector::UVdetector()
     {
+        std::cout << "[DEBUG] Entering UVdetector constructor" << std::endl;
         this->row_downsample = 4;
         this->col_scale = 0.5;
         this->min_dist = 10;
@@ -155,9 +156,9 @@ namespace onboardDetector{
         this->px = 317.48284912109375;
         this->py = 234.11557006835938;
 
-
         this->x0 = 0;
         this->y0 = 0;
+        std::cout << "[DEBUG] Exiting UVdetector constructor" << std::endl;
     }
 
     void UVdetector::readdata(queue<cv::Mat> depthq)
@@ -191,10 +192,12 @@ namespace onboardDetector{
     void UVdetector::extract_U_map()
     {
         // rescale depth map
+        std::cout << "[DEBUG] extract_U_map: depth size = " << this->depth.rows << "x" << this->depth.cols << std::endl;
         cv::Mat depth_rescale;
-        
         resize(this->depth, depth_rescale, cv::Size(),this->col_scale , 1);
+        std::cout << "[DEBUG] extract_U_map: depth_rescale size = " << depth_rescale.rows << "x" << depth_rescale.cols << std::endl;
         cv::Mat depth_low_res_temp = cv::Mat::zeros(depth_rescale.rows, depth_rescale.cols, CV_8UC1);
+        std::cout << "[DEBUG] extract_U_map: depth_low_res_temp size = " << depth_low_res_temp.rows << "x" << depth_low_res_temp.cols << std::endl;
 
         
 
@@ -205,6 +208,7 @@ namespace onboardDetector{
         int bin_width = ceil((this->max_dist - this->min_dist) / float(histSize));
 
         this->U_map = cv::Mat::zeros(histSize, depth_rescale.cols, CV_8UC1);
+        std::cout << "[DEBUG] extract_U_map: U_map size = " << this->U_map.rows << "x" << this->U_map.cols << std::endl;
 
         int depth_rescale_val = 0;
 
@@ -370,8 +374,10 @@ namespace onboardDetector{
     void UVdetector::extract_3Dbox()
     {   
         // this function returns 3D boxes in world frame for publishing
+        std::cout << "[DEBUG] extract_3Dbox: depth size = " << depth.rows << "x" << depth.cols << std::endl;
         cv::Mat depth_resize;
         resize(depth, depth_resize, cv::Size(), this->col_scale, 1);
+        std::cout << "[DEBUG] extract_3Dbox: depth_resize size = " << depth_resize.rows << "x" << depth_resize.cols << std::endl;
         float histSize = this->depth.rows / this->row_downsample;
         // printf("rows, ros_downsmaple %d, %d\n", this->depth.rows, this->row_downsample);
         float bin_width = ceil((this->max_dist - this->min_dist) / histSize);

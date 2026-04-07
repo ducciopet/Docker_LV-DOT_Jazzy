@@ -196,6 +196,9 @@ namespace onboardDetector{
         int kfAvgFrames_;
         std::vector<int> missedFrames_;
         int maxMissedFrames_;
+        std::vector<int> hitStreak_;
+        std::vector<int> trackAge_;
+        std::vector<bool> confirmedTracks_;
 
         double matchFeatWeight_;
         double matchPosWeight_;
@@ -239,6 +242,21 @@ namespace onboardDetector{
         double assocMaxRelSizeDiff_ = 0.75;         // massimo size diff relativo ammesso
         double matchFeatScoreWeight_ = 0.15;        // peso reale del featScore nel matching: molto basso
         double matchIoU2DWeight_ = 0.20;            // piccolo bonus da overlap XY
+
+        double yolo3DBoxAssocIouThresh_ = 0.20;
+        double minProjectedBoxAreaPx_ = 80.0;
+        double maxProjectedBoxAreaFrac_ = 0.60;
+
+        int minConfirmHits_ = 3;
+        double minNaturalMotionDist_ = 0.08;
+        double maxNaturalMotionDist_ = 1.50;
+        double maxNaturalInnovation_ = 0.60;
+        double minDirectionConsistencyCos_ = -0.20;
+        double minVelocityForDirectionCheck_ = 0.10;
+
+        double maxVelocityDirectionErrorConfirm_ = 1.20;
+        double maxVelocityDirectionErrorTracked_ = 2.50;
+        double stationarySpeedThresh_ = 0.10;
     
         // Classification
         int skipFrame_;
@@ -395,6 +413,43 @@ namespace onboardDetector{
         int findTrackHistoryIndexById(const std::vector<std::deque<onboardDetector::box3D>>& boxHist,
                               int trackId) const;
         void getPreviousObservedBBoxes(std::vector<onboardDetector::box3D>& previousObservedBBoxes) const;
+        bool tryAugmentDetectionMatch(int detIdx,
+                              const std::vector<std::vector<int>>& candidatePrevIdxByCurr,
+                              std::vector<int>& assignedPrevToCurr,
+                              std::vector<int>& assignedCurrToPrev,
+                              std::vector<int>& visitTokenByPrev,
+                              int visitToken) const;
+
+        void assignMatchesGlobally(const std::vector<onboardDetector::matchCandidate>& candidates,
+                                int numCurr,
+                                int numPrev,
+                                std::vector<int>& bestMatch) const;
+
+        double computeBoxIoU2DFromCorners(int tlXA, int tlYA, int brXA, int brYA,
+                                  int tlXB, int tlYB, int brXB, int brYB) const;
+
+        bool project3DBoxToImageRect(const onboardDetector::box3D& bbox,
+                                    int imgWidth,
+                                    int imgHeight,
+                                    cv::Rect& outRect);
+
+        int findBest3DBoxForYoloDetection(const vision_msgs::msg::Detection2D& yoloDet,
+                                        const std::vector<cv::Rect>& projected3DRects,
+                                        double& bestIoU) const;
+        
+        bool isNaturalMotion(int trackIdx,
+                             const onboardDetector::box3D& currDetectedBBox) const;
+
+        bool shouldConfirmTrack(int trackIdx,
+                                const onboardDetector::box3D& currDetectedBBox,
+                                int newHitStreak) const;
+
+        double computeVelocityDirectionError(int trackIdx,
+                                     const onboardDetector::box3D& currDetectedBBox) const;
+
+        bool passesVelocityDirectionGate(int trackIdx,
+                                        const onboardDetector::box3D& currDetectedBBox,
+                                        bool alreadyConfirmed) const;
 
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);
