@@ -113,10 +113,52 @@ detector_node:
 
       duplicate_track_dist_thresh: 0.8
       duplicate_track_iou2d_thresh: 0.25
-      duplicate_size_rel_thresh: 0.6
+      duplicate_size_rel_thresh: 0.6  
       shape_score_weight: 0.02
       enable_tracking_debug_logs: true
 
+      # Association robustness
+      max_match_speed: 8.0
+      match_pos_score_weight: 1.0
+      match_size_score_weight: 0.35
+      match_iou2d_score_weight: 0.15
+      max_relative_size_diff_match: 0.60
+      match_velocity_direction_score_weight: 0.12
+      match_prev_obs_pos_score_weight: 0.25
+      match_prev_obs_iou2d_score_weight: 0.10
+      static_assoc_speed_thresh: 0.35
+      static_assoc_dist_thresh: 0.45
+      dynamic_assoc_dist_base: 0.60
+      dynamic_assoc_dist_gain: 1.20
+      dynamic_assoc_dist_max: 2.50
+      static_assoc_min_iou2d: 0.08
+      assoc_max_rel_size_diff: 0.75
+      match_feat_score_weight: 0.15
+      match_iou2d_weight: 0.20
+
+      # Track confirmation / natural motion
+      min_confirm_hits: 3
+      min_natural_motion_dist: 0.08
+      max_natural_motion_dist: 1.50
+      max_natural_innovation: 0.60
+      min_direction_consistency_cos: -0.20
+      min_velocity_for_direction_check: 0.10
+      max_velocity_direction_error_confirm: 1.20
+      max_velocity_direction_error_tracked: 2.50
+      stationary_speed_thresh: 0.10
+      confirmed_track_assoc_bonus: 0.20
+      dynamic_track_assoc_bonus: 0.25
+      max_natural_innovation_confirmed: 1.00
+      max_natural_innovation_dynamic: 1.20
+      max_velocity_direction_error_confirm_dynamic: 2.20
+      max_velocity_direction_error_tracked_dynamic: 4.00
+      min_match_score_confirmed: -1.20
+      min_match_score_dynamic: -1.50
+
+      # YOLO Dynamic Classification (depth-projected point cloud)
+      yolo_dynamic_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
+      yolo_point_fraction_threshold: 0.15 # min fraction of filtered YOLO points inside a bbox to mark it dynamic
+      yolo_depth_tolerance: 1.0            # [m] max depth beyond foreground to keep (background filter)
 
 
       # Classification
@@ -165,7 +207,7 @@ yolov11_detector_node:
     inference_time_topic: yolo_detector/yolo_time
     weights_path: weights/yolo11n.pt
     class_names_path: config/coco.names
-    target_classes: [person]
+    target_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
     timer_period_sec: 0.033
     inference_size: 352
     queue_size: 10

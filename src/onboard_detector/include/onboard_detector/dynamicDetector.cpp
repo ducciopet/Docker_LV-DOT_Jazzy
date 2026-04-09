@@ -917,6 +917,341 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Enable tracking debug logs is set to: " << (this->enableTrackingDebugLogs_ ? "true" : "false") << std::endl;
         }
 
+        // =========================
+        // YOLO Dynamic Classification Parameters
+        // =========================
+        std::vector<std::string> yoloDynClassesTemp;
+        if (this->nh_->get_parameter(pname("yolo_dynamic_classes"), yoloDynClassesTemp)){
+            this->yoloDynamicClasses_ = yoloDynClassesTemp;
+            std::cout << this->hint_ << ": YOLO dynamic classes: [";
+            for (size_t i = 0; i < this->yoloDynamicClasses_.size(); ++i){
+                std::cout << this->yoloDynamicClasses_[i];
+                if (i != this->yoloDynamicClasses_.size() - 1) std::cout << ", ";
+            }
+            std::cout << "]" << std::endl;
+        }
+        else{
+            this->yoloDynamicClasses_ = {"person", "car", "bus", "truck", "motorbike", "bicycle", "dog", "cat", "horse", "cow", "sheep"};
+            std::cout << this->hint_ << ": No yolo_dynamic_classes parameter. Using defaults: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]." << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_point_fraction_threshold"), this->yoloPointFractionThresh_)){
+            this->yoloPointFractionThresh_ = 0.15;
+            std::cout << this->hint_ << ": No yolo_point_fraction_threshold. Use default: 0.15." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO point fraction threshold: " << this->yoloPointFractionThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_depth_tolerance"), this->yoloDepthTolerance_)){
+            this->yoloDepthTolerance_ = 1.0;
+            std::cout << this->hint_ << ": No yolo_depth_tolerance. Use default: 1.0 m." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO depth tolerance: " << this->yoloDepthTolerance_ << " m" << std::endl;
+        }
+
+        // =========================
+        // Sensor and LiDAR Range Parameters
+        // =========================
+        std::vector<double> sensorRangeTemp;
+        if (this->nh_->get_parameter(pname("local_sensor_range"), sensorRangeTemp) && sensorRangeTemp.size() == 3){
+            this->localSensorRange_ = Eigen::Vector3d(sensorRangeTemp[0], sensorRangeTemp[1], sensorRangeTemp[2]);
+            std::cout << this->hint_ << ": Local sensor range: [" << sensorRangeTemp[0] << ", " << sensorRangeTemp[1] << ", " << sensorRangeTemp[2] << "]" << std::endl;
+        }
+        else{
+            this->localSensorRange_ = Eigen::Vector3d(5.0, 5.0, 5.0);
+            std::cout << this->hint_ << ": No local_sensor_range. Use default: [5.0, 5.0, 5.0]." << std::endl;
+        }
+
+        std::vector<double> lidarRangeTemp;
+        if (this->nh_->get_parameter(pname("local_lidar_range"), lidarRangeTemp) && lidarRangeTemp.size() == 3){
+            this->localLidarRange_ = Eigen::Vector3d(lidarRangeTemp[0], lidarRangeTemp[1], lidarRangeTemp[2]);
+            std::cout << this->hint_ << ": Local LiDAR range: [" << lidarRangeTemp[0] << ", " << lidarRangeTemp[1] << ", " << lidarRangeTemp[2] << "]" << std::endl;
+        }
+        else{
+            this->localLidarRange_ = Eigen::Vector3d(10.0, 10.0, 5.0);
+            std::cout << this->hint_ << ": No local_lidar_range. Use default: [10.0, 10.0, 5.0]." << std::endl;
+        }
+
+        // =========================
+        // Association Robustness Parameters
+        // =========================
+        if (!this->nh_->get_parameter(pname("max_match_speed"), this->maxMatchSpeed_)){
+            this->maxMatchSpeed_ = 8.0;
+            std::cout << this->hint_ << ": No max_match_speed. Use default: 8.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max match speed: " << this->maxMatchSpeed_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_pos_score_weight"), this->matchPosScoreWeight_)){
+            this->matchPosScoreWeight_ = 1.0;
+            std::cout << this->hint_ << ": No match_pos_score_weight. Use default: 1.0." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match pos score weight: " << this->matchPosScoreWeight_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_size_score_weight"), this->matchSizeScoreWeight_)){
+            this->matchSizeScoreWeight_ = 0.35;
+            std::cout << this->hint_ << ": No match_size_score_weight. Use default: 0.35." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match size score weight: " << this->matchSizeScoreWeight_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_iou2d_score_weight"), this->matchIou2DScoreWeight_)){
+            this->matchIou2DScoreWeight_ = 0.15;
+            std::cout << this->hint_ << ": No match_iou2d_score_weight. Use default: 0.15." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match IoU2D score weight: " << this->matchIou2DScoreWeight_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_relative_size_diff_match"), this->maxRelativeSizeDiffMatch_)){
+            this->maxRelativeSizeDiffMatch_ = 0.60;
+            std::cout << this->hint_ << ": No max_relative_size_diff_match. Use default: 0.60." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max relative size diff match: " << this->maxRelativeSizeDiffMatch_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_velocity_direction_score_weight"), this->matchVelocityDirectionScoreWeight_)){
+            this->matchVelocityDirectionScoreWeight_ = 0.12;
+            std::cout << this->hint_ << ": No match_velocity_direction_score_weight. Use default: 0.12." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match velocity direction score weight: " << this->matchVelocityDirectionScoreWeight_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_prev_obs_pos_score_weight"), this->matchPrevObsPosScoreWeight_)){
+            this->matchPrevObsPosScoreWeight_ = 0.25;
+            std::cout << this->hint_ << ": No match_prev_obs_pos_score_weight. Use default: 0.25." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match prev obs pos score weight: " << this->matchPrevObsPosScoreWeight_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_prev_obs_iou2d_score_weight"), this->matchPrevObsIou2DScoreWeight_)){
+            this->matchPrevObsIou2DScoreWeight_ = 0.10;
+            std::cout << this->hint_ << ": No match_prev_obs_iou2d_score_weight. Use default: 0.10." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match prev obs IoU2D score weight: " << this->matchPrevObsIou2DScoreWeight_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("static_assoc_speed_thresh"), this->staticAssocSpeedThresh_)){
+            this->staticAssocSpeedThresh_ = 0.35;
+            std::cout << this->hint_ << ": No static_assoc_speed_thresh. Use default: 0.35." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Static assoc speed thresh: " << this->staticAssocSpeedThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("static_assoc_dist_thresh"), this->staticAssocDistThresh_)){
+            this->staticAssocDistThresh_ = 0.45;
+            std::cout << this->hint_ << ": No static_assoc_dist_thresh. Use default: 0.45." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Static assoc dist thresh: " << this->staticAssocDistThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("dynamic_assoc_dist_base"), this->dynamicAssocDistBase_)){
+            this->dynamicAssocDistBase_ = 0.60;
+            std::cout << this->hint_ << ": No dynamic_assoc_dist_base. Use default: 0.60." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Dynamic assoc dist base: " << this->dynamicAssocDistBase_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("dynamic_assoc_dist_gain"), this->dynamicAssocDistGain_)){
+            this->dynamicAssocDistGain_ = 1.20;
+            std::cout << this->hint_ << ": No dynamic_assoc_dist_gain. Use default: 1.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Dynamic assoc dist gain: " << this->dynamicAssocDistGain_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("dynamic_assoc_dist_max"), this->dynamicAssocDistMax_)){
+            this->dynamicAssocDistMax_ = 2.50;
+            std::cout << this->hint_ << ": No dynamic_assoc_dist_max. Use default: 2.50." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Dynamic assoc dist max: " << this->dynamicAssocDistMax_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("static_assoc_min_iou2d"), this->staticAssocMinIoU2D_)){
+            this->staticAssocMinIoU2D_ = 0.08;
+            std::cout << this->hint_ << ": No static_assoc_min_iou2d. Use default: 0.08." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Static assoc min IoU2D: " << this->staticAssocMinIoU2D_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("assoc_max_rel_size_diff"), this->assocMaxRelSizeDiff_)){
+            this->assocMaxRelSizeDiff_ = 0.75;
+            std::cout << this->hint_ << ": No assoc_max_rel_size_diff. Use default: 0.75." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Assoc max rel size diff: " << this->assocMaxRelSizeDiff_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_feat_score_weight"), this->matchFeatScoreWeight_)){
+            this->matchFeatScoreWeight_ = 0.15;
+            std::cout << this->hint_ << ": No match_feat_score_weight. Use default: 0.15." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match feat score weight: " << this->matchFeatScoreWeight_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_iou2d_weight"), this->matchIoU2DWeight_)){
+            this->matchIoU2DWeight_ = 0.20;
+            std::cout << this->hint_ << ": No match_iou2d_weight. Use default: 0.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match IoU2D weight: " << this->matchIoU2DWeight_ << std::endl;
+        }
+
+        // =========================
+        // Track Confirmation / Natural Motion Parameters
+        // =========================
+        if (!this->nh_->get_parameter(pname("min_confirm_hits"), this->minConfirmHits_)){
+            this->minConfirmHits_ = 3;
+            std::cout << this->hint_ << ": No min_confirm_hits. Use default: 3." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Min confirm hits: " << this->minConfirmHits_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("min_natural_motion_dist"), this->minNaturalMotionDist_)){
+            this->minNaturalMotionDist_ = 0.08;
+            std::cout << this->hint_ << ": No min_natural_motion_dist. Use default: 0.08." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Min natural motion dist: " << this->minNaturalMotionDist_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_natural_motion_dist"), this->maxNaturalMotionDist_)){
+            this->maxNaturalMotionDist_ = 1.50;
+            std::cout << this->hint_ << ": No max_natural_motion_dist. Use default: 1.50." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max natural motion dist: " << this->maxNaturalMotionDist_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_natural_innovation"), this->maxNaturalInnovation_)){
+            this->maxNaturalInnovation_ = 0.60;
+            std::cout << this->hint_ << ": No max_natural_innovation. Use default: 0.60." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max natural innovation: " << this->maxNaturalInnovation_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("min_direction_consistency_cos"), this->minDirectionConsistencyCos_)){
+            this->minDirectionConsistencyCos_ = -0.20;
+            std::cout << this->hint_ << ": No min_direction_consistency_cos. Use default: -0.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Min direction consistency cos: " << this->minDirectionConsistencyCos_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("min_velocity_for_direction_check"), this->minVelocityForDirectionCheck_)){
+            this->minVelocityForDirectionCheck_ = 0.10;
+            std::cout << this->hint_ << ": No min_velocity_for_direction_check. Use default: 0.10." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Min velocity for direction check: " << this->minVelocityForDirectionCheck_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_velocity_direction_error_confirm"), this->maxVelocityDirectionErrorConfirm_)){
+            this->maxVelocityDirectionErrorConfirm_ = 1.20;
+            std::cout << this->hint_ << ": No max_velocity_direction_error_confirm. Use default: 1.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max velocity direction error confirm: " << this->maxVelocityDirectionErrorConfirm_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_velocity_direction_error_tracked"), this->maxVelocityDirectionErrorTracked_)){
+            this->maxVelocityDirectionErrorTracked_ = 2.50;
+            std::cout << this->hint_ << ": No max_velocity_direction_error_tracked. Use default: 2.50." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max velocity direction error tracked: " << this->maxVelocityDirectionErrorTracked_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("stationary_speed_thresh"), this->stationarySpeedThresh_)){
+            this->stationarySpeedThresh_ = 0.10;
+            std::cout << this->hint_ << ": No stationary_speed_thresh. Use default: 0.10." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Stationary speed thresh: " << this->stationarySpeedThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("confirmed_track_assoc_bonus"), this->confirmedTrackAssocBonus_)){
+            this->confirmedTrackAssocBonus_ = 0.20;
+            std::cout << this->hint_ << ": No confirmed_track_assoc_bonus. Use default: 0.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Confirmed track assoc bonus: " << this->confirmedTrackAssocBonus_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("dynamic_track_assoc_bonus"), this->dynamicTrackAssocBonus_)){
+            this->dynamicTrackAssocBonus_ = 0.25;
+            std::cout << this->hint_ << ": No dynamic_track_assoc_bonus. Use default: 0.25." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Dynamic track assoc bonus: " << this->dynamicTrackAssocBonus_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_natural_innovation_confirmed"), this->maxNaturalInnovationConfirmed_)){
+            this->maxNaturalInnovationConfirmed_ = 1.00;
+            std::cout << this->hint_ << ": No max_natural_innovation_confirmed. Use default: 1.00." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max natural innovation confirmed: " << this->maxNaturalInnovationConfirmed_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_natural_innovation_dynamic"), this->maxNaturalInnovationDynamic_)){
+            this->maxNaturalInnovationDynamic_ = 1.20;
+            std::cout << this->hint_ << ": No max_natural_innovation_dynamic. Use default: 1.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max natural innovation dynamic: " << this->maxNaturalInnovationDynamic_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_velocity_direction_error_confirm_dynamic"), this->maxVelocityDirectionErrorConfirmDynamic_)){
+            this->maxVelocityDirectionErrorConfirmDynamic_ = 2.20;
+            std::cout << this->hint_ << ": No max_velocity_direction_error_confirm_dynamic. Use default: 2.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max velocity direction error confirm dynamic: " << this->maxVelocityDirectionErrorConfirmDynamic_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_velocity_direction_error_tracked_dynamic"), this->maxVelocityDirectionErrorTrackedDynamic_)){
+            this->maxVelocityDirectionErrorTrackedDynamic_ = 4.00;
+            std::cout << this->hint_ << ": No max_velocity_direction_error_tracked_dynamic. Use default: 4.00." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max velocity direction error tracked dynamic: " << this->maxVelocityDirectionErrorTrackedDynamic_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("min_match_score_confirmed"), this->minMatchScoreConfirmed_)){
+            this->minMatchScoreConfirmed_ = -1.20;
+            std::cout << this->hint_ << ": No min_match_score_confirmed. Use default: -1.20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Min match score confirmed: " << this->minMatchScoreConfirmed_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("min_match_score_dynamic"), this->minMatchScoreDynamic_)){
+            this->minMatchScoreDynamic_ = -1.50;
+            std::cout << this->hint_ << ": No min_match_score_dynamic. Use default: -1.50." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Min match score dynamic: " << this->minMatchScoreDynamic_ << std::endl;
+        }
+
     }
 
     bool dynamicDetector::lookupTfMatrix(const std::string& targetFrame, const std::string& sourceFrame, Eigen::Matrix4d& transformMatrix){
@@ -1548,7 +1883,7 @@ namespace onboardDetector{
         for (size_t i=0; i<this->pcHist_.size() ; ++i){
             // ===================================================================================
             // CASE I: yolo recognized as dynamic dynamic obstacle
-            if (this->boxHist_[i][0].is_human){
+            if (this->boxHist_[i][0].is_yolo_candidate){
                 dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
                 continue;
             }
@@ -1637,7 +1972,7 @@ namespace onboardDetector{
                 int dynaConsistCount = 0;
                 if (int(this->boxHist_[i].size()) >= this->dynamicConsistThresh_){
                     for (int j=0 ; j<this->dynamicConsistThresh_; ++j){
-                        if (this->boxHist_[i][j].is_dynamic_candidate or this->boxHist_[i][j].is_human or this->boxHist_[i][j].is_dynamic){
+                        if (this->boxHist_[i][j].is_dynamic_candidate or this->boxHist_[i][j].is_yolo_candidate or this->boxHist_[i][j].is_dynamic){
                             ++dynaConsistCount;
                         }
                     }
@@ -2804,225 +3139,159 @@ namespace onboardDetector{
         this->filteredBBoxesBeforeYolo_ = filteredBBoxesTemp; // ready for visualization / next steps
 
         // =========================
-        // ADD YOLO DETECTION RESULTS
+        // YOLO DYNAMIC CLASSIFICATION (depth-projected point cloud)
         // =========================
-        if (this->yoloDetectionResults_.detections.size() != 0){
-            
-            std::vector<int> best3DBBoxForYOLO(this->yoloDetectionResults_.detections.size(), -1);
-            std::vector<cv::Rect> projected3DRects;
-            projected3DRects.reserve(filteredBBoxesTemp.size());
+        // Pipeline:
+        //   1) For each YOLO detection of a target class, build a 3D point cloud
+        //      by unprojecting depth pixels inside the YOLO rect.
+        //   2) Filter background: keep only foreground points (within tolerance
+        //      of the 10th-percentile depth).
+        //   3) For each filtered point, check which filteredBBoxesTemp it falls in.
+        //   4) If a bbox captures enough of the filtered YOLO points → mark dynamic.
+        if (!this->yoloDetectionResults_.detections.empty() && !this->depthImage_.empty())
+        {
+            // Precompute constants for depth → 3D → world
+            const double inv_factor = 1.0 / this->depthScale_;
+            const double inv_fx = 1.0 / this->fx_;
+            const double inv_fy = 1.0 / this->fy_;
+            const int dCols = this->depthImage_.cols;
+            const int dRows = this->depthImage_.rows;
 
-            std::vector<int> projected3DToOriginalIdx;
-            projected3DToOriginalIdx.reserve(filteredBBoxesTemp.size());
+            // Mapping from color pixel to depth pixel (co-located cameras):
+            //   u_depth = fx_/fxC_ * (u_color - cxC_) + cx_
+            //   v_depth = fy_/fyC_ * (v_color - cyC_) + cy_
+            const double scaleU = this->fx_ / this->fxC_;
+            const double scaleV = this->fy_ / this->fyC_;
+            const double offU  = this->cx_ - scaleU * this->cxC_;
+            const double offV  = this->cy_ - scaleV * this->cyC_;
 
-            const int imgWidth  = this->detectedColorImage_.cols;
-            const int imgHeight = this->detectedColorImage_.rows;
-
-            // Project valid 3D boxes only
-            for (int j = 0; j < static_cast<int>(filteredBBoxesTemp.size()); ++j){
-                cv::Rect rect;
-                if (!this->project3DBoxToImageRect(filteredBBoxesTemp[j], imgWidth, imgHeight, rect)){
-                    continue;
-                }
-
-                projected3DRects.push_back(rect);
-                projected3DToOriginalIdx.push_back(j);
-            }
-
-            for (int i = 0; i < static_cast<int>(this->yoloDetectionResults_.detections.size()); ++i){
+            for (size_t i = 0; i < this->yoloDetectionResults_.detections.size(); ++i){
                 const auto& yoloDet = this->yoloDetectionResults_.detections[i];
 
-                int tlXTarget = 0;
-                int tlYTarget = 0;
+                // Only process target dynamic classes
+                std::string detClass;
                 if (!yoloDet.results.empty()){
-                    tlXTarget = static_cast<int>(yoloDet.results[0].pose.pose.position.x);
-                    tlYTarget = static_cast<int>(yoloDet.results[0].pose.pose.position.y);
+                    detClass = yoloDet.results[0].hypothesis.class_id;
+                }
+                bool isDynamicClass = false;
+                for (const auto& cls : this->yoloDynamicClasses_){
+                    if (cls == detClass){ isDynamicClass = true; break; }
+                }
+                if (!isDynamicClass) continue;
+
+                // YOLO rect in color image coordinates
+                int tlX = 0, tlY = 0;
+                if (!yoloDet.results.empty()){
+                    tlX = static_cast<int>(yoloDet.results[0].pose.pose.position.x);
+                    tlY = static_cast<int>(yoloDet.results[0].pose.pose.position.y);
+                }
+                const int brX = tlX + static_cast<int>(yoloDet.bbox.size_x);
+                const int brY = tlY + static_cast<int>(yoloDet.bbox.size_y);
+                if (brX <= tlX || brY <= tlY) continue;
+
+                // Visualize YOLO detection
+                if (!this->detectedColorImage_.empty()){
+                    cv::Rect bboxVis(tlX, tlY, brX - tlX, brY - tlY);
+                    cv::rectangle(this->detectedColorImage_, bboxVis, cv::Scalar(255, 0, 0), 5, 8, 0);
+                    cv::putText(this->detectedColorImage_, detClass,
+                                cv::Point(bboxVis.x, bboxVis.y - 10),
+                                cv::FONT_HERSHEY_SIMPLEX, 1.0,
+                                cv::Scalar(255, 0, 0), 2, 8);
                 }
 
-                const int brXTarget = tlXTarget + static_cast<int>(yoloDet.bbox.size_x);
-                const int brYTarget = tlYTarget + static_cast<int>(yoloDet.bbox.size_y);
+                // --------------------------------------------------
+                // STEP 1: Build YOLO 3D point cloud from depth image
+                // --------------------------------------------------
+                // Map YOLO rect corners to depth image pixel ROI
+                int dTlU = static_cast<int>(std::floor(scaleU * tlX + offU));
+                int dTlV = static_cast<int>(std::floor(scaleV * tlY + offV));
+                int dBrU = static_cast<int>(std::ceil (scaleU * brX + offU));
+                int dBrV = static_cast<int>(std::ceil (scaleV * brY + offV));
+                dTlU = std::max(dTlU, 0);  dTlV = std::max(dTlV, 0);
+                dBrU = std::min(dBrU, dCols); dBrV = std::min(dBrV, dRows);
 
-                if (brXTarget <= tlXTarget || brYTarget <= tlYTarget){
-                    continue;
+                if (dBrU <= dTlU || dBrV <= dTlV) continue;
+
+                // Collect 3D points + their camera-frame depths
+                std::vector<Eigen::Vector3d> yoloPoints;
+                std::vector<double> yoloDepths;
+                yoloPoints.reserve((dBrU - dTlU) * (dBrV - dTlV));
+                yoloDepths.reserve(yoloPoints.capacity());
+
+                for (int vv = dTlV; vv < dBrV; ++vv){
+                    const uint16_t* rowPtr = this->depthImage_.ptr<uint16_t>(vv);
+                    for (int uu = dTlU; uu < dBrU; ++uu){
+                        if (rowPtr[uu] == 0) continue;
+                        const double d = rowPtr[uu] * inv_factor;
+                        if (d < this->depthMinValue_ || d > this->depthMaxValue_) continue;
+
+                        // Depth pixel → 3D camera frame
+                        Eigen::Vector3d ptCam;
+                        ptCam(0) = (uu - this->cx_) * d * inv_fx;
+                        ptCam(1) = (vv - this->cy_) * d * inv_fy;
+                        ptCam(2) = d;
+
+                        // Camera frame → world frame
+                        Eigen::Vector3d ptWorld = this->orientationDepth_ * ptCam + this->positionDepth_;
+
+                        yoloPoints.push_back(ptWorld);
+                        yoloDepths.push_back(d);
+                    }
                 }
 
-                cv::Rect bboxVis(tlXTarget,
-                                tlYTarget,
-                                brXTarget - tlXTarget,
-                                brYTarget - tlYTarget);
+                if (yoloPoints.empty()) continue;
 
-                cv::rectangle(this->detectedColorImage_, bboxVis, cv::Scalar(255, 0, 0), 5, 8, 0);
+                // --------------------------------------------------
+                // STEP 2: Filter background points
+                // --------------------------------------------------
+                // Find 10th-percentile depth as robust foreground estimate,
+                // keep only points within yoloDepthTolerance_ of it.
+                std::vector<double> sortedDepths = yoloDepths;
+                std::sort(sortedDepths.begin(), sortedDepths.end());
+                const double foregroundDepth = sortedDepths[sortedDepths.size() / 10]; // ~10th percentile
+                const double maxAllowedDepth = foregroundDepth + this->yoloDepthTolerance_;
 
-                std::string text = "dynamic";
-                int fontFace = cv::FONT_HERSHEY_SIMPLEX;
-                double fontScale = 1.0;
-                int thickness = 2;
-                cv::Point textOrg(bboxVis.x, bboxVis.y - 10);
-                cv::putText(this->detectedColorImage_, text, textOrg, fontFace, fontScale,
-                            cv::Scalar(255, 0, 0), thickness, 8);
-
-                double bestIoU = 0.0;
-                const int localBestIdx = this->findBest3DBoxForYoloDetection(yoloDet, projected3DRects, bestIoU);
-
-                if (localBestIdx < 0){
-                    continue;
+                std::vector<Eigen::Vector3d> filteredYoloPoints;
+                filteredYoloPoints.reserve(yoloPoints.size());
+                for (size_t k = 0; k < yoloPoints.size(); ++k){
+                    if (yoloDepths[k] <= maxAllowedDepth){
+                        filteredYoloPoints.push_back(yoloPoints[k]);
+                    }
                 }
 
-                if (localBestIdx >= 0 && localBestIdx < static_cast<int>(projected3DToOriginalIdx.size())){
-                    best3DBBoxForYOLO[i] = projected3DToOriginalIdx[localBestIdx];
-                }
+                if (filteredYoloPoints.empty()) continue;
 
-                if (this->enableTrackingDebugLogs_){
-                    RCLCPP_DEBUG(this->nh_->get_logger(),
-                                "[YOLO_3D_ASSOC] yolo_idx=%d best_3d_idx=%d iou=%.3f",
-                                i,
-                                best3DBBoxForYOLO[i],
-                                bestIoU);
-                }
-            }
+                // --------------------------------------------------
+                // STEP 3 & 4: Check which bboxes contain these points
+                // --------------------------------------------------
+                // For each bbox, count how many filtered YOLO points fall inside.
+                const int totalFiltered = static_cast<int>(filteredYoloPoints.size());
 
-            std::map<int, std::vector<int>> box3DToYolo;
-            for (int i = 0; i < int(best3DBBoxForYOLO.size()); ++i) {
-                int idx3D = best3DBBoxForYOLO[i];
-                if (idx3D >= 0 && idx3D < int(filteredBBoxesTemp.size())){
-                    box3DToYolo[idx3D].push_back(i);
-                }
-            }
+                for (size_t j = 0; j < filteredBBoxesTemp.size(); ++j){
+                    const auto& bb = filteredBBoxesTemp[j];
+                    const double hx = bb.x_width * 0.5;
+                    const double hy = bb.y_width * 0.5;
+                    const double hz = bb.z_width * 0.5;
 
-            std::vector<onboardDetector::box3D> newFilteredBBoxes;
-            std::vector<std::vector<Eigen::Vector3d>> newFilteredPcClusters;
-            std::vector<Eigen::Vector3d> newFilteredPcClusterCenters;
-            std::vector<Eigen::Vector3d> newFilteredPcClusterStds;
-            
-            for (int idx3D = 0; idx3D < int(filteredBBoxesTemp.size()); ++idx3D) {
-                auto it = box3DToYolo.find(idx3D);
-                // *Case 1: No corresponding yolo box
-                if (it == box3DToYolo.end()) {
-                    newFilteredBBoxes.push_back(filteredBBoxesTemp[idx3D]);
-                    newFilteredPcClusters.push_back(filteredPcClustersTemp[idx3D]);
-                    newFilteredPcClusterCenters.push_back(filteredPcClusterCentersTemp[idx3D]);
-                    newFilteredPcClusterStds.push_back(filteredPcClusterStdsTemp[idx3D]);
-                    continue;
-                }
-
-                std::vector<int> yoloIndices = it->second;
-                // *Case 2: one yolo box corresponds to one 3D box
-                if (yoloIndices.size() == 1) {
-                    filteredBBoxesTemp[idx3D].is_dynamic = true;
-                    filteredBBoxesTemp[idx3D].is_human = true;
-                    newFilteredBBoxes.push_back(filteredBBoxesTemp[idx3D]);
-                    newFilteredPcClusters.push_back(filteredPcClustersTemp[idx3D]);
-                    newFilteredPcClusterCenters.push_back(filteredPcClusterCentersTemp[idx3D]);
-                    newFilteredPcClusterStds.push_back(filteredPcClusterStdsTemp[idx3D]);
-                // *Case 3: multiple yolo boxes correspond to one 3D box
-                } else {
-                    std::vector<Eigen::Vector3d> cloudCluster = filteredPcClustersTemp[idx3D];
-                    const onboardDetector::box3D& parentBox = filteredBBoxesTemp[idx3D];
-
-                    // iterate to assign all points
-                    int allowMargin = 0; // pixel 
-                    std::vector<int> assignment(cloudCluster.size(), -1);
-                    for (size_t i = 0; i < cloudCluster.size(); ++i){
-                        Eigen::Vector3d ptWorld = cloudCluster[i];
-                        Eigen::Vector3d ptCam = this->orientationColor_.inverse() * (ptWorld - this->positionColor_);
-
-                        if (ptCam(2) <= 0){
-                            continue;
-                        }
-
-                        int u = (this->fxC_ * ptCam(0) + this->cxC_ * ptCam(2)) / ptCam(2);
-
-                        int closestDist = std::numeric_limits<int>::max();
-                        for (int yidx : yoloIndices){
-                            int XTargetWid = int(this->yoloDetectionResults_.detections[yidx].bbox.size_x);
-
-                            // Extract YOLO bbox top-left corner from hypothesis pose
-                            int XTarget = 0;
-                            if (this->yoloDetectionResults_.detections[yidx].results.size() > 0) {
-                                XTarget = int(this->yoloDetectionResults_.detections[yidx].results[0].pose.pose.position.x);
-                            }
-
-                            int xMin = XTarget;
-                            int xMax = XTarget + XTargetWid;
-
-                            // Use only horizontal image information to split the cluster.
-                            // Do NOT use YOLO bbox height to avoid changing 3D bbox height.
-                            int distance = 0;
-                            if (u < xMin - allowMargin) {
-                                distance = (xMin - allowMargin) - u;
-                            } else if (u > xMax + allowMargin) {
-                                distance = u - (xMax + allowMargin);
-                            } else {
-                                distance = 0;
-                            }
-
-                            if (distance < closestDist){
-                                assignment[i] = yidx;
-                                closestDist = distance;
-                            }
+                    int insideCount = 0;
+                    for (const auto& pt : filteredYoloPoints){
+                        if (std::abs(pt(0) - bb.x) <= hx &&
+                            std::abs(pt(1) - bb.y) <= hy &&
+                            std::abs(pt(2) - bb.z) <= hz){
+                            ++insideCount;
                         }
                     }
 
-                    std::vector<bool> flag(cloudCluster.size(), false);
-                    for (int yidx : yoloIndices){
-                        std::vector<Eigen::Vector3d> subCloud;
-                        for (size_t i = 0; i < cloudCluster.size(); ++i){
-                            if (flag[i]){
-                                continue;
-                            }
+                    if (insideCount == 0) continue;
 
-                            if (assignment[i] == yidx){
-                                subCloud.push_back(cloudCluster[i]);
-                                flag[i] = true;
-                            }
-                        }
+                    const double fraction = static_cast<double>(insideCount) / static_cast<double>(totalFiltered);
 
-                        if (subCloud.size() != 0){
-                            onboardDetector::box3D newBox;
-                            Eigen::Vector3d center, stddev;
-                            center = computeCenter(subCloud);
-
-                            double xMin = std::numeric_limits<double>::max(), xMax = std::numeric_limits<double>::lowest();
-                            double yMin = std::numeric_limits<double>::max(), yMax = std::numeric_limits<double>::lowest();
-
-                            for (const auto &pt : subCloud) {
-                                xMin = std::min(xMin, pt.x());
-                                xMax = std::max(xMax, pt.x());
-                                yMin = std::min(yMin, pt.y());
-                                yMax = std::max(yMax, pt.y());
-                            }
-
-                            // create a new bounding box
-                            newBox.x = (xMin + xMax) / 2.;
-                            newBox.y = (yMin + yMax) / 2.;
-
-                            // Keep original height unchanged
-                            newBox.z = parentBox.z;
-                            newBox.z_width = parentBox.z_width;
-
-                            newBox.x_width = xMax - xMin;
-                            newBox.y_width = yMax - yMin;
-
-                            if (newBox.x_width <= 0 || newBox.y_width <= 0 || newBox.z_width <= 0){
-                                continue;
-                            }
-
-                            newBox.is_dynamic = true;
-                            newBox.is_human = true;
-
-                            stddev = computeStd(subCloud, center);
-                            newFilteredBBoxes.push_back(newBox);
-                            newFilteredPcClusters.push_back(subCloud);
-                            newFilteredPcClusterCenters.push_back(center);
-                            newFilteredPcClusterStds.push_back(stddev);
-                        }
+                    if (fraction >= this->yoloPointFractionThresh_){
+                        filteredBBoxesTemp[j].is_yolo_candidate = true;
+                        filteredBBoxesTemp[j].is_dynamic = true;
                     }
                 }
             }
-            filteredBBoxesTemp = newFilteredBBoxes;
-            filteredPcClustersTemp = newFilteredPcClusters;
-            filteredPcClusterCentersTemp = newFilteredPcClusterCenters;
-            filteredPcClusterStdsTemp = newFilteredPcClusterStds;
         }
         this->filteredBBoxes_ = filteredBBoxesTemp;
         this->filteredPcClusters_ = filteredPcClustersTemp;
@@ -3654,113 +3923,6 @@ namespace onboardDetector{
         return interArea / unionArea;
     }
 
-    bool dynamicDetector::project3DBoxToImageRect(const onboardDetector::box3D& bbox,
-                                                int imgWidth,
-                                                int imgHeight,
-                                                cv::Rect& outRect)
-    {
-        Eigen::Vector3d centerWorld(bbox.x, bbox.y, bbox.z);
-        Eigen::Vector3d sizeWorld(bbox.x_width, bbox.y_width, bbox.z_width);
-        Eigen::Vector3d centerCam, sizeCam;
-
-        this->transformBBox(centerWorld,
-                            sizeWorld,
-                            -this->orientationColor_.inverse() * this->positionColor_,
-                            this->orientationColor_.inverse(),
-                            centerCam,
-                            sizeCam);
-
-        if (centerCam(2) <= 0.1){
-            return false;
-        }
-
-        Eigen::Vector3d topLeft3D(centerCam(0) - sizeCam(0) / 2.0,
-                                centerCam(1) - sizeCam(1) / 2.0,
-                                centerCam(2));
-
-        Eigen::Vector3d bottomRight3D(centerCam(0) + sizeCam(0) / 2.0,
-                                    centerCam(1) + sizeCam(1) / 2.0,
-                                    centerCam(2));
-
-        if (topLeft3D(2) <= 0.1 || bottomRight3D(2) <= 0.1){
-            return false;
-        }
-
-        int tlX = static_cast<int>((this->fxC_ * topLeft3D(0)     + this->cxC_ * topLeft3D(2))     / topLeft3D(2));
-        int tlY = static_cast<int>((this->fyC_ * topLeft3D(1)     + this->cyC_ * topLeft3D(2))     / topLeft3D(2));
-        int brX = static_cast<int>((this->fxC_ * bottomRight3D(0) + this->cxC_ * bottomRight3D(2)) / bottomRight3D(2));
-        int brY = static_cast<int>((this->fyC_ * bottomRight3D(1) + this->cyC_ * bottomRight3D(2)) / bottomRight3D(2));
-
-        if (brX <= tlX || brY <= tlY){
-            return false;
-        }
-
-        tlX = std::max(0, std::min(tlX, imgWidth  - 1));
-        brX = std::max(0, std::min(brX, imgWidth  - 1));
-        tlY = std::max(0, std::min(tlY, imgHeight - 1));
-        brY = std::max(0, std::min(brY, imgHeight - 1));
-
-        if (brX <= tlX || brY <= tlY){
-            return false;
-        }
-
-        const double area = static_cast<double>(brX - tlX) * static_cast<double>(brY - tlY);
-        const double imgArea = static_cast<double>(imgWidth) * static_cast<double>(imgHeight);
-
-        if (area < this->minProjectedBoxAreaPx_){
-            return false;
-        }
-
-        if (area > this->maxProjectedBoxAreaFrac_ * imgArea){
-            return false;
-        }
-
-        outRect = cv::Rect(tlX, tlY, brX - tlX, brY - tlY);
-        return true;
-    }
-
-    int dynamicDetector::findBest3DBoxForYoloDetection(
-        const vision_msgs::msg::Detection2D& yoloDet,
-        const std::vector<cv::Rect>& projected3DRects,
-        double& bestIoU) const
-    {
-        bestIoU = 0.0;
-
-        int tlXTarget = 0;
-        int tlYTarget = 0;
-        if (!yoloDet.results.empty()){
-            tlXTarget = static_cast<int>(yoloDet.results[0].pose.pose.position.x);
-            tlYTarget = static_cast<int>(yoloDet.results[0].pose.pose.position.y);
-        }
-
-        const int brXTarget = tlXTarget + static_cast<int>(yoloDet.bbox.size_x);
-        const int brYTarget = tlYTarget + static_cast<int>(yoloDet.bbox.size_y);
-
-        if (brXTarget <= tlXTarget || brYTarget <= tlYTarget){
-            return -1;
-        }
-
-        int bestIdx = -1;
-        for (int j = 0; j < static_cast<int>(projected3DRects.size()); ++j){
-            const cv::Rect& r = projected3DRects[j];
-
-            const double iou = this->computeBoxIoU2DFromCorners(
-                r.x, r.y, r.x + r.width, r.y + r.height,
-                tlXTarget, tlYTarget, brXTarget, brYTarget);
-
-            if (iou > bestIoU){
-                bestIoU = iou;
-                bestIdx = j;
-            }
-        }
-
-        if (bestIoU < this->yolo3DBoxAssocIouThresh_){
-            return -1;
-        }
-
-        return bestIdx;
-    }
-
     bool dynamicDetector::isNaturalMotion(int trackIdx,
                                         const onboardDetector::box3D& currDetectedBBox) const
     {
@@ -3817,7 +3979,7 @@ namespace onboardDetector{
 
             // più tolleranza per dinamici o già confirmed
             double minCos = this->minDirectionConsistencyCos_;
-            if (currDetectedBBox.is_dynamic || currDetectedBBox.is_human){
+            if (currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate){
                 minCos = std::min(-0.60, this->minDirectionConsistencyCos_);
             }
             else if (this->isTrackConfirmedByIdx(trackIdx)){
@@ -3924,7 +4086,7 @@ namespace onboardDetector{
         const double err = this->computeVelocityDirectionError(trackIdx, currDetectedBBox);
 
         // dinamici/umani: molto più permissivi
-        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_human){
+        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate){
             if (alreadyConfirmed){
                 return err <= this->maxVelocityDirectionErrorTrackedDynamic_;
             }
@@ -3951,7 +4113,7 @@ namespace onboardDetector{
     double dynamicDetector::getAdaptiveMaxInnovation(int trackIdx,
                                                     const onboardDetector::box3D& currDetectedBBox) const
     {
-        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_human){
+        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate){
             return this->maxNaturalInnovationDynamic_;
         }
 
@@ -3965,7 +4127,7 @@ namespace onboardDetector{
     double dynamicDetector::getAdaptiveMinMatchScore(int trackIdx,
                                                     const onboardDetector::box3D& currentBox) const
     {
-        if (currentBox.is_dynamic || currentBox.is_human){
+        if (currentBox.is_dynamic || currentBox.is_yolo_candidate){
             return this->minMatchScoreDynamic_;
         }
 
@@ -3980,7 +4142,7 @@ namespace onboardDetector{
                                             const onboardDetector::box3D& currDetectedBBox,
                                             int newHitStreak) const
     {
-        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_human){
+        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate){
             return true;
         }
 
@@ -4028,7 +4190,7 @@ namespace onboardDetector{
                 newFilter.setup(states, A, B, H, P, Q, R);
                 this->filters_.push_back(newFilter);
 
-                if (this->filteredBBoxes_[i].is_dynamic || this->filteredBBoxes_[i].is_human){
+                if (this->filteredBBoxes_[i].is_dynamic || this->filteredBBoxes_[i].is_yolo_candidate){
                     this->confirmedTracks_[i] = true;
                 }
             }
@@ -4291,7 +4453,7 @@ namespace onboardDetector{
             newEstimatedBBox.y_width = currDetectedBBox.y_width;
             newEstimatedBBox.z_width = currDetectedBBox.z_width;
             newEstimatedBBox.is_dynamic = currDetectedBBox.is_dynamic;
-            newEstimatedBBox.is_human = currDetectedBBox.is_human;
+            newEstimatedBBox.is_yolo_candidate = currDetectedBBox.is_yolo_candidate;
             newEstimatedBBox.id = this->boxHist_[matchIdx][0].id;
 
             if (int(boxHistTemp.back().size()) == this->histSize_){
@@ -4468,7 +4630,7 @@ namespace onboardDetector{
             hitStreakTemp.push_back(1);
             trackAgeTemp.push_back(1);
 
-            const bool confirmNow = currDetectedBBox.is_dynamic || currDetectedBBox.is_human;
+            const bool confirmNow = currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate;
             confirmedTracksTemp.push_back(confirmNow);
 
             if (confirmNow){
@@ -5011,99 +5173,99 @@ namespace onboardDetector{
                                                 double& prevObsPosDist,
                                                 double& prevObsIou2d,
                                                 std::string& rejectReason) const
-{
-    rejectReason.clear();
+    {
+        rejectReason.clear();
 
-    const double dxPred = predictedBox.x - currentBox.x;
-    const double dyPred = predictedBox.y - currentBox.y;
-    predPosDist = std::sqrt(dxPred * dxPred + dyPred * dyPred);
+        const double dxPred = predictedBox.x - currentBox.x;
+        const double dyPred = predictedBox.y - currentBox.y;
+        predPosDist = std::sqrt(dxPred * dxPred + dyPred * dyPred);
 
-    if (predPosDist >= this->maxMatchRange_){
-        rejectReason = "REJECT_POS";
-        return -1e9;
-    }
-
-    dt = this->clampPositive(dt, 1e-3);
-    requiredSpeed = predPosDist / dt;
-
-    if (requiredSpeed >= this->maxMatchSpeed_){
-        rejectReason = "REJECT_SPEED";
-        return -1e9;
-    }
-
-    relSizeDiff = this->computeRelativeSizeDiff(predictedBox, currentBox);
-    if (relSizeDiff >= this->maxRelativeSizeDiffMatch_){
-        rejectReason = "REJECT_SIZE";
-        return -1e9;
-    }
-
-    predIou2d = this->computeBoxIoU2D(predictedBox, currentBox);
-
-    const double dxPrev = previousObservedBox.x - currentBox.x;
-    const double dyPrev = previousObservedBox.y - currentBox.y;
-    prevObsPosDist = std::sqrt(dxPrev * dxPrev + dyPrev * dyPrev);
-    prevObsIou2d = this->computeBoxIoU2D(previousObservedBox, currentBox);
-
-    const double normPredPosDist = predPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
-    const double normPrevObsPosDist = prevObsPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
-
-    double velDirPenalty = 0.0;
-    bool foundTrackIdx = false;
-    bool alreadyConfirmed = false;
-    int matchedTrackIdx = -1;
-
-    for (size_t j = 0; j < this->boxHist_.size(); ++j){
-        if (this->boxHist_[j].empty()){
-            continue;
-        }
-
-        if (this->boxHist_[j][0].id == predictedBox.id){
-            matchedTrackIdx = static_cast<int>(j);
-            foundTrackIdx = true;
-            if (j < this->confirmedTracks_.size()){
-                alreadyConfirmed = this->confirmedTracks_[j];
-            }
-            break;
-        }
-    }
-
-    if (foundTrackIdx){
-        if (!this->passesVelocityDirectionGate(matchedTrackIdx, currentBox, alreadyConfirmed)){
-            rejectReason = alreadyConfirmed ? "REJECT_VELDIR_TRACKED" : "REJECT_VELDIR_CONFIRM";
+        if (predPosDist >= this->maxMatchRange_){
+            rejectReason = "REJECT_POS";
             return -1e9;
         }
 
-        velDirPenalty = this->computeVelocityDirectionError(matchedTrackIdx, currentBox);
-    }
+        dt = this->clampPositive(dt, 1e-3);
+        requiredSpeed = predPosDist / dt;
 
-    double score =
-        - this->matchPosScoreWeight_ * normPredPosDist
-        - this->matchSizeScoreWeight_ * relSizeDiff
-        + this->matchIou2DScoreWeight_ * predIou2d
-        - this->matchPrevObsPosScoreWeight_ * normPrevObsPosDist
-        + this->matchPrevObsIou2DScoreWeight_ * prevObsIou2d
-        - this->matchVelocityDirectionScoreWeight_ * velDirPenalty;
-
-    if (foundTrackIdx){
-        if (alreadyConfirmed){
-            score += this->confirmedTrackAssocBonus_;
+        if (requiredSpeed >= this->maxMatchSpeed_){
+            rejectReason = "REJECT_SPEED";
+            return -1e9;
         }
-        if (currentBox.is_dynamic || currentBox.is_human){
-            score += this->dynamicTrackAssocBonus_;
+
+        relSizeDiff = this->computeRelativeSizeDiff(predictedBox, currentBox);
+        if (relSizeDiff >= this->maxRelativeSizeDiffMatch_){
+            rejectReason = "REJECT_SIZE";
+            return -1e9;
         }
-    }
 
-    const double adaptiveMinScore =
-        foundTrackIdx ? this->getAdaptiveMinMatchScore(matchedTrackIdx, currentBox)
-                      : this->minMatchScore_;
+        predIou2d = this->computeBoxIoU2D(predictedBox, currentBox);
 
-    if (score < adaptiveMinScore){
-        rejectReason = "REJECT_SCORE";
+        const double dxPrev = previousObservedBox.x - currentBox.x;
+        const double dyPrev = previousObservedBox.y - currentBox.y;
+        prevObsPosDist = std::sqrt(dxPrev * dxPrev + dyPrev * dyPrev);
+        prevObsIou2d = this->computeBoxIoU2D(previousObservedBox, currentBox);
+
+        const double normPredPosDist = predPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+        const double normPrevObsPosDist = prevObsPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+
+        double velDirPenalty = 0.0;
+        bool foundTrackIdx = false;
+        bool alreadyConfirmed = false;
+        int matchedTrackIdx = -1;
+
+        for (size_t j = 0; j < this->boxHist_.size(); ++j){
+            if (this->boxHist_[j].empty()){
+                continue;
+            }
+
+            if (this->boxHist_[j][0].id == predictedBox.id){
+                matchedTrackIdx = static_cast<int>(j);
+                foundTrackIdx = true;
+                if (j < this->confirmedTracks_.size()){
+                    alreadyConfirmed = this->confirmedTracks_[j];
+                }
+                break;
+            }
+        }
+
+        if (foundTrackIdx){
+            if (!this->passesVelocityDirectionGate(matchedTrackIdx, currentBox, alreadyConfirmed)){
+                rejectReason = alreadyConfirmed ? "REJECT_VELDIR_TRACKED" : "REJECT_VELDIR_CONFIRM";
+                return -1e9;
+            }
+
+            velDirPenalty = this->computeVelocityDirectionError(matchedTrackIdx, currentBox);
+        }
+
+        double score =
+            - this->matchPosScoreWeight_ * normPredPosDist
+            - this->matchSizeScoreWeight_ * relSizeDiff
+            + this->matchIou2DScoreWeight_ * predIou2d
+            - this->matchPrevObsPosScoreWeight_ * normPrevObsPosDist
+            + this->matchPrevObsIou2DScoreWeight_ * prevObsIou2d
+            - this->matchVelocityDirectionScoreWeight_ * velDirPenalty;
+
+        if (foundTrackIdx){
+            if (alreadyConfirmed){
+                score += this->confirmedTrackAssocBonus_;
+            }
+            if (currentBox.is_dynamic || currentBox.is_yolo_candidate){
+                score += this->dynamicTrackAssocBonus_;
+            }
+        }
+
+        const double adaptiveMinScore =
+            foundTrackIdx ? this->getAdaptiveMinMatchScore(matchedTrackIdx, currentBox)
+                        : this->minMatchScore_;
+
+        if (score < adaptiveMinScore){
+            rejectReason = "REJECT_SCORE";
+            return score;
+        }
+
         return score;
     }
-
-    return score;
-}
 
     bool dynamicDetector::tryAugmentDetectionMatch(int detIdx,
                                                 const std::vector<std::vector<int>>& candidatePrevIdxByCurr,
@@ -5574,7 +5736,7 @@ namespace onboardDetector{
 
         if (this->boxHist_.size()){
             for (size_t i=0 ; i<this->boxHist_.size() ; ++i){
-                if (this->boxHist_[i][0].is_dynamic or this->boxHist_[i][0].is_human){   
+                if (this->boxHist_[i][0].is_dynamic or this->boxHist_[i][0].is_yolo_candidate){   
                     bool findMatch = false;     
                     if (this->constrainSize_){
                         for (Eigen::Vector3d targetSize : this->targetObjectSize_){

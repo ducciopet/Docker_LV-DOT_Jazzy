@@ -139,7 +139,7 @@ namespace onboardDetector{
                 
         // DBSCAN visual param
         double voxelOccThresh_;
-        double voxelSize_ = 0.1; // default voxel size (meters)
+        double voxelSize_;
         int dbMinPointsCluster_;
         double dbEpsilon_;
         
@@ -209,13 +209,13 @@ namespace onboardDetector{
         double matchVelWeight_;
         double minMatchScore_;
 
-        double maxMatchSpeed_ = 8.0;             // [m/s] velocità massima fisicamente plausibile per associare
-        double matchPosScoreWeight_ = 1.0;       // peso distanza
-        double matchSizeScoreWeight_ = 0.35;     // peso differenza size
-        double matchIou2DScoreWeight_ = 0.15;    // peso IoU2D (tenuto basso)
-        double maxRelativeSizeDiffMatch_ = 0.60; // soglia gating sulla differenza relativa media delle dimensioni
-        double matchVelocityDirectionScoreWeight_ = 0.12; // peso direzione velocità
-        
+        double maxMatchSpeed_;
+        double matchPosScoreWeight_;
+        double matchSizeScoreWeight_;
+        double matchIou2DScoreWeight_;
+        double maxRelativeSizeDiffMatch_;
+        double matchVelocityDirectionScoreWeight_;
+
         double newTrackMinDist_;
         double newTrackMinPcDist_;
         double maxMatchVelDiff_;
@@ -227,49 +227,43 @@ namespace onboardDetector{
         double shapeScoreWeight_;             // peso molto basso della forma cluster nel matching
         bool enableTrackingDebugLogs_; 
         
-        double matchPrevObsPosScoreWeight_ = 0.25;   // peso secondario della distanza rispetto all'ultima bbox osservata
-        double matchPrevObsIou2DScoreWeight_ = 0.10; // piccolo bonus IoU2D rispetto all'ultima bbox osservata
+        double matchPrevObsPosScoreWeight_;
+        double matchPrevObsIou2DScoreWeight_;
 
-        // =========================
         // Association robustness params
-        // =========================
-        double staticAssocSpeedThresh_ = 0.35;      // [m/s] sotto questa velocità il track è trattato come quasi-statico
-        double staticAssocDistThresh_ = 0.45;       // [m] gate stretto per track quasi-statici
-        double dynamicAssocDistBase_ = 0.60;        // [m] gate base per track dinamici
-        double dynamicAssocDistGain_ = 1.20;        // moltiplicatore su speed*dt per allargare il gate
-        double dynamicAssocDistMax_ = 2.50;         // [m] gate massimo per track veloci
+        double staticAssocSpeedThresh_;
+        double staticAssocDistThresh_;
+        double dynamicAssocDistBase_;
+        double dynamicAssocDistGain_;
+        double dynamicAssocDistMax_;
+        double staticAssocMinIoU2D_;
+        double assocMaxRelSizeDiff_;
+        double matchFeatScoreWeight_;
+        double matchIoU2DWeight_;
 
-        double staticAssocMinIoU2D_ = 0.08;         // overlap XY minimo richiesto per track quasi-statici se non molto vicini
-        double assocMaxRelSizeDiff_ = 0.75;         // massimo size diff relativo ammesso
-        double matchFeatScoreWeight_ = 0.15;        // peso reale del featScore nel matching: molto basso
-        double matchIoU2DWeight_ = 0.20;            // piccolo bonus da overlap XY
+        // YOLO Dynamic Classification
+        std::vector<std::string> yoloDynamicClasses_;
+        double yoloPointFractionThresh_;
+        double yoloDepthTolerance_;
 
-        double yolo3DBoxAssocIouThresh_ = 0.20;
-        double minProjectedBoxAreaPx_ = 80.0;
-        double maxProjectedBoxAreaFrac_ = 0.60;
-
-        int minConfirmHits_ = 3;
-        double minNaturalMotionDist_ = 0.08;
-        double maxNaturalMotionDist_ = 1.50;
-        double maxNaturalInnovation_ = 0.60;
-        double minDirectionConsistencyCos_ = -0.20;
-        double minVelocityForDirectionCheck_ = 0.10;
-
-        double maxVelocityDirectionErrorConfirm_ = 1.20;
-        double maxVelocityDirectionErrorTracked_ = 2.50;
-        double stationarySpeedThresh_ = 0.10;
-
-        double confirmedTrackAssocBonus_ = 0.20;
-        double dynamicTrackAssocBonus_ = 0.25;
-
-        double maxNaturalInnovationConfirmed_ = 1.00;
-        double maxNaturalInnovationDynamic_ = 1.20;
-
-        double maxVelocityDirectionErrorConfirmDynamic_ = 2.20;
-        double maxVelocityDirectionErrorTrackedDynamic_ = 4.00;
-
-        double minMatchScoreConfirmed_ = -1.20;
-        double minMatchScoreDynamic_ = -1.50;
+        // Track confirmation / natural motion
+        int minConfirmHits_;
+        double minNaturalMotionDist_;
+        double maxNaturalMotionDist_;
+        double maxNaturalInnovation_;
+        double minDirectionConsistencyCos_;
+        double minVelocityForDirectionCheck_;
+        double maxVelocityDirectionErrorConfirm_;
+        double maxVelocityDirectionErrorTracked_;
+        double stationarySpeedThresh_;
+        double confirmedTrackAssocBonus_;
+        double dynamicTrackAssocBonus_;
+        double maxNaturalInnovationConfirmed_;
+        double maxNaturalInnovationDynamic_;
+        double maxVelocityDirectionErrorConfirmDynamic_;
+        double maxVelocityDirectionErrorTrackedDynamic_;
+        double minMatchScoreConfirmed_;
+        double minMatchScoreDynamic_;
     
         // Classification
         int skipFrame_;
@@ -295,8 +289,8 @@ namespace onboardDetector{
         Eigen::Vector3d positionLidar_; // color camera position
         Eigen::Matrix3d orientationLidar_; // color camera orientation
         bool hasSensorPose_;
-        Eigen::Vector3d localSensorRange_ {5.0, 5.0, 5.0};
-        Eigen::Vector3d localLidarRange_ {10.0, 10.0, 5.0};
+        Eigen::Vector3d localSensorRange_;
+        Eigen::Vector3d localLidarRange_;
 
         //LIDAR DATA
         sensor_msgs::msg::PointCloud2::ConstSharedPtr latestCloud_;
@@ -441,14 +435,7 @@ namespace onboardDetector{
         double computeBoxIoU2DFromCorners(int tlXA, int tlYA, int brXA, int brYA,
                                   int tlXB, int tlYB, int brXB, int brYB) const;
 
-        bool project3DBoxToImageRect(const onboardDetector::box3D& bbox,
-                                    int imgWidth,
-                                    int imgHeight,
-                                    cv::Rect& outRect);
 
-        int findBest3DBoxForYoloDetection(const vision_msgs::msg::Detection2D& yoloDet,
-                                        const std::vector<cv::Rect>& projected3DRects,
-                                        double& bestIoU) const;
         
         bool isNaturalMotion(int trackIdx,
                              const onboardDetector::box3D& currDetectedBBox) const;

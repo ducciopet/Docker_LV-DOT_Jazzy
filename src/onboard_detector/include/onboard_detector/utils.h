@@ -57,7 +57,7 @@ namespace onboardDetector{
         double id;
         double Vx=0, Vy=0, Vz=0;
         double Ax=0, Ay=0, Az=0;
-        bool is_human=false; // false: not detected by yolo as dynamic, true: detected by yolo
+        bool is_yolo_candidate=false; // true: detected by yolo as a target dynamic class
         bool is_dynamic=false; // false: not detected as dynamic(either yolo or classificationCB), true: detected as dynamic
         bool fix_size=false; // flag to force future boxes to fix size
         bool is_dynamic_candidate=false;

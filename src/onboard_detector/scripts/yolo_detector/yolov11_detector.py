@@ -168,9 +168,11 @@ class yolo_detector(Node):
                     y1 = float(detected_box[1])
                     x2 = float(detected_box[2])
                     y2 = float(detected_box[3])
-                    # Store top-left corner in hypothesis pose and size in bbox
+                    class_name = str(detected_box[4])
+                    # Store top-left corner in hypothesis pose, class in class_id, and size in bbox
                     from vision_msgs.msg import ObjectHypothesisWithPose
                     hyp = ObjectHypothesisWithPose()
+                    hyp.hypothesis.class_id = class_name
                     hyp.pose.pose.position.x = x1  # top-left x
                     hyp.pose.pose.position.y = y1  # top-left y
                     bbox_msg.results.append(hyp)
