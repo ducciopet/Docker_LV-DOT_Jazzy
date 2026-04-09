@@ -2349,7 +2349,29 @@ namespace onboardDetector{
         std::vector<Eigen::Vector3d>& outStds)
     {
         size_t N = inBoxes.size();
+        std::cout << "[DEBUG] mergeNestedGroup: N=" << N
+                  << ", inClusters.size()=" << inClusters.size()
+                  << ", inCenters.size()=" << inCenters.size()
+                  << ", inStds.size()=" << inStds.size() << std::endl;
         if (N == 0) return;
+
+        // Guard: if cluster arrays don't match box count, pad with empties
+        // This prevents out-of-bounds access when uvBBoxes_ uses pcClustersVisual_
+        std::vector<std::vector<Eigen::Vector3d>> safeClusters = inClusters;
+        std::vector<Eigen::Vector3d> safeCenters = inCenters;
+        std::vector<Eigen::Vector3d> safeStds = inStds;
+        if (safeClusters.size() < N) {
+            std::cout << "[WARN] mergeNestedGroup: inClusters.size()=" << inClusters.size() << " < N=" << N << ", padding with empties" << std::endl;
+            safeClusters.resize(N);
+        }
+        if (safeCenters.size() < N) {
+            std::cout << "[WARN] mergeNestedGroup: inCenters.size()=" << inCenters.size() << " < N=" << N << ", padding with empties" << std::endl;
+            safeCenters.resize(N, Eigen::Vector3d::Zero());
+        }
+        if (safeStds.size() < N) {
+            std::cout << "[WARN] mergeNestedGroup: inStds.size()=" << inStds.size() << " < N=" << N << ", padding with empties" << std::endl;
+            safeStds.resize(N, Eigen::Vector3d::Zero());
+        }
 
         double iouThresh = this->samegroupIOUThresh_;
         double iovThresh = this->samegroupIOVThresh_;
@@ -2415,7 +2437,7 @@ namespace onboardDetector{
                 std::vector<Eigen::Vector3d> cluster;
                 Eigen::Vector3d center, stddev;
 
-                mergeBoxesSet(inBoxes, inClusters, comp,
+                mergeBoxesSet(inBoxes, safeClusters, comp,
                             box, cluster, center, stddev);
 
                 outBoxes.push_back(box);
@@ -2525,7 +2547,7 @@ namespace onboardDetector{
             std::vector<Eigen::Vector3d> cluster;
             Eigen::Vector3d center, stddev;
 
-            mergeBoxesSet(inBoxes, inClusters, subtree,
+            mergeBoxesSet(inBoxes, safeClusters, subtree,
                         box, cluster, center, stddev);
 
             outBoxes.push_back(box);
@@ -2545,9 +2567,9 @@ namespace onboardDetector{
             if (!used[i])
             {
                 outBoxes.push_back(inBoxes[i]);
-                outClusters.push_back(inClusters[i]);
-                outCenters.push_back(inCenters[i]);
-                outStds.push_back(inStds[i]);
+                outClusters.push_back(safeClusters[i]);
+                outCenters.push_back(safeCenters[i]);
+                outStds.push_back(safeStds[i]);
             }
         }
     }
@@ -2608,6 +2630,14 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::filterLVBBoxes(){
+        std::cout << "[DEBUG] filterLVBBoxes: START" << std::endl;
+        std::cout << "[DEBUG] filterLVBBoxes: uvBBoxes_ size = " << this->uvBBoxes_.size()
+                  << ", dbBBoxes_ size = " << this->dbBBoxes_.size()
+                  << ", pcClustersVisual_ size = " << this->pcClustersVisual_.size()
+                  << ", pcClusterCentersVisual_ size = " << this->pcClusterCentersVisual_.size()
+                  << ", pcClusterStdsVisual_ size = " << this->pcClusterStdsVisual_.size()
+                  << ", lidarBBoxes_ size = " << this->lidarBBoxes_.size() << std::endl;
+
         std::vector<onboardDetector::box3D> filteredBBoxesTemp;
         std::vector<std::vector<Eigen::Vector3d>> filteredPcClustersTemp;
         std::vector<Eigen::Vector3d> filteredPcClusterCentersTemp;
@@ -2637,6 +2667,7 @@ namespace onboardDetector{
         std::vector<Eigen::Vector3d> dbPcClusterStdsFiltered;
 
         // UV
+        std::cout << "[DEBUG] filterLVBBoxes: calling mergeNestedGroup for UV" << std::endl;
         this->mergeNestedGroup(
             this->uvBBoxes_,
             this->pcClustersVisual_,
@@ -2648,8 +2679,10 @@ namespace onboardDetector{
             uvPcClusterCentersFiltered,
             uvPcClusterStdsFiltered
         );
+        std::cout << "[DEBUG] filterLVBBoxes: after UV mergeNestedGroup, uvBBoxesFiltered size = " << uvBBoxesFiltered.size() << std::endl;
 
         // DBSCAN
+        std::cout << "[DEBUG] filterLVBBoxes: calling mergeNestedGroup for DBSCAN" << std::endl;
         this->mergeNestedGroup(
             this->dbBBoxes_,
             this->pcClustersVisual_,
@@ -2661,6 +2694,7 @@ namespace onboardDetector{
             dbPcClusterCentersFiltered,
             dbPcClusterStdsFiltered
         );
+        std::cout << "[DEBUG] filterLVBBoxes: after DBSCAN mergeNestedGroup, dbBBoxesFiltered size = " << dbBBoxesFiltered.size() << std::endl;
 
         this->publish3dBox(uvBBoxesFiltered, this->uvBBoxesFilteredPub_, 0, 1, 0.5);
         this->publish3dBox(dbBBoxesFiltered, this->dbBBoxesFilteredPub_, 1, 0.5, 0);
