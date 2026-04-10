@@ -194,19 +194,23 @@ namespace onboardDetector{
         double eRVel_; // observation uncertainty matrix for velocity
         double eRAcc_; // observation uncertainty matrix for acceleration
         int kfAvgFrames_;
+
+        // Kalman Filter V2 parameters (position-only observation)
+        double eP_v2_;
+        double eQPos_v2_;
+        double eQVel_v2_;
+        double eQAcc_v2_;
+        double eRPos_v2_;
+
+        // Coasting: confirmed tracks survive short miss gaps in output
+        int coastingMaxMissedFrames_;
+
         std::vector<int> missedFrames_;
         int maxMissedFrames_;
         std::vector<int> hitStreak_;
         std::vector<int> trackAge_;
         std::vector<bool> confirmedTracks_;
 
-        double matchFeatWeight_;
-        double matchPosWeight_;
-        double matchPcWeight_;
-        double matchSizeWeight_;
-        double matchIouWeight_;
-        double matchClusterWeight_;
-        double matchVelWeight_;
         double minMatchScore_;
 
         double maxMatchSpeed_;
@@ -386,8 +390,10 @@ namespace onboardDetector{
         void kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch);
         void kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
+        void kalmanFilterMatrixAccV2(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
         void getKalmanObservationAcc(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
+        void getKalmanObservationAccV2(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z);
         double computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB) const;
         void getPredictedBBoxesFromFilters(std::vector<onboardDetector::box3D>& propedBBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);
         bool isCloseToExistingTrack(const onboardDetector::box3D& currDetectedBBox, const Eigen::Vector3d& currPcCenter, const std::vector<bool>& prevMatched);

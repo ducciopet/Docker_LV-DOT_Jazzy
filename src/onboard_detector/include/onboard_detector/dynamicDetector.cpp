@@ -671,50 +671,38 @@ namespace onboardDetector{
         else{
             std::cout << this->hint_ << ": Number of frames used in KF for observation is set to: " << this->kfAvgFrames_ << std::endl;
         }
-        
-        // weights for matching
-        if (!this->nh_->get_parameter(pname("match_feat_weight"), this->matchFeatWeight_)){
-            this->matchFeatWeight_ = 1.0;
-            std::cout << this->hint_ << ": No match feature weight parameter found. Use default: 1.0." << std::endl;
+
+        // Kalman Filter V2 parameters (position-only observation model)
+        std::vector<double> kfV2Params;
+        if (!this->nh_->get_parameter(pname("kalman_filter_v2_param"), kfV2Params)){
+            this->eP_v2_ = 0.25;
+            this->eQPos_v2_ = 0.05;
+            this->eQVel_v2_ = 0.15;
+            this->eQAcc_v2_ = 0.10;
+            this->eRPos_v2_ = 0.02;
+            std::cout << this->hint_ << ": No KF v2 parameter found. Use defaults: [0.25, 0.05, 0.15, 0.10, 0.02]." << std::endl;
         }
         else{
-            std::cout << this->hint_ << ": Match feature weight is set to: " << this->matchFeatWeight_ << std::endl;
+            this->eP_v2_ = kfV2Params[0];
+            this->eQPos_v2_ = kfV2Params[1];
+            this->eQVel_v2_ = kfV2Params[2];
+            this->eQAcc_v2_ = kfV2Params[3];
+            this->eRPos_v2_ = kfV2Params[4];
+            std::cout << this->hint_ << ": KF v2 parameter is set to: [";
+            for (int i = 0; i < int(kfV2Params.size()); ++i){
+                if (i != 0) std::cout << ", ";
+                std::cout << kfV2Params[i];
+            }
+            std::cout << "]." << std::endl;
         }
 
-        // weight for position difference in matching
-        if (!this->nh_->get_parameter(pname("match_pos_weight"), this->matchPosWeight_)){
-            this->matchPosWeight_ = 1.5;
-            std::cout << this->hint_ << ": No match position weight parameter found. Use default: 1.5." << std::endl;
+        // coasting: max missed frames for confirmed tracks to remain in output
+        if (!this->nh_->get_parameter(pname("coasting_max_missed_frames"), this->coastingMaxMissedFrames_)){
+            this->coastingMaxMissedFrames_ = 2;
+            std::cout << this->hint_ << ": No coasting max missed frames parameter found. Use default: 2." << std::endl;
         }
         else{
-            std::cout << this->hint_ << ": Match position weight is set to: " << this->matchPosWeight_ << std::endl;
-        }
-
-        // weight for point cloud difference in matching
-        if (!this->nh_->get_parameter(pname("match_pc_weight"), this->matchPcWeight_)){
-            this->matchPcWeight_ = 1.0;
-            std::cout << this->hint_ << ": No match point cloud weight parameter found. Use default: 1.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Match point cloud weight is set to: " << this->matchPcWeight_ << std::endl;
-        }
-
-        // weight for size difference in matching
-        if (!this->nh_->get_parameter(pname("match_size_weight"), this->matchSizeWeight_)){
-            this->matchSizeWeight_ = 1.0;
-            std::cout << this->hint_ << ": No match size weight parameter found. Use default: 1.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Match size weight is set to: " << this->matchSizeWeight_ << std::endl;
-        }
-
-        // weight for IOU in matching
-        if (!this->nh_->get_parameter(pname("match_iou_weight"), this->matchIouWeight_)){
-            this->matchIouWeight_ = 1.0;
-            std::cout << this->hint_ << ": No match IOU weight parameter found. Use default: 1.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Match IOU weight is set to: " << this->matchIouWeight_ << std::endl;
+            std::cout << this->hint_ << ": Coasting max missed frames is set to: " << this->coastingMaxMissedFrames_ << std::endl;
         }
 
         // minimum match score for matching
@@ -724,15 +712,6 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": Minimum match score is set to: " << this->minMatchScore_ << std::endl;
-        }
-
-        // weight for velocity difference in matching
-        if (!this->nh_->get_parameter(pname("match_vel_weight"), this->matchVelWeight_)){
-            this->matchVelWeight_ = 1.0;
-            std::cout << this->hint_ << ": No match velocity weight parameter found. Use default: 1.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Match velocity weight is set to: " << this->matchVelWeight_ << std::endl;
         }
 
         // thresholds for new track initialization
@@ -762,15 +741,6 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Maximum velocity difference for matching is set to: " << this->maxMatchVelDiff_ << std::endl;
         }
 
-        // weight for cluster consistency in matching
-        if (!this->nh_->get_parameter(pname("match_cluster_weight"), this->matchClusterWeight_)){
-            this->matchClusterWeight_ = 1.0;
-            std::cout << this->hint_ << ": No match cluster weight parameter found. Use default: 1.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Match cluster weight is set to: " << this->matchClusterWeight_ << std::endl;
-        }   
-
         // skip frame for classification
         if (!this->nh_->get_parameter(pname("frame_skip"), this->skipFrame_)){
             this->skipFrame_ = 5;
@@ -791,8 +761,8 @@ namespace onboardDetector{
 
         // voting threshold for dynamic classification
         if (!this->nh_->get_parameter(pname("dynamic_voting_threshold"), this->dynaVoteThresh_)){
-            this->dynaVoteThresh_ = 0.8;
-            std::cout << this->hint_ << ": No dynamic voting threshold parameter found. Use default: 0.8." << std::endl;
+            this->dynaVoteThresh_ = 0.7;
+            std::cout << this->hint_ << ": No dynamic voting threshold parameter found. Use default: 0.7." << std::endl;
         }
         else{
             std::cout << this->hint_ << ": Voting threshold for dynamic classification is set to: " << this->dynaVoteThresh_ << std::endl;
@@ -898,16 +868,7 @@ namespace onboardDetector{
         else{
             std::cout << this->hint_ << ": Duplicate size relative threshold is set to: " << this->duplicateSizeRelThresh_ << std::endl;
         }
-
-        // Shape Score Weight:
-        if (!this->nh_->get_parameter(pname("shape_score_weight"), this->shapeScoreWeight_)){
-            this->shapeScoreWeight_ = 0.2;
-            std::cout << this->hint_ << ": No shape score weight parameter found. Use default: 1.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Shape score weight is set to: " << this->shapeScoreWeight_ << std::endl;
-        }
-
+        
         // Enable Tracking Debug Logs
         if (!this->nh_->get_parameter(pname("enable_tracking_debug_logs"), this->enableTrackingDebugLogs_)){
             this->enableTrackingDebugLogs_ = false;
@@ -1922,8 +1883,8 @@ namespace onboardDetector{
 
             std::vector<Eigen::Vector3d> currPc = this->pcHist_[i][0];
             std::vector<Eigen::Vector3d> prevPc = this->pcHist_[i][curFrameGap];
-            Eigen::Vector3d Vcur(0.,0.,0.); // single point velocity 
-            Eigen::Vector3d Vbox(0.,0.,0.); // bounding box velocity 
+            Eigen::Vector3d Vcur(0.,0.,0.); // single point velocity
+            Eigen::Vector3d Vbox(0.,0.,0.); // bounding box velocity
             Eigen::Vector3d Vkf(0.,0.,0.);  // velocity estimated from kalman filter
             int numPoints = currPc.size(); // it changes within loop
             int votes = 0;
@@ -1957,15 +1918,14 @@ namespace onboardDetector{
                     }
                 }
             }
-            
-            
+
             // update dynamic boxes
             double voteRatio = (numPoints>0)?double(votes)/double(numPoints):0;
             double velNorm = Vkf.norm();
 
             // voting and velocity threshold
             // 1. point cloud voting ratio.
-            // 2. velocity (from kalman filter) 
+            // 2. velocity (from kalman filter)
             if (voteRatio>=this->dynaVoteThresh_ && velNorm>=this->dynaVelThresh_){
                 this->boxHist_[i][0].is_dynamic_candidate = true;
                 // dynamic-consistency check
@@ -2207,7 +2167,23 @@ namespace onboardDetector{
         size_t N = group2BBoxes_.size();
         std::cout << "[DEBUG] BboxesMerger: START, M = " << M << ", N = " << N << std::endl;
         if (M == 0 || N == 0) {
-            std::cout << "[DEBUG] BboxesMerger: Skipping because M == 0 or N == 0" << std::endl;
+            std::cout << "[DEBUG] BboxesMerger: M=" << M << " or N=" << N << " is 0, handling unmatched" << std::endl;
+            if (N == 0 && flag_group1) {
+                for (size_t i = 0; i < M; ++i) {
+                    BBoxesTemp.push_back(group1BBoxes_[i]);
+                    PcClustersTemp.push_back(group1pcClusters_[i]);
+                    PcClusterCentersTemp.push_back(group1pcClusterCenters_[i]);
+                    PcClusterStdsTemp.push_back(group1pcClusterStds_[i]);
+                }
+            }
+            if (M == 0 && flag_group2) {
+                for (size_t j = 0; j < N; ++j) {
+                    BBoxesTemp.push_back(group2BBoxes_[j]);
+                    PcClustersTemp.push_back(group2pcClusters_[j]);
+                    PcClusterCentersTemp.push_back(group2pcClusterCenters_[j]);
+                    PcClusterStdsTemp.push_back(group2pcClusterStds_[j]);
+                }
+            }
             return;
         }
 
@@ -2764,7 +2740,7 @@ namespace onboardDetector{
                 }
             }
 
-            if (best_i_back == (int)i && best_iou > iouThresh)
+            if (best_i_back == (int)i && best_iou > iouThresh && best_iou_back > iouThresh)
             {
                 std::vector<int> comp = { (int)i, best_j };
 
@@ -3001,13 +2977,43 @@ namespace onboardDetector{
         std::vector<Eigen::Vector3d> dbPcClusterCentersFiltered;
         std::vector<Eigen::Vector3d> dbPcClusterStdsFiltered;
 
-        // UV
+        // UV: extract depth points falling inside each UV bbox (world frame)
+        // UV bboxes have no associated pointcloud from the uv-map detector,
+        // so we build their clusters directly from filteredDepthPoints_.
+        std::vector<std::vector<Eigen::Vector3d>> uvPcClusters(this->uvBBoxes_.size());
+        std::vector<Eigen::Vector3d> uvPcCenters(this->uvBBoxes_.size(), Eigen::Vector3d::Zero());
+        std::vector<Eigen::Vector3d> uvPcStds(this->uvBBoxes_.size(), Eigen::Vector3d::Zero());
+
+        for (size_t i = 0; i < this->uvBBoxes_.size(); ++i) {
+            const auto& b = this->uvBBoxes_[i];
+            const double hx = b.x_width / 2.0;
+            const double hy = b.y_width / 2.0;
+            const double hz = b.z_width / 2.0;
+            for (const auto& p : this->filteredDepthPoints_) {
+                if (std::abs(p.x() - b.x) <= hx &&
+                    std::abs(p.y() - b.y) <= hy &&
+                    std::abs(p.z() - b.z) <= hz) {
+                    uvPcClusters[i].push_back(p);
+                }
+            }
+            if (!uvPcClusters[i].empty()) {
+                Eigen::Vector3d center = Eigen::Vector3d::Zero();
+                for (const auto& p : uvPcClusters[i]) center += p;
+                center /= static_cast<double>(uvPcClusters[i].size());
+                uvPcCenters[i] = center;
+                Eigen::Vector3d stddev = Eigen::Vector3d::Zero();
+                for (const auto& p : uvPcClusters[i])
+                    stddev += (p - center).cwiseAbs2();
+                uvPcStds[i] = (stddev / static_cast<double>(uvPcClusters[i].size())).cwiseSqrt();
+            }
+        }
+
         std::cout << "[DEBUG] filterLVBBoxes: calling mergeNestedGroup for UV" << std::endl;
         this->mergeNestedGroup(
             this->uvBBoxes_,
-            this->pcClustersVisual_,
-            this->pcClusterCentersVisual_,
-            this->pcClusterStdsVisual_,
+            uvPcClusters,
+            uvPcCenters,
+            uvPcStds,
 
             uvBBoxesFiltered,
             uvPcClustersFiltered,
@@ -3941,6 +3947,14 @@ namespace onboardDetector{
         const double dy = currDetectedBBox.y - prevBBox.y;
         const double obsDist = std::sqrt(dx * dx + dy * dy);
 
+        // Stationary bypass: if both observed and predicted velocities are near-zero,
+        // the object is consistently stationary — that IS natural motion for a static object.
+        const double prevSpeed = std::sqrt(prevBBox.Vx * prevBBox.Vx + prevBBox.Vy * prevBBox.Vy);
+        const double obsSpeed = std::sqrt(dx * dx + dy * dy) / dt;
+        if (obsSpeed < this->stationarySpeedThresh_ && prevSpeed < this->stationarySpeedThresh_){
+            return true;
+        }
+
         if (obsDist < this->minNaturalMotionDist_){
             return false;
         }
@@ -3966,15 +3980,15 @@ namespace onboardDetector{
 
         const double obsVx = dx / dt;
         const double obsVy = dy / dt;
-        const double obsSpeed = std::sqrt(obsVx * obsVx + obsVy * obsVy);
+        const double obsSpeedDir = std::sqrt(obsVx * obsVx + obsVy * obsVy);
 
-        const double prevSpeed = std::sqrt(prevBBox.Vx * prevBBox.Vx + prevBBox.Vy * prevBBox.Vy);
+        const double prevSpeedDir = std::sqrt(prevBBox.Vx * prevBBox.Vx + prevBBox.Vy * prevBBox.Vy);
 
-        if (obsSpeed > this->minVelocityForDirectionCheck_ &&
-            prevSpeed > this->minVelocityForDirectionCheck_)
+        if (obsSpeedDir > this->minVelocityForDirectionCheck_ &&
+            prevSpeedDir > this->minVelocityForDirectionCheck_)
         {
             const double dot = obsVx * prevBBox.Vx + obsVy * prevBBox.Vy;
-            const double denom = std::max(obsSpeed * prevSpeed, 1e-6);
+            const double denom = std::max(obsSpeedDir * prevSpeedDir, 1e-6);
             const double cosSim = dot / denom;
 
             // più tolleranza per dinamici o già confirmed
@@ -4184,7 +4198,7 @@ namespace onboardDetector{
                 this->pcCenterHist_[i].push_back(this->filteredPcClusterCenters_[i]);
 
                 MatrixXd states, A, B, H, P, Q, R;
-                this->kalmanFilterMatrixAcc(this->filteredBBoxes_[i], states, A, B, H, P, Q, R);
+                this->kalmanFilterMatrixAccV2(this->filteredBBoxes_[i], states, A, B, H, P, Q, R);
 
                 onboardDetector::kalman_filter newFilter;
                 newFilter.setup(states, A, B, H, P, Q, R);
@@ -4438,7 +4452,7 @@ namespace onboardDetector{
             onboardDetector::box3D newEstimatedBBox;
 
             Eigen::MatrixXd Z;
-            this->getKalmanObservationAcc(currDetectedBBox, matchIdx, Z);
+            this->getKalmanObservationAccV2(currDetectedBBox, Z);
             filtersTemp.back().estimate(Z, MatrixXd::Zero(6,1));
 
             newEstimatedBBox.x = filtersTemp.back().output(0);
@@ -4568,6 +4582,12 @@ namespace onboardDetector{
             trackAgeTemp.push_back(oldTrackAge + 1);
             confirmedTracksTemp.push_back(oldConfirmed);
 
+            // Coasting: confirmed tracks with short miss gaps still appear in output
+            // using their Kalman-predicted position. This prevents ID loss on merge flicker.
+            if (oldConfirmed && newMissed <= this->coastingMaxMissedFrames_){
+                trackedBBoxesTemp.push_back(predictedBBox);
+            }
+
             if (this->enableTrackingDebugLogs_){
                 RCLCPP_DEBUG(
                     this->nh_->get_logger(),
@@ -4614,7 +4634,7 @@ namespace onboardDetector{
             onboardDetector::box3D newEstimatedBBox = currDetectedBBox;
 
             Eigen::MatrixXd states, A, B, H, P, Q, R;
-            this->kalmanFilterMatrixAcc(currDetectedBBox, states, A, B, H, P, Q, R);
+            this->kalmanFilterMatrixAccV2(currDetectedBBox, states, A, B, H, P, Q, R);
 
             newFilter.setup(states, A, B, H, P, Q, R);
             filtersTemp.push_back(newFilter);
@@ -4842,6 +4862,75 @@ namespace onboardDetector{
                 Z(i,0) = 0.0;
             }
         }
+    }
+
+    // ============================================================================
+    // Kalman Filter V2: position-only observation model
+    // The state vector is the same 6D [x, y, vx, vy, ax, ay] with the same
+    // constant-acceleration transition matrix A.
+    // The key difference: H is 2x6 (observe only position), so the filter
+    // internally estimates velocity and acceleration from position updates alone.
+    // This avoids double-counting noisy finite-difference velocity/acceleration
+    // as direct observations.
+    // ============================================================================
+
+    void dynamicDetector::kalmanFilterMatrixAccV2(const onboardDetector::box3D& currDetectedBBox,
+                                                  MatrixXd& states,
+                                                  MatrixXd& A,
+                                                  MatrixXd& B,
+                                                  MatrixXd& H,
+                                                  MatrixXd& P,
+                                                  MatrixXd& Q,
+                                                  MatrixXd& R)
+    {
+        const double dt = this->clampPositive(this->dt_, 1e-3);
+        const double dt2 = dt * dt;
+
+        states.resize(6, 1);
+        states(0) = currDetectedBBox.x;
+        states(1) = currDetectedBBox.y;
+        states(2) = 0.0;
+        states(3) = 0.0;
+        states(4) = 0.0;
+        states(5) = 0.0;
+
+        A.resize(6, 6);
+        A << 1, 0, dt, 0, 0.5 * dt2, 0,
+             0, 1, 0, dt, 0, 0.5 * dt2,
+             0, 0, 1,  0, dt,         0,
+             0, 0, 0,  1, 0,          dt,
+             0, 0, 0,  0, 1,          0,
+             0, 0, 0,  0, 0,          1;
+
+        B = MatrixXd::Zero(6, 6);
+
+        // Observe only position (2x6)
+        H = MatrixXd::Zero(2, 6);
+        H(0, 0) = 1.0;
+        H(1, 1) = 1.0;
+
+        P = MatrixXd::Identity(6, 6) * this->eP_v2_;
+
+        Q = MatrixXd::Zero(6, 6);
+        Q(0, 0) = this->eQPos_v2_;
+        Q(1, 1) = this->eQPos_v2_;
+        Q(2, 2) = this->eQVel_v2_;
+        Q(3, 3) = this->eQVel_v2_;
+        Q(4, 4) = this->eQAcc_v2_;
+        Q(5, 5) = this->eQAcc_v2_;
+
+        // Observation noise: only 2x2 for position
+        R = MatrixXd::Zero(2, 2);
+        R(0, 0) = this->eRPos_v2_;
+        R(1, 1) = this->eRPos_v2_;
+    }
+
+    void dynamicDetector::getKalmanObservationAccV2(const onboardDetector::box3D& currDetectedBBox,
+                                                     MatrixXd& Z)
+    {
+        Z = MatrixXd::Zero(2, 1);
+        Z(0) = currDetectedBBox.x;
+        Z(1) = currDetectedBBox.y;
     }
 
     void dynamicDetector::getPredictedBBoxesFromFilters(std::vector<onboardDetector::box3D>& propedBBoxes,
@@ -5194,10 +5283,6 @@ namespace onboardDetector{
         }
 
         relSizeDiff = this->computeRelativeSizeDiff(predictedBox, currentBox);
-        if (relSizeDiff >= this->maxRelativeSizeDiffMatch_){
-            rejectReason = "REJECT_SIZE";
-            return -1e9;
-        }
 
         predIou2d = this->computeBoxIoU2D(predictedBox, currentBox);
 
@@ -5227,6 +5312,15 @@ namespace onboardDetector{
                 }
                 break;
             }
+        }
+
+        // For confirmed tracks, allow larger size differences (merge flicker tolerance)
+        const double effectiveSizeLimit = (foundTrackIdx && alreadyConfirmed)
+                                            ? this->maxRelativeSizeDiffMatch_ * 1.5
+                                            : this->maxRelativeSizeDiffMatch_;
+        if (relSizeDiff >= effectiveSizeLimit){
+            rejectReason = "REJECT_SIZE";
+            return -1e9;
         }
 
         if (foundTrackIdx){

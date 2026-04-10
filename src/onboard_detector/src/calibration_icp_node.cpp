@@ -46,8 +46,9 @@ public:
         depth_skip_ = this->declare_parameter("onboard_detector.depth_skip_pixel", 2);
 
         lidar_frame_ = this->declare_parameter("lidar_frame", std::string("velodyne"));
-        camera_frame_initial_guess_ = this->declare_parameter("camera_frame_initial_guess", std::string("camera_initial_guess")); 
-        refined_camera_frame_ = this->declare_parameter("refined_camera_frame", "camera_refined");
+        camera_frame_ = this->declare_parameter("urdf_camera_frame", std::string("camera"));
+        camera_frame_initial_guess_ = this->declare_parameter("camera_frame_initial_guess", std::string("camera_initial_guess"));
+        refined_camera_frame_ = this->declare_parameter("refined_camera_frame", std::string("camera_refined"));
 
         icp_max_corr_dist_ = this->declare_parameter("icp_max_correspondence_distance", 0.2);
         icp_max_iter_ = this->declare_parameter("icp_max_iteration", 100);

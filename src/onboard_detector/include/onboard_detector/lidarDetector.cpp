@@ -168,9 +168,9 @@ namespace onboardDetector{
 
                 onboardDetector::box3D bbox;
                 bbox.id = static_cast<int>(i);
-                bbox.x = centroid(0);
-                bbox.y = centroid(1);
-                bbox.z = centroid(2);
+                bbox.x = 0.5 * (minPt.x + maxPt.x);
+                bbox.y = 0.5 * (minPt.y + maxPt.y);
+                bbox.z = 0.5 * (minPt.z + maxPt.z);
                 bbox.x_width = maxPt.x - minPt.x;
                 bbox.y_width = maxPt.y - minPt.y;
                 bbox.z_width = maxPt.z - minPt.z;

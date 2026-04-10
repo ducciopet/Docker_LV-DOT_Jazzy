@@ -1,202 +1,281 @@
 detector_node:
   ros__parameters:
     onboard_detector:
-      
-      localization_mode: 0 # 0: pose (default) 1: odom
 
+      localization_mode: 0 # 0: use pose topic (default); 1: use odometry topic
+
+      # -----------------------------------------------------------------------
       # ROS Topics
+      # -----------------------------------------------------------------------
       depth_image_topic: /front_camera/camera/depth/image_rect_raw
       color_image_topic: /front_camera/camera/color/image_raw
       lidar_pointcloud_topic: /velodyne_points
       pose_topic: /glim_ros/lidar_pose
       odom_topic: /odom
-      use_tf_pose: true
-      tf_map_frame: map
-      tf_lidar_frame: velodyne
-      tf_depth_frame: camera_refined
-      tf_color_frame: camera_refined
-      urdf_camera_frame: camera
-      camera_frame_initial_guess: camera_initial_guess
-      output_detected_image_topic: /onboard_detector/detected_image
-      output_detected_bboxes_topic: /onboard_detector/detected_bounding_boxes
-      output_obstacles_topic: /onboard_detector/obstacles         
+      use_tf_pose: true          # if true, read robot pose from TF instead of pose/odom topic
+      tf_map_frame: map          # name of the fixed world frame in TF
+      tf_lidar_frame: velodyne   # TF frame of the LiDAR sensor
+      tf_depth_frame: camera_refined  # TF frame of the depth camera (after ICP calibration)
+      tf_color_frame: camera_refined  # TF frame of the color camera (same as depth if co-located)
 
-      # Camera Parameters
-      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # fx, fy, cx, cy - from actual camera calibration
-      color_intrinsics: [645.0390014648438, 644.30419921875, 653.908203125, 365.65606689453125] # fx, fy, cx, cy
-      depth_scale_factor: 1000.0 # 1000 for Intel Realsense Camera
-      depth_min_value: 0.5
-      depth_max_value: 4.5
-      depth_filter_margin: 10 # filter
-      depth_skip_pixel: 2  # filter
-      image_cols: 848 #depth_image_width
-      image_rows: 480 #depth_image_cols
+      # -----------------------------------------------------------------------
+      # Camera Intrinsics & Depth Parameters
+      # -----------------------------------------------------------------------
+      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # [fx, fy, cx, cy] from camera calibration
+      color_intrinsics: [645.0390014648438, 644.30419921875, 653.908203125, 365.65606689453125]       # [fx, fy, cx, cy]
+      depth_scale_factor: 1000.0  # raw_value / scale = meters (1000 for Intel RealSense 16-bit)
+      depth_min_value: 0.5        # [m] points closer than this are discarded (noise / self-occlusion)
+      depth_max_value: 4.5        # [m] points farther than this are discarded — hard limit on visual detection range
+      depth_filter_margin: 10     # [px] border margin removed from depth image before processing
+      depth_skip_pixel: 2         # subsample every N pixels to reduce computation (1 = full resolution)
+      image_cols: 848             # depth image width  [px]
+      image_rows: 480             # depth image height [px]
 
-      # System
-      time_step: 0.12
+      # -----------------------------------------------------------------------
+      # System Timing
+      # -----------------------------------------------------------------------
+      time_step: 0.12  # [s] expected period between detection frames (used in Kalman prediction step)
 
-      # DBSCAN Common
-      voxel_size: 0.1 # Size of voxel grid for filtering (meters)
-      ground_height: -0.7 # height of ground to remove ground points
-      roof_height: 4.0 # relative height of roof to remove roof points
+      # -----------------------------------------------------------------------
+      # Detection Ranges
+      # -----------------------------------------------------------------------
+      # local_sensor_range: axis-aligned box centred on the robot used to size the
+      #   voxel-filter grid for the DEPTH camera pipeline ONLY (UV + DBSCAN visual).
+      #   The actual detection range is hard-bounded by depth_max_value (4.5 m), so
+      #   XY values larger than depth_max_value waste memory. Set XY ≈ depth_max_value.
+      local_sensor_range: [5.0, 5.0, 5.0]   # [m] ±X, ±Y, ±Z around robot — depth/visual pipeline only
 
-      # DBSCAN visual param
-      voxel_occupied_thresh: 5.0 # min num of points for a voxel to be occupied in voxel filter
-      dbscan_min_points_cluster: 20 # 20: 4.0m range; 30: 3.5m range 40: 3.0m range
-      dbscan_search_range_epsilon: 0.05 # searching range radius
+      # local_lidar_range: PassThrough filter applied to the raw LiDAR cloud before
+      #   DBSCAN clustering. This is the effective detection range for the LiDAR pipeline.
+      local_lidar_range: [10.0, 10.0, 5.0]  # [m] ±X, ±Y, ±Z around robot — LiDAR pipeline only
 
-      # DBSCAN LiDAR param
-      lidar_DBSCAN_min_points: 14       # ↑ meno rumore
-      lidar_DBSCAN_epsilon: 0.08        # ok così
+      # -----------------------------------------------------------------------
+      # Ground & Roof Estimation
+      # -----------------------------------------------------------------------
+      ground_height: -0.7  # [m] initial ground Z in world frame — updated dynamically each frame via RANSAC
+      roof_height: 4.0     # [m] static fallback; overridden by ground_height + ground_roof_offset when estimation runs
+      ground_roof_offset: 5.0         # [m] roofHeight = groundHeight + this value
+      ground_estim_bottom_fraction: 4 # use bottom 1/N rows of depth image for ground plane fitting (4 = bottom 25%)
+      ground_estim_min_inliers: 50    # minimum RANSAC inliers required to accept the ground estimate
 
-      downsample_threshold: 3500
-      gaussian_downsample_rate: 8
+      # -----------------------------------------------------------------------
+      # Voxel Filter (depth pipeline only)
+      # -----------------------------------------------------------------------
+      voxel_size: 0.1          # [m] voxel cell size for down-sampling the depth point cloud
+      voxel_occupied_thresh: 5.0 # min raw points in a voxel to keep it (noise rejection threshold) — must be float (double in code)
 
-      # DBSCAN refinement param
+      # -----------------------------------------------------------------------
+      # UV Detection Filtering
+      # -----------------------------------------------------------------------
+      uv_box_max_diagonal: 3.0  # [m] max XY diagonal of a UV-map bbox; larger detections are discarded as spurious
+
+      # -----------------------------------------------------------------------
+      # Visual DBSCAN Parameters (depth point cloud)
+      # -----------------------------------------------------------------------
+      dbscan_min_points_cluster: 20    # min points per cluster (higher = less noise, misses more distant objects)
+      dbscan_search_range_epsilon: 0.04 # [m] neighbourhood radius for DBSCAN core-point test
+
+      downsample_threshold: 3500   # if projected points exceed this count, apply Gaussian downsampling
+      gaussian_downsample_rate: 8  # keep 1 in N points after Gaussian downsampling
+
+      # -----------------------------------------------------------------------
+      # DBSCAN Refinement (recursive cluster splitting)
+      # -----------------------------------------------------------------------
       dbscan_refinement_enable: true
-      dbscan_refine_max_diagonal: 2.5      # Allow large boxes if density is high
-      dbscan_refine_min_density: 120.0     # Require high density for large boxes
-      dbscan_refine_split_min_pts: 10
-      dbscan_refine_split_eps: 0.07
-      dbscan_refine_min_subcluster_pts: 12
-      dbscan_refine_axis_slice_width: 0.25
-      dbscan_refine_max_depth: 3
+      dbscan_refine_max_diagonal: 2.5      # [m] clusters with diagonal > this are split (unless density is high enough)
+      dbscan_refine_min_density: 120.0     # [pts/m³] if density exceeds this, large clusters are kept as-is
+      dbscan_refine_split_min_pts: 10      # min points required in each sub-cluster after a split
+      dbscan_refine_split_eps: 0.07        # [m] DBSCAN epsilon used during the split pass
+      dbscan_refine_min_subcluster_pts: 12 # sub-clusters smaller than this are discarded after splitting
+      dbscan_refine_axis_slice_width: 0.25 # [m] slice width along dominant axis when splitting
+      dbscan_refine_max_depth: 3           # maximum recursion depth for splitting
       dbscan_refine_recursive: true
-      dbscan_refine_min_box_volume: 0.0001
+      dbscan_refine_min_box_volume: 0.0001 # [m³] bounding boxes smaller than this are discarded
 
+      # -----------------------------------------------------------------------
+      # LiDAR DBSCAN Parameters
+      # -----------------------------------------------------------------------
+      lidar_DBSCAN_min_points: 14  # min points per LiDAR cluster
+      lidar_DBSCAN_epsilon: 0.08   # [m] DBSCAN neighbourhood radius for LiDAR
 
-      # LiDAR Visual Filtering
-      visual_filtering_BBox_IOU_threshold: 0.4
-      visual_filtering_BBox_IOV_threshold: 0.5
+      # -----------------------------------------------------------------------
+      # BBox Merging — Intra-group (same detection source)
+      # -----------------------------------------------------------------------
+      # Applied inside mergeNestedGroup() before any cross-source merging.
+      samegroupIOU_threshold: 0.2  # mutual IOU above this → merge as overlapping peers
+      samegroupIOV_threshold: 0.3   # IOV (intersection / volume of smaller box) above this → merge as nested
 
-      lidar_visual_filtering_BBox_IOU_threshold: 0.3
-      lidar_visual_filtering_BBox_IOV_threshold: 0.4
+      # -----------------------------------------------------------------------
+      # BBox Merging — UV <-> DBSCAN (visual pipeline)
+      # -----------------------------------------------------------------------
+      # UV bboxes come from the U-V disparity map; they have no associated point cloud.
+      # DBSCAN bboxes come from depth clustering and carry a depth point cloud cluster.
+      visual_merging_flag: "bigger"             # "smaller": tight bbox containing both; "bigger": union; "none": skip
+      visual_filtering_BBox_IOU_threshold: 0.2   # mutual IOU threshold for UV<->DBSCAN peer merge
+      visual_filtering_BBox_IOV_threshold: 0.3  # IOV threshold for UV<->DBSCAN nesting detection
+      uv_unmerged_flag: false  # if true, UV bboxes with no DBSCAN match are kept in output
+      db_unmerged_flag: true   # if true, DBSCAN bboxes with no UV match are kept in output
 
-      samegroupIOU_threshold: 0.4 # threshold for merging boxes in the same group (for debugging)
-      samegroupIOV_threshold: 0.5 # threshold for merging boxes in the same group (for debugging)
+      # -----------------------------------------------------------------------
+      # BBox Merging — Visual <-> LiDAR (final fusion)
+      # -----------------------------------------------------------------------
+      lidar_visual_merging_flag: "bigger"              # same options as visual_merging_flag
+      lidar_visual_filtering_BBox_IOU_threshold: 0.3    # mutual IOU threshold for visual<->LiDAR peer merge
+      lidar_visual_filtering_BBox_IOV_threshold: 0.4    # IOV threshold for visual<->LiDAR nesting detection
+      visual_unmerged_flag: true  # if true, visual bboxes with no LiDAR match are kept in output
+      lidar_unmerged_flag: true   # if true, LiDAR bboxes with no visual match are kept in output
 
-      visual_merging_flag: "smaller" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
-      uv_unmerged_flag: false # whether to visualize unmerged boxes (for debugging);
-      db_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
-      lidar_visual_merging_flag: "smaller" # "smaller": keep smaller box; "bigger": keep bigger box; "none": do not merge
-      visual_unmerged_flag: true # discard or not visual boxes that don't have enough overlap with LiDAR boxes (for debugging)
-      lidar_unmerged_flag: true # whether to visualize unmerged boxes (for debugging);
+      # -----------------------------------------------------------------------
+      # Tracking & Data Association
+      # -----------------------------------------------------------------------
+      max_match_range: 2.0       # [m] max positional distance to match a detection to an existing track
+      max_size_diff_range: 2.0   # [m] max absolute size difference allowed during matching
+      feature_weight: [3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0.05, 0.05, 0.01] # weights for feature vector [3×pos, 3×size, 3×pc_centroid]
+      history_size: 100           # number of past frames stored per track (history[0] = current)
+      fix_size_history_threshold: 20   # after this many frames, lock bbox size to its running average
+      fix_size_dimension_threshold: 0.4 # proportional size change below this is ignored when fixing size
 
-      # Sensor and LiDAR Ranges
-      local_sensor_range: [10.0, 10.0, 5.0] # x, y, z range for generic sensor (meters)
-      local_lidar_range: [10.0, 10.0, 5.0] # x, y, z range for LiDAR (meters)
-
-      # Tracking and data association
-      max_match_range: 2.0 # max match range between time steps in meters
-      max_size_diff_range: 2.0 #  in meter
-      feature_weight: [3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0.05, 0.05, 0.01] # weight for feagent 3pos + 3size +  3 pc centroid
-      history_size: 100 # size of tracking history. history[0] is current detection
-      fix_size_history_threshold: 20 # History threshold (num of frames) to fix box size
-      fix_size_dimension_threshold: 0.4 # dimension threshold (size of proportional) to fix box size
-      kalman_filter_param: [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
+      # Kalman Filter V2 — position-only observation; velocity & acceleration estimated internally
+      # Parameters: [eP, eQPos, eQVel, eQAcc, eRPos]
+      #   eP:    initial state covariance
+      #   eQPos: process noise on position
+      #   eQVel: process noise on velocity
+      #   eQAcc: process noise on acceleration
+      #   eRPos: measurement noise on position
+      kalman_filter_v2_param: [0.25, 0.05, 0.15, 0.10, 0.02]
+      # OLD Kalman V1 params (kept for reference, not used by active code):
+      # kalman_filter_param:     [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
       # kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05]
-      kalman_filter_averaging_frames: 10
-      max_missed_frames: 5
-      match_feat_weight: 1.0
-      match_pos_weight: 1.5
-      match_pc_weight: 1.0
-      match_size_weight: 1.0
-      match_iou_weight: 1.0
-      match_cluster_weight: 0.8
-      match_vel_weight: 1.0
+      kalman_filter_averaging_frames: 3  # smooth velocity estimate over this many frames
+      max_missed_frames: 5               # delete a track after this many consecutive missed detections
+      coasting_max_missed_frames: 2      # confirmed tracks are held in output for this many missed frames (coasting)
 
-      min_match_score: -2.5
+      # -----------------------------------------------------------------------
+      # Association Scoring Weights
+      # -----------------------------------------------------------------------
+      # The final match score combines several terms; weights control their relative importance.
+      min_match_score: -2.5             # detections with score below this are not matched to any track
+      min_match_score_confirmed: -1.20  # stricter threshold for already-confirmed tracks
+      min_match_score_dynamic: -1.50    # stricter threshold for dynamic tracks
 
-      new_track_min_dist: 0.8
-      new_track_min_pc_dist: 1.0
-      max_match_vel_diff: 3.0
+      max_match_speed: 8.0              # [m/s] max expected object speed; used to gate association distance
+      max_match_vel_diff: 3.0           # [m/s] max velocity difference allowed when matching
 
-      duplicate_track_dist_thresh: 0.8
-      duplicate_track_iou2d_thresh: 0.25
-      duplicate_size_rel_thresh: 0.6  
-      shape_score_weight: 0.02
+      match_pos_score_weight: 1.0             # weight on predicted-position distance term
+      match_size_score_weight: 0.35           # weight on relative size difference term
+      match_iou2d_score_weight: 0.15          # weight on 2D IOU term
+      match_iou2d_weight: 0.20                # secondary IOU weight (used in combined score)
+      match_velocity_direction_score_weight: 0.12  # weight on velocity direction consistency
+      match_prev_obs_pos_score_weight: 0.25   # weight on distance to previous observation position
+      match_prev_obs_iou2d_score_weight: 0.10 # weight on IOU with previous observation bbox
+      match_feat_score_weight: 0.15           # weight on point cloud feature similarity
+
+      max_relative_size_diff_match: 0.80  # max relative size ratio difference allowed in matching
+      assoc_max_rel_size_diff: 0.75       # secondary size ratio gate
+
+      static_assoc_speed_thresh: 0.35  # [m/s] tracks below this speed are treated as static for association
+      static_assoc_dist_thresh: 0.45   # [m] max distance for static track association
+      static_assoc_min_iou2d: 0.08     # min 2D IOU required to associate with a static track
+      dynamic_assoc_dist_base: 0.60    # [m] base distance threshold for dynamic track association
+      dynamic_assoc_dist_gain: 1.20    # dist_max = base + gain * speed (scales with velocity)
+      dynamic_assoc_dist_max: 2.50     # [m] hard cap on dynamic association distance
+
+      new_track_min_dist: 0.8      # [m] a new detection must be at least this far from all tracks to spawn a new track
+      new_track_min_pc_dist: 1.0   # [m] same check using point cloud centroid distance
+
+      duplicate_track_dist_threshold: 0.8  # [m] two tracks closer than this are candidates for deduplication
+      duplicate_track_iou_threshold: 0.25  # 2D IOU above this → treat as duplicates
+      duplicate_size_rel_threshold: 0.6    # relative size ratio above this → treat as duplicates
+
+      confirmed_track_assoc_bonus: 0.20  # score bonus when matching to a confirmed track
+      dynamic_track_assoc_bonus: 0.25    # score bonus when matching to a dynamic track
+
       enable_tracking_debug_logs: true
 
-      # Association robustness
-      max_match_speed: 8.0
-      match_pos_score_weight: 1.0
-      match_size_score_weight: 0.35
-      match_iou2d_score_weight: 0.15
-      max_relative_size_diff_match: 0.60
-      match_velocity_direction_score_weight: 0.12
-      match_prev_obs_pos_score_weight: 0.25
-      match_prev_obs_iou2d_score_weight: 0.10
-      static_assoc_speed_thresh: 0.35
-      static_assoc_dist_thresh: 0.45
-      dynamic_assoc_dist_base: 0.60
-      dynamic_assoc_dist_gain: 1.20
-      dynamic_assoc_dist_max: 2.50
-      static_assoc_min_iou2d: 0.08
-      assoc_max_rel_size_diff: 0.75
-      match_feat_score_weight: 0.15
-      match_iou2d_weight: 0.20
+      # -----------------------------------------------------------------------
+      # Track Confirmation & Natural Motion
+      # -----------------------------------------------------------------------
+      min_confirm_hits: 3                  # a track needs this many consecutive hits before being confirmed
+      min_natural_motion_dist: 0.08        # [m] minimum displacement per frame to be considered moving
+      max_natural_motion_dist: 1.50        # [m] displacements larger than this are flagged as unnatural jumps
+      max_natural_innovation: 0.60         # [m] max Kalman innovation for an unconfirmed track
+      max_natural_innovation_confirmed: 1.00  # [m] same, for confirmed tracks
+      max_natural_innovation_dynamic: 1.20    # [m] same, for dynamic tracks
+      min_direction_consistency_cos: -0.20    # cos(angle) threshold: consecutive velocity vectors must not be too anti-parallel
+      min_velocity_for_direction_check: 0.10  # [m/s] direction check only applied above this speed
+      max_velocity_direction_error_confirm: 1.20   # [rad] max heading error for confirming a track
+      max_velocity_direction_error_tracked: 2.50   # [rad] max heading error for a tracked (non-dynamic) track
+      max_velocity_direction_error_confirm_dynamic: 2.20  # [rad] same, for confirming a dynamic track
+      max_velocity_direction_error_tracked_dynamic: 4.00  # [rad] same, for a tracked dynamic track
+      stationary_speed_thresh: 0.10  # [m/s] tracks below this speed are classified as stationary
 
-      # Track confirmation / natural motion
-      min_confirm_hits: 3
-      min_natural_motion_dist: 0.08
-      max_natural_motion_dist: 1.50
-      max_natural_innovation: 0.60
-      min_direction_consistency_cos: -0.20
-      min_velocity_for_direction_check: 0.10
-      max_velocity_direction_error_confirm: 1.20
-      max_velocity_direction_error_tracked: 2.50
-      stationary_speed_thresh: 0.10
-      confirmed_track_assoc_bonus: 0.20
-      dynamic_track_assoc_bonus: 0.25
-      max_natural_innovation_confirmed: 1.00
-      max_natural_innovation_dynamic: 1.20
-      max_velocity_direction_error_confirm_dynamic: 2.20
-      max_velocity_direction_error_tracked_dynamic: 4.00
-      min_match_score_confirmed: -1.20
-      min_match_score_dynamic: -1.50
-
-      # YOLO Dynamic Classification (depth-projected point cloud)
+      # -----------------------------------------------------------------------
+      # YOLO Dynamic Classification
+      # -----------------------------------------------------------------------
+      # For each YOLO detection of a target class, depth points inside the 2D bbox
+      # are back-projected to 3D and checked against the merged 3D bboxes.
+      # A 3D bbox is marked dynamic if enough YOLO points fall inside it.
       yolo_dynamic_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
-      yolo_point_fraction_threshold: 0.15 # min fraction of filtered YOLO points inside a bbox to mark it dynamic
-      yolo_depth_tolerance: 1.0            # [m] max depth beyond foreground to keep (background filter)
+      yolo_point_fraction_threshold: 0.2  # min fraction of foreground YOLO points inside a 3D bbox to mark it dynamic
+      yolo_depth_tolerance: 1.0            # [m] depth window beyond the foreground percentile to keep (background rejection)
 
+      # -----------------------------------------------------------------------
+      # Dynamic Classification (point cloud motion voting)
+      # -----------------------------------------------------------------------
+      # For each track, points in the current cluster are matched to the nearest
+      # point in the cluster from `frame_skip` frames ago. Each matched point
+      # casts a vote if its estimated velocity exceeds `dynamic_velocity_threshold`
+      # AND its direction is consistent with the bbox displacement direction.
+      # A track becomes a dynamic candidate if the vote ratio >= dynamic_voting_threshold
+      # AND the Kalman velocity also exceeds the threshold.
+      #
+      # Anti-false-positive logic:
+      #   - dynamic_velocity_threshold: hard gate on per-point speed AND Kalman speed
+      #   - dynamic_voting_threshold:   requires a large majority of consistent votes
+      #   - dynamic_consistency_threshold: requires sustained motion over many frames
+      #     (at 0.12s/frame, value 12 = ~1.4s of continuous motion before confirmation)
+      #
+      # "Was moving, now stopped" logic:
+      #   - frames_force_dynamic / frames_force_dynamic_check_range: if the object
+      #     was confirmed dynamic for enough of the recent history, it stays dynamic
+      #     even while stationary (handles pedestrians stopping, cars decelerating, etc.)
+      frame_skip: 5                         # [frames] gap for point cloud displacement estimate
+      dynamic_velocity_threshold: 0.3      # [m/s] min speed to cast a vote (per-point) AND confirm (Kalman); ~slow walk
+      dynamic_voting_threshold: 0.80        # fraction of consistent votes required — 80% majority filters noisy static clusters
+      frames_force_dynamic: 20              # min dynamic frames in window to force sticky label (out of check_range below)
+      frames_force_dynamic_check_range: 30  # [frames] window = ~1.8s; keeps recently-moving objects dynamic after they stop
+      dynamic_consistency_threshold: 22     # consecutive candidate frames before confirming (~1.4s at 0.12s/frame)
 
-      # Classification
-      frame_skip: 5 # num of frames skiped when comparing 2 point clouds
-      dynamic_velocity_threshold: 0.3
-      dynamic_voting_threshold: 0.8
-      frames_force_dynamic: 22 # Range of searching dynamic obstacles in box history
-      frames_force_dynamic_check_range: 30 # threshold for forcing dynamic obstacles
-      dynamic_consistency_threshold: 20 # obstacles being voted as dynamic for continuous k frames are eligible to be classified as dynamic
-
-      # Constrain size
-      target_constrain_size: false
-      target_object_size: [0.5, 0.5, 1.8]
-      max_object_size: [10.0, 10.0, 10.0] # filter out objects that are too large
+      # -----------------------------------------------------------------------
+      # Object Size Constraints
+      # -----------------------------------------------------------------------
+      target_constrain_size: false           # if true, fix detected bbox to target_object_size
+      target_object_size: [0.5, 0.5, 1.8]   # [m] expected object size [x, y, z] when constrain is active
+      max_object_size: [10.0, 10.0, 10.0]   # [m] bboxes larger than this in any axis are discarded
 
 calibration_icp_node:
   ros__parameters:
     depth_topic: /front_camera/camera/depth/image_rect_raw
     velodyne_topic: /velodyne_points
-    lidar_frame: velodyne
-    urdf_camera_frame: camera
-    camera_frame_initial_guess: camera_initial_guess
-    refined_camera_frame: camera_refined
-    icp_max_correspondence_distance: 0.2
-    icp_max_iteration: 100
-    icp_voxel_size: 0.05
-    icp_use_point_to_plane: false
-    icp_normal_radius: 0.15
-    icp_normal_max_nn: 30
-    min_overlap_points: 100
-    overlap_fov_margin_px: 120
-    icp_max_runs: 10         # Number of ICP runs (tunable)
-    icp_fitness_threshold: 0.3 # Minimum fitness for valid ICP result (tunable)
+    lidar_frame: velodyne                         # TF frame of the LiDAR
+    urdf_camera_frame: camera                     # logical camera frame name (used in output TF/logs)
+    camera_frame_initial_guess: camera_initial_guess  # TF frame providing the initial LiDAR->camera transform guess
+    refined_camera_frame: camera_refined          # name of the TF frame published after ICP refinement
+    icp_max_correspondence_distance: 0.2   # [m] max point-to-point distance considered an ICP correspondence
+    icp_max_iteration: 100                 # max ICP iterations per run
+    icp_voxel_size: 0.05                   # [m] voxel down-sampling before ICP (0 = disabled)
+    icp_use_point_to_plane: true           # true = point-to-plane ICP (requires normals); false = point-to-point
+    icp_normal_radius: 0.15                # [m] search radius for normal estimation
+    icp_normal_max_nn: 30                  # max neighbours used for normal estimation
+    min_overlap_points: 100                # min LiDAR points in camera FOV; if fewer, full cloud is used as target
+    overlap_fov_margin_px: 120             # [px] margin added around image boundary when computing FOV overlap
+    icp_max_runs: 10                       # number of independent ICP scenes to collect before averaging
+    icp_fitness_threshold: 0.3             # min ICP fitness score to accept a result (0-1, higher = better fit)
     onboard_detector:
-      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]
+      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # [fx, fy, cx, cy]
       depth_scale_factor: 1000.0
-      depth_min_value: 0.5
-      depth_max_value: 5.0
+      depth_min_value: 0.5  # [m]
+      depth_max_value: 5.0  # [m] slightly larger than detector to include edge points during calibration
       depth_skip_pixel: 2
 
 yolov11_detector_node:
@@ -208,11 +287,11 @@ yolov11_detector_node:
     weights_path: weights/yolo11n.pt
     class_names_path: config/coco.names
     target_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
-    timer_period_sec: 0.033
-    inference_size: 352
+    timer_period_sec: 0.033  # [s] inference period (~30 Hz)
+    inference_size: 352       # [px] YOLO input resolution (lower = faster, less accurate at distance)
     queue_size: 10
 
-# yolo_detector_node:
+# yolo_detector_node:  # legacy YOLOv4/v5 node, kept for reference
 #   ros__parameters:
 #     image_topic: /camera1/rs1/color/image_raw
 #     detected_image_topic: yolo_detector/detected_image
