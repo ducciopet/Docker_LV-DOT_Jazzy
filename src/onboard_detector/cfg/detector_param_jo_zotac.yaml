@@ -67,7 +67,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # UV Detection Filtering
       # -----------------------------------------------------------------------
-      uv_box_max_diagonal: 3.0  # [m] max XY diagonal of a UV-map bbox; larger detections are discarded as spurious
+      uv_box_max_diagonal: 2.5  # [m] max XY diagonal of a UV-map bbox; larger detections are discarded as spurious
 
       # -----------------------------------------------------------------------
       # Visual DBSCAN Parameters (depth point cloud)
@@ -75,7 +75,7 @@ detector_node:
       dbscan_min_points_cluster: 20    # min points per cluster (higher = less noise, misses more distant objects)
       dbscan_search_range_epsilon: 0.04 # [m] neighbourhood radius for DBSCAN core-point test
 
-      downsample_threshold: 3500   # if projected points exceed this count, apply Gaussian downsampling
+      downsample_threshold: 4500   # if projected points exceed this count, apply Gaussian downsampling
       gaussian_downsample_rate: 8  # keep 1 in N points after Gaussian downsampling
 
       # -----------------------------------------------------------------------
@@ -96,7 +96,7 @@ detector_node:
       # LiDAR DBSCAN Parameters
       # -----------------------------------------------------------------------
       lidar_DBSCAN_min_points: 14  # min points per LiDAR cluster
-      lidar_DBSCAN_epsilon: 0.08   # [m] DBSCAN neighbourhood radius for LiDAR
+      lidar_DBSCAN_epsilon: 0.09   # [m] DBSCAN neighbourhood radius for LiDAR
 
       # -----------------------------------------------------------------------
       # BBox Merging — Intra-group (same detection source)
@@ -110,7 +110,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # UV bboxes come from the U-V disparity map; they have no associated point cloud.
       # DBSCAN bboxes come from depth clustering and carry a depth point cloud cluster.
-      visual_merging_flag: "bigger"             # "smaller": tight bbox containing both; "bigger": union; "none": skip
+      visual_merging_flag: "smaller"             # "smaller": tight bbox containing both; "bigger": union; "none": skip
       visual_filtering_BBox_IOU_threshold: 0.2   # mutual IOU threshold for UV<->DBSCAN peer merge
       visual_filtering_BBox_IOV_threshold: 0.3  # IOV threshold for UV<->DBSCAN nesting detection
       uv_unmerged_flag: false  # if true, UV bboxes with no DBSCAN match are kept in output
@@ -149,6 +149,7 @@ detector_node:
       kalman_filter_averaging_frames: 3  # smooth velocity estimate over this many frames
       max_missed_frames: 5               # delete a track after this many consecutive missed detections
       coasting_max_missed_frames: 2      # confirmed tracks are held in output for this many missed frames (coasting)
+      max_static_frames: 10              # de-confirm a track after this many consecutive stationary frames (resets when moving or force_dynamic is active)
 
       # -----------------------------------------------------------------------
       # Association Scoring Weights
@@ -216,8 +217,10 @@ detector_node:
       # are back-projected to 3D and checked against the merged 3D bboxes.
       # A 3D bbox is marked dynamic if enough YOLO points fall inside it.
       yolo_dynamic_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
-      yolo_point_fraction_threshold: 0.2  # min fraction of foreground YOLO points inside a 3D bbox to mark it dynamic
-      yolo_depth_tolerance: 1.0            # [m] depth window beyond the foreground percentile to keep (background rejection)
+      yolo_point_fraction_threshold: 0.2   # min fraction of foreground YOLO points inside a 3D bbox to mark it dynamic
+      yolo_depth_tolerance: 1.0             # [m] depth window beyond the foreground percentile to keep (background rejection)
+      yolo_centroid_dist_threshold: 1.5     # [m] max XY distance from YOLO point cloud centroid to a 3D bbox center;
+                                            # prevents walls/clusters behind the detected person from being flagged
 
       # -----------------------------------------------------------------------
       # Dynamic Classification (point cloud motion voting)

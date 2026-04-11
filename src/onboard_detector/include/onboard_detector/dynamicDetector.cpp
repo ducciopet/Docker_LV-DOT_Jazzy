@@ -705,6 +705,14 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Coasting max missed frames is set to: " << this->coastingMaxMissedFrames_ << std::endl;
         }
 
+        if (!this->nh_->get_parameter(pname("max_static_frames"), this->maxStaticFrames_)){
+            this->maxStaticFrames_ = 10;
+            std::cout << this->hint_ << ": No max_static_frames parameter found. Use default: 10." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Max static frames before de-confirm: " << this->maxStaticFrames_ << std::endl;
+        }
+
         // minimum match score for matching
         if (!this->nh_->get_parameter(pname("min_match_score"), this->minMatchScore_)){
             this->minMatchScore_ = -2.5;
@@ -910,6 +918,14 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": YOLO depth tolerance: " << this->yoloDepthTolerance_ << " m" << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_centroid_dist_threshold"), this->yoloCentroidDistThresh_)){
+            this->yoloCentroidDistThresh_ = 1.5;
+            std::cout << this->hint_ << ": No yolo_centroid_dist_threshold. Use default: 1.5 m." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO centroid distance threshold: " << this->yoloCentroidDistThresh_ << " m" << std::endl;
         }
 
         // =========================
@@ -2064,6 +2080,17 @@ namespace onboardDetector{
             this->transformUVBBoxes(uvBBoxes);
             std::cout << "[DEBUG] After transformUVBBoxes, uvBBoxes size = " << uvBBoxes.size() << std::endl;
             this->uvBBoxes_ = uvBBoxes;
+
+            // Filter UV bboxes by XY diagonal — must happen here, after uvBBoxes_ is assigned,
+            // NOT in dbscanDetect() where it ran on the previous frame's data.
+            std::vector<onboardDetector::box3D> filteredUVBBoxes;
+            for (const auto& box : this->uvBBoxes_) {
+                const double diag = std::sqrt(box.x_width * box.x_width + box.y_width * box.y_width);
+                if (diag <= this->uvBoxMaxDiagonal_) {
+                    filteredUVBBoxes.push_back(box);
+                }
+            }
+            this->uvBBoxes_ = filteredUVBBoxes;
         }
     }
 
@@ -2078,18 +2105,8 @@ namespace onboardDetector{
 
         // 3. cluster points and get bounding boxes
         RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Clustering filteredDepthPoints_ (size: %zu)", this->filteredDepthPoints_.size());
-        this->clusterPointsAndBBoxes(this->filteredDepthPoints_, this->dbBBoxes_, this->pcClustersVisual_, 
+        this->clusterPointsAndBBoxes(this->filteredDepthPoints_, this->dbBBoxes_, this->pcClustersVisual_,
                                      this->pcClusterCentersVisual_, this->pcClusterStdsVisual_);
-
-        // 4. Filter UV detected boxes by diagonal size
-        std::vector<onboardDetector::box3D> filteredUVBBoxes;
-        for (const auto& box : this->uvBBoxes_) {
-            double diag = std::sqrt(box.x_width * box.x_width + box.y_width * box.y_width);
-            if (diag <= this->uvBoxMaxDiagonal_) {
-                filteredUVBBoxes.push_back(box);
-            }
-        }
-        this->uvBBoxes_ = filteredUVBBoxes;
     }
 
 
@@ -3270,11 +3287,19 @@ namespace onboardDetector{
                 // --------------------------------------------------
                 // STEP 3 & 4: Check which bboxes contain these points
                 // --------------------------------------------------
-                // For each bbox, count how many filtered YOLO points fall inside.
-                const int totalFiltered = static_cast<int>(filteredYoloPoints.size());
+                // Compute centroid of the YOLO foreground point cloud in world frame.
+                // Used as a spatial gate: 3D bboxes whose center is farther than
+                // yoloCentroidDistThresh_ from this centroid are skipped, preventing
+                // walls or other clusters behind the detected person from being flagged.
+                Eigen::Vector3d yoloCentroid = Eigen::Vector3d::Zero();
+                for (const auto& pt : filteredYoloPoints){ yoloCentroid += pt; }
+                yoloCentroid /= static_cast<double>(filteredYoloPoints.size());
 
                 for (size_t j = 0; j < filteredBBoxesTemp.size(); ++j){
                     const auto& bb = filteredBBoxesTemp[j];
+                    const double cdx = bb.x - yoloCentroid(0);
+                    const double cdy = bb.y - yoloCentroid(1);
+                    if (std::sqrt(cdx*cdx + cdy*cdy) > this->yoloCentroidDistThresh_) continue;
                     const double hx = bb.x_width * 0.5;
                     const double hy = bb.y_width * 0.5;
                     const double hz = bb.z_width * 0.5;
@@ -3290,6 +3315,13 @@ namespace onboardDetector{
 
                     if (insideCount == 0) continue;
 
+                    // Fraction of YOLO foreground points that fall inside this 3D bbox.
+                    // Background is already removed in STEP 2 (10th-percentile depth filter),
+                    // so totalFiltered contains only foreground points belonging to the detected
+                    // object. Using the YOLO-relative denominator is correct: it measures how
+                    // concentrated the detection's foreground is inside this bbox, independently
+                    // of LiDAR points that may also be in the 3D cluster.
+                    const int totalFiltered = static_cast<int>(filteredYoloPoints.size());
                     const double fraction = static_cast<double>(insideCount) / static_cast<double>(totalFiltered);
 
                     if (fraction >= this->yoloPointFractionThresh_){
@@ -4156,15 +4188,27 @@ namespace onboardDetector{
                                             const onboardDetector::box3D& currDetectedBBox,
                                             int newHitStreak) const
     {
-        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate){
-            return true;
-        }
-
+        // Minimum consecutive hits required before any confirmation.
         if (newHitStreak < this->minConfirmHits_){
             return false;
         }
 
-        if (!this->isNaturalMotion(trackIdx, currDetectedBBox)){
+        // A track can only be confirmed if the object is actually moving.
+        // This prevents static detections from ever entering trackedBBoxes_.
+        // Objects that WERE already confirmed (oldConfirmed=true in the caller)
+        // remain in output via `oldConfirmed || shouldConfirmTrack(...)`, so a
+        // person who stops walking stays tracked without re-entering this gate.
+        if (trackIdx < 0 || trackIdx >= static_cast<int>(this->boxHist_.size()) || this->boxHist_[trackIdx].empty()){
+            return false;
+        }
+
+        const auto& prevBBox = this->boxHist_[trackIdx].front();
+        const double dt = this->clampPositive(this->dt_, 1e-3);
+        const double dx = currDetectedBBox.x - prevBBox.x;
+        const double dy = currDetectedBBox.y - prevBBox.y;
+        const double obsSpeed = std::sqrt(dx * dx + dy * dy) / dt;
+
+        if (obsSpeed < this->stationarySpeedThresh_){
             return false;
         }
 
@@ -4186,6 +4230,7 @@ namespace onboardDetector{
             this->hitStreak_.resize(numObjs, 1);
             this->trackAge_.resize(numObjs, 1);
             this->confirmedTracks_.resize(numObjs, false);
+            this->staticStreak_.resize(numObjs, 0);
 
             bestMatch.resize(this->filteredBBoxes_.size(), -1);
 
@@ -4422,6 +4467,7 @@ namespace onboardDetector{
         std::vector<int> hitStreakTemp;
         std::vector<int> trackAgeTemp;
         std::vector<bool> confirmedTracksTemp;
+        std::vector<int> staticStreakTemp;
 
         std::deque<onboardDetector::box3D> newSingleBoxHist;
         std::deque<std::vector<Eigen::Vector3d>> newSinglePcHist;
@@ -4489,14 +4535,43 @@ namespace onboardDetector{
 
             const int newHitStreak = oldHitStreak + 1;
             const int newTrackAge = oldTrackAge + 1;
-            const bool newConfirmed = oldConfirmed || this->shouldConfirmTrack(matchIdx, currDetectedBBox, newHitStreak);
+
+            // Track consecutive static frames for confirmed tracks.
+            // If a confirmed track has been stationary for too long AND is no longer
+            // flagged as dynamic (force_dynamic expired), revoke its confirmation.
+            // This prevents a wall from permanently inheriting the track ID of a person
+            // who walked out of the camera FOV.
+            const int oldStaticStreak =
+                (matchIdx < static_cast<int>(this->staticStreak_.size())) ? this->staticStreak_[matchIdx] : 0;
+            const double velNorm = std::sqrt(newEstimatedBBox.Vx * newEstimatedBBox.Vx +
+                                             newEstimatedBBox.Vy * newEstimatedBBox.Vy);
+            const bool isStationary = velNorm < this->stationarySpeedThresh_;
+            const int newStaticStreak = (isStationary && !currDetectedBBox.is_dynamic && !currDetectedBBox.is_yolo_candidate)
+                                        ? (oldStaticStreak + 1) : 0;
+            staticStreakTemp.push_back(newStaticStreak);
+
+            const bool deconfirm = oldConfirmed
+                && (newStaticStreak >= this->maxStaticFrames_)
+                && !currDetectedBBox.is_dynamic
+                && !currDetectedBBox.is_yolo_candidate;
+
+            const bool newConfirmed = !deconfirm && (oldConfirmed || this->shouldConfirmTrack(matchIdx, currDetectedBBox, newHitStreak));
 
             hitStreakTemp.push_back(newHitStreak);
             trackAgeTemp.push_back(newTrackAge);
             confirmedTracksTemp.push_back(newConfirmed);
 
             if (newConfirmed){
-                trackedBBoxesTemp.push_back(newEstimatedBBox);
+                // Use detected (measured) geometry for the output bbox so the
+                // visualised box sits on the actual detection, not the Kalman prediction.
+                // Velocity/acceleration come from the Kalman filter.
+                onboardDetector::box3D outputBBox = currDetectedBBox;
+                outputBBox.Vx = newEstimatedBBox.Vx;
+                outputBBox.Vy = newEstimatedBBox.Vy;
+                outputBBox.Ax = newEstimatedBBox.Ax;
+                outputBBox.Ay = newEstimatedBBox.Ay;
+                outputBBox.id = newEstimatedBBox.id;
+                trackedBBoxesTemp.push_back(outputBBox);
             }
 
             if (this->enableTrackingDebugLogs_){
@@ -4578,6 +4653,10 @@ namespace onboardDetector{
             const bool oldConfirmed =
                 (j < static_cast<int>(this->confirmedTracks_.size())) ? this->confirmedTracks_[j] : false;
 
+            const int oldStaticStreakMissed =
+                (j < static_cast<int>(this->staticStreak_.size())) ? this->staticStreak_[j] : 0;
+            staticStreakTemp.push_back(oldStaticStreakMissed); // no detection → keep existing streak
+
             hitStreakTemp.push_back(0);
             trackAgeTemp.push_back(oldTrackAge + 1);
             confirmedTracksTemp.push_back(oldConfirmed);
@@ -4649,6 +4728,7 @@ namespace onboardDetector{
 
             hitStreakTemp.push_back(1);
             trackAgeTemp.push_back(1);
+            staticStreakTemp.push_back(0); // new track, no static history
 
             const bool confirmNow = currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate;
             confirmedTracksTemp.push_back(confirmNow);
@@ -4718,6 +4798,7 @@ namespace onboardDetector{
         this->hitStreak_ = hitStreakTemp;
         this->trackAge_ = trackAgeTemp;
         this->confirmedTracks_ = confirmedTracksTemp;
+        this->staticStreak_ = staticStreakTemp;
     }
 
     void dynamicDetector::kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R){

@@ -210,6 +210,8 @@ namespace onboardDetector{
         std::vector<int> hitStreak_;
         std::vector<int> trackAge_;
         std::vector<bool> confirmedTracks_;
+        std::vector<int> staticStreak_;  // consecutive frames a confirmed track has been stationary
+        int maxStaticFrames_;            // de-confirm after this many consecutive static frames
 
         double minMatchScore_;
 
@@ -248,6 +250,7 @@ namespace onboardDetector{
         // YOLO Dynamic Classification
         std::vector<std::string> yoloDynamicClasses_;
         double yoloPointFractionThresh_;
+        double yoloCentroidDistThresh_; // max XY distance from YOLO cloud centroid to 3D bbox center
         double yoloDepthTolerance_;
 
         // Track confirmation / natural motion
