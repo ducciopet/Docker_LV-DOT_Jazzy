@@ -73,30 +73,31 @@ detector_node:
       # Visual DBSCAN Parameters (depth point cloud)
       # -----------------------------------------------------------------------
       dbscan_min_points_cluster: 20    # min points per cluster (higher = less noise, misses more distant objects)
-      dbscan_search_range_epsilon: 0.04 # [m] neighbourhood radius for DBSCAN core-point test
+      dbscan_search_range_epsilon: 0.08 # [m] neighbourhood radius for DBSCAN core-point test
 
-      downsample_threshold: 4500   # if projected points exceed this count, apply Gaussian downsampling
+      downsample_threshold: 6500   # if projected points exceed this count, apply Gaussian downsampling
       gaussian_downsample_rate: 8  # keep 1 in N points after Gaussian downsampling
 
       # -----------------------------------------------------------------------
       # DBSCAN Refinement (recursive cluster splitting)
       # -----------------------------------------------------------------------
       dbscan_refinement_enable: true
+      visual_dbscan_refinement_enable: true  # if false, visual DBSCAN skips refinement (LiDAR still uses dbscan_refinement_enable)
       dbscan_refine_max_diagonal: 2.5      # [m] clusters with diagonal > this are split (unless density is high enough)
       dbscan_refine_min_density: 120.0     # [pts/m³] if density exceeds this, large clusters are kept as-is
       dbscan_refine_split_min_pts: 10      # min points required in each sub-cluster after a split
       dbscan_refine_split_eps: 0.07        # [m] DBSCAN epsilon used during the split pass
       dbscan_refine_min_subcluster_pts: 12 # sub-clusters smaller than this are discarded after splitting
-      dbscan_refine_axis_slice_width: 0.25 # [m] slice width along dominant axis when splitting
-      dbscan_refine_max_depth: 3           # maximum recursion depth for splitting
+      dbscan_refine_axis_slice_width: 0.6 # [m] slice width along dominant axis when splitting
+      dbscan_refine_max_depth: 2           # maximum recursion depth for splitting
       dbscan_refine_recursive: true
       dbscan_refine_min_box_volume: 0.0001 # [m³] bounding boxes smaller than this are discarded
 
       # -----------------------------------------------------------------------
       # LiDAR DBSCAN Parameters
       # -----------------------------------------------------------------------
-      lidar_DBSCAN_min_points: 14  # min points per LiDAR cluster
-      lidar_DBSCAN_epsilon: 0.09   # [m] DBSCAN neighbourhood radius for LiDAR
+      lidar_DBSCAN_min_points: 10  # min points per LiDAR cluster
+      lidar_DBSCAN_epsilon: 0.04   # [m] DBSCAN neighbourhood radius for LiDAR
 
       # -----------------------------------------------------------------------
       # BBox Merging — Intra-group (same detection source)
@@ -111,17 +112,18 @@ detector_node:
       # UV bboxes come from the U-V disparity map; they have no associated point cloud.
       # DBSCAN bboxes come from depth clustering and carry a depth point cloud cluster.
       visual_merging_flag: "smaller"             # "smaller": tight bbox containing both; "bigger": union; "none": skip
-      visual_filtering_BBox_IOU_threshold: 0.2   # mutual IOU threshold for UV<->DBSCAN peer merge
-      visual_filtering_BBox_IOV_threshold: 0.3  # IOV threshold for UV<->DBSCAN nesting detection
+      visual_filtering_BBox_IOU_threshold: 0.6   # mutual IOU threshold for UV<->DBSCAN peer merge
+      visual_filtering_BBox_IOV_threshold: 0.7  # IOV threshold for UV<->DBSCAN nesting detection
       uv_unmerged_flag: false  # if true, UV bboxes with no DBSCAN match are kept in output
       db_unmerged_flag: true   # if true, DBSCAN bboxes with no UV match are kept in output
 
       # -----------------------------------------------------------------------
       # BBox Merging — Visual <-> LiDAR (final fusion)
       # -----------------------------------------------------------------------
-      lidar_visual_merging_flag: "bigger"              # same options as visual_merging_flag
-      lidar_visual_filtering_BBox_IOU_threshold: 0.3    # mutual IOU threshold for visual<->LiDAR peer merge
-      lidar_visual_filtering_BBox_IOV_threshold: 0.4    # IOV threshold for visual<->LiDAR nesting detection
+      lidar_visual_merging_flag: "smaller"             # same options as visual_merging_flag
+      lidar_visual_merger_leaf_only: false                # if true, "smaller" mode outputs only leaf bboxes (no conservative parent+child merge)
+      lidar_visual_filtering_BBox_IOU_threshold: 0.6    # mutual IOU threshold for visual<->LiDAR peer merge
+      lidar_visual_filtering_BBox_IOV_threshold: 0.7   # IOV threshold for visual<->LiDAR nesting detection
       visual_unmerged_flag: true  # if true, visual bboxes with no LiDAR match are kept in output
       lidar_unmerged_flag: true   # if true, LiDAR bboxes with no visual match are kept in output
 
@@ -129,7 +131,6 @@ detector_node:
       # Tracking & Data Association
       # -----------------------------------------------------------------------
       max_match_range: 2.0       # [m] max positional distance to match a detection to an existing track
-      max_size_diff_range: 2.0   # [m] max absolute size difference allowed during matching
       feature_weight: [3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0.05, 0.05, 0.01] # weights for feature vector [3×pos, 3×size, 3×pc_centroid]
       history_size: 100           # number of past frames stored per track (history[0] = current)
       fix_size_history_threshold: 20   # after this many frames, lock bbox size to its running average
@@ -148,8 +149,6 @@ detector_node:
       # kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05]
       kalman_filter_averaging_frames: 3  # smooth velocity estimate over this many frames
       max_missed_frames: 5               # delete a track after this many consecutive missed detections
-      coasting_max_missed_frames: 2      # confirmed tracks are held in output for this many missed frames (coasting)
-      max_static_frames: 10              # de-confirm a track after this many consecutive stationary frames (resets when moving or force_dynamic is active)
 
       # -----------------------------------------------------------------------
       # Association Scoring Weights
@@ -202,7 +201,7 @@ detector_node:
       max_natural_innovation: 0.60         # [m] max Kalman innovation for an unconfirmed track
       max_natural_innovation_confirmed: 1.00  # [m] same, for confirmed tracks
       max_natural_innovation_dynamic: 1.20    # [m] same, for dynamic tracks
-      min_direction_consistency_cos: -0.20    # cos(angle) threshold: consecutive velocity vectors must not be too anti-parallel
+      min_direction_consistency_cos: 0.0    # cos(angle) threshold: consecutive velocity vectors must not be too anti-parallel
       min_velocity_for_direction_check: 0.10  # [m/s] direction check only applied above this speed
       max_velocity_direction_error_confirm: 1.20   # [rad] max heading error for confirming a track
       max_velocity_direction_error_tracked: 2.50   # [rad] max heading error for a tracked (non-dynamic) track

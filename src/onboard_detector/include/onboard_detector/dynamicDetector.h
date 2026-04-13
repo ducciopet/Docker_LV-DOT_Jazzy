@@ -151,6 +151,7 @@ namespace onboardDetector{
         
         // DBSCAN refinement param
         bool dbscanRefinementEnable_;
+        bool visualDbscanRefinementEnable_;
         double dbscanRefineMaxDiagonal_;
         double dbscanRefineMinDensity_;
         int dbscanRefineSplitMinPts_;
@@ -173,6 +174,7 @@ namespace onboardDetector{
         double samegroupIOVThresh_;
         std::string visualmergingFlag_;
         std::string lidarVisualmergingFlag_;
+        bool lidarVisualMergerLeafOnly_;
         bool uvUnmergedFlag_;
         bool dbUnmergedFlag_;
         bool lidarUnmergedFlag_;
@@ -384,7 +386,7 @@ namespace onboardDetector{
         // Data association and tracking functions
         void boxAssociation(std::vector<int>& bestMatch);
         void boxAssociationHelper(std::vector<int>& bestMatch);
-        void BboxesMerger(const std::vector<onboardDetector::box3D>& group1BBoxes_, const std::vector<onboardDetector::box3D>& group2BBoxes_, const std::vector<std::vector<Eigen::Vector3d>>& group1pcClusters_, const std::vector<Eigen::Vector3d>& group1pcClusterCenters_, const std::vector<Eigen::Vector3d>& group1pcClusterStds_, const std::vector<std::vector<Eigen::Vector3d>>& group2pcClusters_, const std::vector<Eigen::Vector3d>& group2pcClusterCenters_, const std::vector<Eigen::Vector3d>& group2pcClusterStds_, std::vector<onboardDetector::box3D>& BBoxesTemp, std::vector<std::vector<Eigen::Vector3d>>& PcClustersTemp, std::vector<Eigen::Vector3d>& PcClusterCentersTemp, std::vector<Eigen::Vector3d>& PcClusterStdsTemp, std::string merging_style, bool flag_group1, bool flag_group2, double boxIOUThresh_, double boxIOVThresh_);
+        void BboxesMerger(const std::vector<onboardDetector::box3D>& group1BBoxes_, const std::vector<onboardDetector::box3D>& group2BBoxes_, const std::vector<std::vector<Eigen::Vector3d>>& group1pcClusters_, const std::vector<Eigen::Vector3d>& group1pcClusterCenters_, const std::vector<Eigen::Vector3d>& group1pcClusterStds_, const std::vector<std::vector<Eigen::Vector3d>>& group2pcClusters_, const std::vector<Eigen::Vector3d>& group2pcClusterCenters_, const std::vector<Eigen::Vector3d>& group2pcClusterStds_, std::vector<onboardDetector::box3D>& BBoxesTemp, std::vector<std::vector<Eigen::Vector3d>>& PcClustersTemp, std::vector<Eigen::Vector3d>& PcClusterCentersTemp, std::vector<Eigen::Vector3d>& PcClusterStdsTemp, std::string merging_style, bool flag_group1, bool flag_group2, double boxIOUThresh_, double boxIOVThresh_, bool leaf_only = false);
         void mergeNestedGroup(const std::vector<onboardDetector::box3D>& inBoxes, const std::vector<std::vector<Eigen::Vector3d>>& inClusters, const std::vector<Eigen::Vector3d>& inCenters, const std::vector<Eigen::Vector3d>& inStds,     std::vector<onboardDetector::box3D>& outBoxes, std::vector<std::vector<Eigen::Vector3d>>& outClusters, std::vector<Eigen::Vector3d>& outCenters, std::vector<Eigen::Vector3d>& outStds);
         void mergeBoxesSet(const std::vector<onboardDetector::box3D>& boxes, const std::vector<std::vector<Eigen::Vector3d>>& clusters, const std::vector<int>& indices, onboardDetector::box3D& outBox, std::vector<Eigen::Vector3d>& outCluster, Eigen::Vector3d& center, Eigen::Vector3d& stddev);
         void genFeatHelper(const std::vector<onboardDetector::box3D>& boxes, const std::vector<Eigen::Vector3d>& pcCenters, std::vector<Eigen::VectorXd>& feature);

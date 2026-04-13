@@ -360,6 +360,15 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": DBSCAN refinement enable: " << this->dbscanRefinementEnable_ << std::endl;
         }
 
+        // Visual DBSCAN refinement enable (separate from LiDAR)
+        if (!this->nh_->get_parameter(pname("visual_dbscan_refinement_enable"), this->visualDbscanRefinementEnable_)){
+            this->visualDbscanRefinementEnable_ = this->dbscanRefinementEnable_;
+            std::cout << this->hint_ << ": No visual DBSCAN refinement enable. Use default from dbscan_refinement_enable: " << this->visualDbscanRefinementEnable_ << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Visual DBSCAN refinement enable: " << this->visualDbscanRefinementEnable_ << std::endl;
+        }
+
         // DBSCAN refine max diagonal
         if (!this->nh_->get_parameter(pname("dbscan_refine_max_diagonal"), this->dbscanRefineMaxDiagonal_)){
             this->dbscanRefineMaxDiagonal_ = 2.0;
@@ -503,6 +512,15 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": LiDAR visual merging flag is set to: " << this->lidarVisualmergingFlag_ << std::endl;
         }
 
+        // LiDAR Visual Merger Leaf Only
+        if (!this->nh_->get_parameter(pname("lidar_visual_merger_leaf_only"), this->lidarVisualMergerLeafOnly_)){
+            this->lidarVisualMergerLeafOnly_ = false;
+            std::cout << this->hint_ << ": No LiDAR visual merger leaf_only parameter found. Use default: false." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": LiDAR visual merger leaf_only is set to: " << this->lidarVisualMergerLeafOnly_ << std::endl;
+        }
+
         // UV unmerged Flag
         if (!this->nh_->get_parameter(pname("uv_unmerged_flag"), this->uvUnmergedFlag_)){
             this->uvUnmergedFlag_ = false;
@@ -564,15 +582,6 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": Max match range is set to: " << this->maxMatchRange_  << "m." << std::endl;
-        }
-
-        // maximum size difference for matching
-        if (!this->nh_->get_parameter(pname("max_size_diff_range"), this->maxMatchSizeRange_)){
-            this->maxMatchSizeRange_ = 0.5;
-            std::cout << this->hint_ << ": No max size difference range for matching parameter found. Use default: 0.5m." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Max size difference range for matching is set to: " << this->maxMatchSizeRange_ << "m." << std::endl;
         }
 
         // feature weight
@@ -694,23 +703,6 @@ namespace onboardDetector{
                 std::cout << kfV2Params[i];
             }
             std::cout << "]." << std::endl;
-        }
-
-        // coasting: max missed frames for confirmed tracks to remain in output
-        if (!this->nh_->get_parameter(pname("coasting_max_missed_frames"), this->coastingMaxMissedFrames_)){
-            this->coastingMaxMissedFrames_ = 2;
-            std::cout << this->hint_ << ": No coasting max missed frames parameter found. Use default: 2." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Coasting max missed frames is set to: " << this->coastingMaxMissedFrames_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("max_static_frames"), this->maxStaticFrames_)){
-            this->maxStaticFrames_ = 10;
-            std::cout << this->hint_ << ": No max_static_frames parameter found. Use default: 10." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Max static frames before de-confirm: " << this->maxStaticFrames_ << std::endl;
         }
 
         // minimum match score for matching
@@ -2178,7 +2170,8 @@ namespace onboardDetector{
                                     bool flag_group1,
                                     bool flag_group2,
                                     double boxIOUThresh_,
-                                    double boxIOVThresh_)
+                                    double boxIOVThresh_,
+                                    bool leaf_only)
     {
         size_t M = group1BBoxes_.size();
         size_t N = group2BBoxes_.size();
@@ -2420,9 +2413,9 @@ namespace onboardDetector{
                 }
 
                 // =========================
-                // 🔥 CASO CONSERVATIVO: 1 parent - 1 child
+                // 🔥 CASO CONSERVATIVO: 1 parent - 1 child (skipped when leaf_only)
                 // =========================
-                if (hasParent)
+                if (hasParent && !leaf_only)
                 {
                     auto parentKey = std::make_pair(parentNode.idx, parentNode.is_group1);
 
@@ -3156,7 +3149,8 @@ namespace onboardDetector{
             this->lidarUnmergedFlag_,                              
 
             this->lidarVisualboxIOUThresh_,
-            this->lidarVisualboxIOVThresh_
+            this->lidarVisualboxIOVThresh_,
+            this->lidarVisualMergerLeafOnly_
         );
 
         this->filteredBBoxesBeforeYolo_ = filteredBBoxesTemp; // ready for visualization / next steps
@@ -3451,7 +3445,7 @@ namespace onboardDetector{
             pointsDB));
 
         this->dbCluster_->setRefinementParams(
-            this->dbscanRefinementEnable_,
+            this->visualDbscanRefinementEnable_,
             this->dbscanRefineMaxDiagonal_,
             this->dbscanRefineMinDensity_,
             this->dbscanRefineSplitMinPts_,
@@ -3464,7 +3458,7 @@ namespace onboardDetector{
 
         this->dbCluster_->run();
 
-        if (this->dbscanRefinementEnable_) {
+        if (this->visualDbscanRefinementEnable_) {
             // Use refined clusters with AABB
             std::vector<onboardDetector::ClusterRefined> refinedClusters;
             this->dbCluster_->getRefinedClustersWithAABB(refinedClusters);
@@ -4193,11 +4187,15 @@ namespace onboardDetector{
             return false;
         }
 
-        // A track can only be confirmed if the object is actually moving.
-        // This prevents static detections from ever entering trackedBBoxes_.
-        // Objects that WERE already confirmed (oldConfirmed=true in the caller)
-        // remain in output via `oldConfirmed || shouldConfirmTrack(...)`, so a
-        // person who stops walking stays tracked without re-entering this gate.
+        // YOLO-certified objects (persons, vehicles, …) are confirmed regardless of speed:
+        // YOLO already guarantees the detection belongs to a dynamic class. The object may
+        // simply be standing still at the moment of first detection.
+        if (currDetectedBBox.is_yolo_candidate){
+            return true;
+        }
+
+        // For all other detections, require observed motion to avoid confirming static
+        // clutter (walls, furniture, sensor noise).
         if (trackIdx < 0 || trackIdx >= static_cast<int>(this->boxHist_.size()) || this->boxHist_[trackIdx].empty()){
             return false;
         }
@@ -4249,9 +4247,8 @@ namespace onboardDetector{
                 newFilter.setup(states, A, B, H, P, Q, R);
                 this->filters_.push_back(newFilter);
 
-                if (this->filteredBBoxes_[i].is_dynamic || this->filteredBBoxes_[i].is_yolo_candidate){
-                    this->confirmedTracks_[i] = true;
-                }
+                // No immediate confirmation: minConfirmHits_ consecutive hits are
+                // required before any track enters the output, even for YOLO detections.
             }
         }
         else{
@@ -4536,26 +4533,11 @@ namespace onboardDetector{
             const int newHitStreak = oldHitStreak + 1;
             const int newTrackAge = oldTrackAge + 1;
 
-            // Track consecutive static frames for confirmed tracks.
-            // If a confirmed track has been stationary for too long AND is no longer
-            // flagged as dynamic (force_dynamic expired), revoke its confirmation.
-            // This prevents a wall from permanently inheriting the track ID of a person
-            // who walked out of the camera FOV.
-            const int oldStaticStreak =
-                (matchIdx < static_cast<int>(this->staticStreak_.size())) ? this->staticStreak_[matchIdx] : 0;
-            const double velNorm = std::sqrt(newEstimatedBBox.Vx * newEstimatedBBox.Vx +
-                                             newEstimatedBBox.Vy * newEstimatedBBox.Vy);
-            const bool isStationary = velNorm < this->stationarySpeedThresh_;
-            const int newStaticStreak = (isStationary && !currDetectedBBox.is_dynamic && !currDetectedBBox.is_yolo_candidate)
-                                        ? (oldStaticStreak + 1) : 0;
-            staticStreakTemp.push_back(newStaticStreak);
+            staticStreakTemp.push_back(0); // unused, kept for vector size consistency
 
-            const bool deconfirm = oldConfirmed
-                && (newStaticStreak >= this->maxStaticFrames_)
-                && !currDetectedBBox.is_dynamic
-                && !currDetectedBBox.is_yolo_candidate;
-
-            const bool newConfirmed = !deconfirm && (oldConfirmed || this->shouldConfirmTrack(matchIdx, currDetectedBBox, newHitStreak));
+            // Once confirmed a track stays confirmed until it dies by maxMissedFrames_.
+            // There is no active de-confirmation: a person who stops walking stays tracked.
+            const bool newConfirmed = oldConfirmed || this->shouldConfirmTrack(matchIdx, currDetectedBBox, newHitStreak);
 
             hitStreakTemp.push_back(newHitStreak);
             trackAgeTemp.push_back(newTrackAge);
@@ -4730,12 +4712,8 @@ namespace onboardDetector{
             trackAgeTemp.push_back(1);
             staticStreakTemp.push_back(0); // new track, no static history
 
-            const bool confirmNow = currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate;
-            confirmedTracksTemp.push_back(confirmNow);
-
-            if (confirmNow){
-                trackedBBoxesTemp.push_back(newEstimatedBBox);
-            }
+            // Always start tentative: minConfirmHits_ hits required before output.
+            confirmedTracksTemp.push_back(false);
 
             if (this->enableTrackingDebugLogs_){
                 RCLCPP_INFO(
@@ -4746,7 +4724,7 @@ namespace onboardDetector{
                     newEstimatedBBox.x,
                     newEstimatedBBox.y,
                     newEstimatedBBox.z,
-                    confirmNow ? 1 : 0);
+                    0);
             }
         }
 
