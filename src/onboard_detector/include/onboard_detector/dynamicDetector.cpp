@@ -285,25 +285,16 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Ground roof offset is set to: " << this->groundRoofOffset_ << std::endl;
         }
 
-        // bottom fraction of the image used to estimate the ground plane
-        if (!this->nh_->get_parameter(pname("ground_estim_bottom_fraction"), this->groundEstimBottomFraction_)){
-            this->groundEstimBottomFraction_ = 4; // use bottom 1/4 of the image
-            std::cout << this->hint_ << ": No ground_estim_bottom_fraction. Use default: 4." << std::endl;
+        // max zmin above ground for tracking (bboxes with zmin > groundHeight_ + this are skipped)
+        if (!this->nh_->get_parameter(pname("track_max_zmin_above_ground"), this->trackMaxZminAboveGround_)){
+            this->trackMaxZminAboveGround_ = 1.5;
+            std::cout << this->hint_ << ": No track_max_zmin_above_ground parameter. Use default: 1.5m." << std::endl;
         }
         else{
-            std::cout << this->hint_ << ": Ground estimation bottom fraction: " << this->groundEstimBottomFraction_ << std::endl;
+            std::cout << this->hint_ << ": track_max_zmin_above_ground is set to: " << this->trackMaxZminAboveGround_ << std::endl;
         }
 
-        // RANSAC minimum inliers for ground plane acceptance
-        if (!this->nh_->get_parameter(pname("ground_estim_min_inliers"), this->groundEstimMinInliers_)){
-            this->groundEstimMinInliers_ = 50;
-            std::cout << this->hint_ << ": No ground_estim_min_inliers. Use default: 50." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Ground estimation min inliers: " << this->groundEstimMinInliers_ << std::endl;
-        }
-
-        // initialize with safe defaults until first estimation runs
+        // initialize with safe defaults until wall_detector publishes ground estimation
         this->groundEstimated_ = false;
 
         // search range
@@ -566,6 +557,15 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Same group IOU threshold is set to: " << this->samegroupIOUThresh_ << std::endl;
         }
 
+        // Final merge flag (extra mergeNestedGroup pass on filteredBBoxes before YOLO)
+        if (!this->nh_->get_parameter(pname("final_merge_flag"), this->finalMergeFlag_)){
+            this->finalMergeFlag_ = false;
+            std::cout << this->hint_ << ": No final_merge_flag parameter found. Use default: false." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Final merge flag is set to: " << (this->finalMergeFlag_ ? "true" : "false") << std::endl;
+        }
+
         // Visual unmerged Flag
         if (!this->nh_->get_parameter(pname("visual_unmerged_flag"), this->visualUnmergedFlag_)){
             this->visualUnmergedFlag_ = false;
@@ -766,6 +766,14 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": Voting threshold for dynamic classification is set to: " << this->dynaVoteThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("dynamic_kf_vel_std_ratio"), this->dynaKfVelStdRatio_)){
+            this->dynaKfVelStdRatio_ = 0.50;
+            std::cout << this->hint_ << ": No dynamic_kf_vel_std_ratio parameter found. Use default: 0.50." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Kalman velocity std ratio for dynamic classification: " << this->dynaKfVelStdRatio_ << std::endl;
         }
 
         // frames to force dynamic
@@ -992,6 +1000,14 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": Match velocity direction score weight: " << this->matchVelocityDirectionScoreWeight_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("match_yolo_class_consistency_weight"), this->matchYoloClassConsistencyWeight_)){
+            this->matchYoloClassConsistencyWeight_ = 0.50;
+            std::cout << this->hint_ << ": No match_yolo_class_consistency_weight. Use default: 0.50." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Match YOLO class consistency weight: " << this->matchYoloClassConsistencyWeight_ << std::endl;
         }
 
         if (!this->nh_->get_parameter(pname("match_prev_obs_pos_score_weight"), this->matchPrevObsPosScoreWeight_)){
@@ -1383,6 +1399,14 @@ namespace onboardDetector{
             "yolo_detector/detected_bounding_boxes", 10,
             std::bind(&dynamicDetector::yoloDetectionCB, this, std::placeholders::_1));
 
+        // wall detector results subscribers
+        this->groundHeightSub_ = this->nh_->create_subscription<std_msgs::msg::Float64MultiArray>(
+            "/wall_detector/ground_height", 10,
+            std::bind(&dynamicDetector::groundHeightCB, this, std::placeholders::_1));
+        this->wallMarkersSub_ = this->nh_->create_subscription<visualization_msgs::msg::MarkerArray>(
+            "/wall_detector/wall_markers", 10,
+            std::bind(&dynamicDetector::wallMarkersCB, this, std::placeholders::_1));
+
         // detection timer
         this->detectionTimer_ = this->nh_->create_wall_timer(
             std::chrono::milliseconds(static_cast<int>(this->dt_ * 1000.0)),
@@ -1501,9 +1525,7 @@ namespace onboardDetector{
         this->positionColor_(2) = camPoseColorMatrix(2, 3);
         this->orientationColor_ = camPoseColorMatrix.block<3, 3>(0, 0);
 
-        if(this->lidarToDepthCamOk_){
-            this->estimateGroundHeight();
-        }
+        // Ground height now comes from wall_detector via /wall_detector/ground_height topic
     }
 
     void dynamicDetector::depthOdomCB(const sensor_msgs::msg::Image::ConstSharedPtr& img, const nav_msgs::msg::Odometry::ConstSharedPtr& odom){
@@ -1537,9 +1559,7 @@ namespace onboardDetector{
         this->positionColor_(2) = camPoseColorMatrix(2, 3);
         this->orientationColor_ = camPoseColorMatrix.block<3, 3>(0, 0);
 
-        if(this->lidarToDepthCamOk_){
-            this->estimateGroundHeight();
-        }
+        // Ground height now comes from wall_detector via /wall_detector/ground_height topic
     }
 
     void dynamicDetector::lidarPoseCB(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloudMsg, const geometry_msgs::msg::PoseStamped::ConstSharedPtr& pose){
@@ -1609,6 +1629,23 @@ namespace onboardDetector{
         pass.setFilterFieldName("z");
         pass.setFilterLimits(this->groundHeight_, this->roofHeight_);
         pass.filter(*groundRoofFilterCloud);
+
+        // Filter out points inside wall bounding boxes
+        {
+            std::lock_guard<std::mutex> lock(this->wallBBoxesMutex_);
+            if (!this->wallBBoxes_.empty()) {
+                pcl::PointCloud<pcl::PointXYZ>::Ptr wallFiltered(new pcl::PointCloud<pcl::PointXYZ>());
+                wallFiltered->reserve(groundRoofFilterCloud->size());
+                for (const auto& pt : groundRoofFilterCloud->points) {
+                    if (!this->isInsideAnyWall(Eigen::Vector3d(pt.x, pt.y, pt.z))) {
+                        wallFiltered->points.push_back(pt);
+                    }
+                }
+                wallFiltered->width  = wallFiltered->points.size();
+                wallFiltered->height = 1;
+                groundRoofFilterCloud = wallFiltered;
+            }
+        }
 
         pcl::PointCloud<pcl::PointXYZ>::Ptr downsampledCloud = groundRoofFilterCloud;
         // Create the VoxelGrid filter object
@@ -1718,6 +1755,23 @@ namespace onboardDetector{
         pass.setFilterLimits(this->groundHeight_, this->roofHeight_);
         pass.filter(*groundRoofFilterCloud);
 
+        // Filter out points inside wall bounding boxes
+        {
+            std::lock_guard<std::mutex> lock(this->wallBBoxesMutex_);
+            if (!this->wallBBoxes_.empty()) {
+                pcl::PointCloud<pcl::PointXYZ>::Ptr wallFiltered(new pcl::PointCloud<pcl::PointXYZ>());
+                wallFiltered->reserve(groundRoofFilterCloud->size());
+                for (const auto& pt : groundRoofFilterCloud->points) {
+                    if (!this->isInsideAnyWall(Eigen::Vector3d(pt.x, pt.y, pt.z))) {
+                        wallFiltered->points.push_back(pt);
+                    }
+                }
+                wallFiltered->width  = wallFiltered->points.size();
+                wallFiltered->height = 1;
+                groundRoofFilterCloud = wallFiltered;
+            }
+        }
+
         pcl::PointCloud<pcl::PointXYZ>::Ptr downsampledCloud = groundRoofFilterCloud;
         // Create the VoxelGrid filter object
         pcl::VoxelGrid<pcl::PointXYZ> sor;
@@ -1773,6 +1827,65 @@ namespace onboardDetector{
 
         this->yoloDetectionResults_ = *detections;
     }
+
+    void dynamicDetector::groundHeightCB(const std_msgs::msg::Float64MultiArray::ConstSharedPtr& msg){
+        if (msg->data.size() >= 2) {
+            this->groundHeight_ = msg->data[0];
+            this->roofHeight_   = msg->data[1];
+            std::cout << "[dynamicDetector] groundHeightCB: ground=" << this->groundHeight_
+                      << "  roof=" << this->roofHeight_ << std::endl;
+            if (!this->groundEstimated_) {
+                this->groundEstimated_ = true;
+                RCLCPP_INFO(this->nh_->get_logger(),
+                    "[dynamicDetector] Received ground=%.3f roof=%.3f from wall_detector",
+                    this->groundHeight_, this->roofHeight_);
+            }
+        } else {
+            std::cout << "[dynamicDetector] groundHeightCB: received msg with "
+                      << msg->data.size() << " elements (expected >=2)" << std::endl;
+        }
+    }
+
+    void dynamicDetector::wallMarkersCB(const visualization_msgs::msg::MarkerArray::ConstSharedPtr& msg){
+        std::vector<WallOBB> new_walls;
+        new_walls.reserve(msg->markers.size());
+
+        for (const auto& m : msg->markers) {
+            // Only process CUBE markers (wall bounding boxes)
+            if (m.type != visualization_msgs::msg::Marker::CUBE) continue;
+            if (m.action == visualization_msgs::msg::Marker::DELETE) continue;
+
+            WallOBB wall;
+            wall.center = Eigen::Vector3d(
+                m.pose.position.x,
+                m.pose.position.y,
+                m.pose.position.z);
+            Eigen::Quaterniond q(
+                m.pose.orientation.w,
+                m.pose.orientation.x,
+                m.pose.orientation.y,
+                m.pose.orientation.z);
+            wall.rotation  = q.toRotationMatrix();
+            wall.half_size = Eigen::Vector3d(
+                m.scale.x * 0.5,
+                m.scale.y * 0.5,
+                m.scale.z * 0.5);
+
+            new_walls.push_back(wall);
+        }
+
+        std::lock_guard<std::mutex> lock(this->wallBBoxesMutex_);
+        this->wallBBoxes_ = std::move(new_walls);
+        std::cout << "[dynamicDetector] wallMarkersCB: received " << this->wallBBoxes_.size()
+                  << " wall bounding boxes" << std::endl;
+        for (size_t i = 0; i < this->wallBBoxes_.size(); ++i) {
+            const auto& w = this->wallBBoxes_[i];
+            std::cout << "  wall[" << i << "] center=(" << w.center.x() << ", "
+                      << w.center.y() << ", " << w.center.z() << ") half_size=("
+                      << w.half_size.x() << ", " << w.half_size.y() << ", "
+                      << w.half_size.z() << ")" << std::endl;
+        }
+    }
    
     void dynamicDetector::lidarDetectionCB(){
 
@@ -1809,6 +1922,36 @@ namespace onboardDetector{
         if(this->lidarToDepthCamOk_ == false){
             RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
             return;
+        }
+
+        // Filter out bboxes whose bottom face is too high above ground
+        {
+            const double zminThresh = this->groundHeight_ + this->trackMaxZminAboveGround_;
+            std::vector<onboardDetector::box3D> keptBBoxes;
+            std::vector<std::vector<Eigen::Vector3d>> keptPc;
+            std::vector<Eigen::Vector3d> keptCenters;
+            std::vector<Eigen::Vector3d> keptStds;
+            keptBBoxes.reserve(this->filteredBBoxes_.size());
+            keptPc.reserve(this->filteredPcClusters_.size());
+            keptCenters.reserve(this->filteredPcClusterCenters_.size());
+            keptStds.reserve(this->filteredPcClusterStds_.size());
+            for (size_t i = 0; i < this->filteredBBoxes_.size(); ++i) {
+                const auto& b = this->filteredBBoxes_[i];
+                double zmin = b.z - b.z_width / 2.0;
+                if (zmin <= zminThresh) {
+                    keptBBoxes.push_back(b);
+                    if (i < this->filteredPcClusters_.size())
+                        keptPc.push_back(this->filteredPcClusters_[i]);
+                    if (i < this->filteredPcClusterCenters_.size())
+                        keptCenters.push_back(this->filteredPcClusterCenters_[i]);
+                    if (i < this->filteredPcClusterStds_.size())
+                        keptStds.push_back(this->filteredPcClusterStds_[i]);
+                }
+            }
+            this->filteredBBoxes_ = std::move(keptBBoxes);
+            this->filteredPcClusters_ = std::move(keptPc);
+            this->filteredPcClusterCenters_ = std::move(keptCenters);
+            this->filteredPcClusterStds_ = std::move(keptStds);
         }
 
         // Debug: Print history and filter sizes before tracking
@@ -1851,8 +1994,11 @@ namespace onboardDetector{
         // NOTE: There are 3 cases which we don't need to perform dynamic obstacle identification.
         for (size_t i=0; i<this->pcHist_.size() ; ++i){
             // ===================================================================================
-            // CASE I: yolo recognized as dynamic dynamic obstacle
+            // CASE I: YOLO-certified object → always dynamic, maintained until track is lost.
+            // Explicitly set is_dynamic=true in boxHist_ so force_dynamic (CASE III) can count
+            // this frame when the object later exits the camera FOV and YOLO is unavailable.
             if (this->boxHist_[i][0].is_yolo_candidate){
+                this->boxHist_[i][0].is_dynamic = true;
                 dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
                 continue;
             }
@@ -1872,7 +2018,9 @@ namespace onboardDetector{
 
 
             // ==================================================================================
-            // CASE III: Force Dynamic (if the obstacle is classifed as dynamic for several time steps)
+            // CASE III: Force Dynamic (if the obstacle was classified as dynamic for enough
+            // recent frames). With sticky is_dynamic flags and CASE I writing is_dynamic=true,
+            // this correctly propagates even when the object exits the camera FOV.
             int dynaFrames = 0;
             if (int(this->boxHist_[i].size()) > this->forceDynaCheckRange_){
                 for (int j=1 ; j<this->forceDynaCheckRange_+1 ; ++j){
@@ -1903,6 +2051,35 @@ namespace onboardDetector{
             Vkf(0) = this->boxHist_[i][0].Vx;
             Vkf(1) = this->boxHist_[i][0].Vy;
 
+            // -----------------------------------------------------------------------
+            // Kalman velocity quality check.
+            // Outside the camera FOV the point cloud comes only from LiDAR (sparse),
+            // so point-voting may be unreliable. If the Kalman filter has been
+            // consistently estimating speed above threshold over the last curFrameGap
+            // frames (low relative std), treat it as a confident motion indicator and
+            // bypass the point-voting requirement.
+            int kfSamples = std::min(curFrameGap + 1, (int)this->boxHist_[i].size());
+            double kfVelMean = 0.0;
+            for (int h = 0; h < kfSamples; ++h){
+                kfVelMean += std::sqrt(this->boxHist_[i][h].Vx * this->boxHist_[i][h].Vx +
+                                       this->boxHist_[i][h].Vy * this->boxHist_[i][h].Vy);
+            }
+            kfVelMean /= std::max(kfSamples, 1);
+
+            double kfVelVar = 0.0;
+            for (int h = 0; h < kfSamples; ++h){
+                double v = std::sqrt(this->boxHist_[i][h].Vx * this->boxHist_[i][h].Vx +
+                                     this->boxHist_[i][h].Vy * this->boxHist_[i][h].Vy);
+                kfVelVar += (v - kfVelMean) * (v - kfVelMean);
+            }
+            kfVelVar /= std::max(kfSamples, 1);
+            const double kfVelStd = std::sqrt(kfVelVar);
+
+            // Confident if mean speed is above threshold and std is small relative to mean
+            const bool kfVelConfident = (kfVelMean >= this->dynaVelThresh_) &&
+                                        (kfVelStd <= this->dynaKfVelStdRatio_ * kfVelMean);
+            // -----------------------------------------------------------------------
+
             // find nearest neighbor
             for (size_t j=0 ; j<currPc.size() ; ++j){
                 double minDist = 2;
@@ -1931,10 +2108,12 @@ namespace onboardDetector{
             double voteRatio = (numPoints>0)?double(votes)/double(numPoints):0;
             double velNorm = Vkf.norm();
 
-            // voting and velocity threshold
-            // 1. point cloud voting ratio.
-            // 2. velocity (from kalman filter)
-            if (voteRatio>=this->dynaVoteThresh_ && velNorm>=this->dynaVelThresh_){
+            // Dynamic condition:
+            // - Kalman speed above threshold (always required as hard gate)
+            // - EITHER point-cloud votes above dynaVoteThresh_
+            //   OR Kalman velocity is consistently high with low variance (kfVelConfident),
+            //      which handles the outside-FOV case where LiDAR clouds are sparse.
+            if ((voteRatio >= this->dynaVoteThresh_ || kfVelConfident) && velNorm >= this->dynaVelThresh_){
                 this->boxHist_[i][0].is_dynamic_candidate = true;
                 // dynamic-consistency check
                 int dynaConsistCount = 0;
@@ -1944,11 +2123,10 @@ namespace onboardDetector{
                             ++dynaConsistCount;
                         }
                     }
-                }            
+                }
                 if (dynaConsistCount == this->dynamicConsistThresh_){
-                    // set as dynamic and push into history
                     this->boxHist_[i][0].is_dynamic = true;
-                    dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);    
+                    dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
                 }
             }
         }
@@ -2175,9 +2353,7 @@ namespace onboardDetector{
     {
         size_t M = group1BBoxes_.size();
         size_t N = group2BBoxes_.size();
-        std::cout << "[DEBUG] BboxesMerger: START, M = " << M << ", N = " << N << std::endl;
         if (M == 0 || N == 0) {
-            std::cout << "[DEBUG] BboxesMerger: M=" << M << " or N=" << N << " is 0, handling unmatched" << std::endl;
             if (N == 0 && flag_group1) {
                 for (size_t i = 0; i < M; ++i) {
                     BBoxesTemp.push_back(group1BBoxes_[i]);
@@ -2196,12 +2372,10 @@ namespace onboardDetector{
             }
             return;
         }
-
-        std::cout << "[DEBUG] Allocating IOU/IOV matrices of size " << M << "x" << N << std::endl;
+        
         Eigen::MatrixXd IOU = Eigen::MatrixXd::Zero(M, N);
         Eigen::MatrixXd IOV_g1 = Eigen::MatrixXd::Zero(M, N);
         Eigen::MatrixXd IOV_g2 = Eigen::MatrixXd::Zero(M, N);
-        std::cout << "[DEBUG] Allocated IOU/IOV matrices" << std::endl;
 
         std::vector<bool> usedGroup1(M, false);
         std::vector<bool> usedGroup2(N, false);
@@ -2215,16 +2389,12 @@ namespace onboardDetector{
         for (size_t i = 0; i < M; ++i)
         {
             for (size_t j = 0; j < N; ++j)
-            {
-                std::cout << "[DEBUG] Filling IOU/IOV: i=" << i << ", j=" << j << std::endl;
+            {       
                 IOU(i,j) = this->calBoxIOU(group1BBoxes_[i], group2BBoxes_[j]);
                 IOV_g1(i,j) = this->calBoxIOV(group1BBoxes_[i], group2BBoxes_[j]);
                 IOV_g2(i,j) = this->calBoxIOV(group2BBoxes_[j], group1BBoxes_[i]);
             }
         }
-        std::cout << "[DEBUG] Finished filling IOU/IOV matrices" << std::endl;
-        // ...existing code...
-        std::cout << "[DEBUG] BboxesMerger: END" << std::endl;
 
         // =========================
         // STEP 1: MUTUAL IOU MATCH
@@ -2287,7 +2457,6 @@ namespace onboardDetector{
                 bbox.Vx = 0;
                 bbox.Vy = 0;
 
-                // 👉 CLUSTER = group2 (come codice originale!)
                 auto cluster = group2pcClusters_[best_j];
                 auto center  = group2pcClusterCenters_[best_j];
                 auto stddev  = group2pcClusterStds_[best_j];
@@ -3153,6 +3322,36 @@ namespace onboardDetector{
             this->lidarVisualMergerLeafOnly_
         );
 
+        // =========================
+        // STEP 4 (optional): FINAL MERGE — extra mergeNestedGroup pass on the fully
+        // fused filtered bboxes, before YOLO association. Collapses residual duplicates
+        // that survived the UV/DBSCAN and visual/LiDAR merging stages.
+        // Uses the same samegroupIOU / samegroupIOV thresholds.
+        // =========================
+        if (this->finalMergeFlag_){
+            std::vector<onboardDetector::box3D> finalMergedBBoxes;
+            std::vector<std::vector<Eigen::Vector3d>> finalMergedClusters;
+            std::vector<Eigen::Vector3d> finalMergedCenters;
+            std::vector<Eigen::Vector3d> finalMergedStds;
+
+            this->mergeNestedGroup(
+                filteredBBoxesTemp,
+                filteredPcClustersTemp,
+                filteredPcClusterCentersTemp,
+                filteredPcClusterStdsTemp,
+
+                finalMergedBBoxes,
+                finalMergedClusters,
+                finalMergedCenters,
+                finalMergedStds
+            );
+
+            filteredBBoxesTemp         = finalMergedBBoxes;
+            filteredPcClustersTemp     = finalMergedClusters;
+            filteredPcClusterCentersTemp = finalMergedCenters;
+            filteredPcClusterStdsTemp  = finalMergedStds;
+        }
+
         this->filteredBBoxesBeforeYolo_ = filteredBBoxesTemp; // ready for visualization / next steps
 
         // =========================
@@ -3319,8 +3518,9 @@ namespace onboardDetector{
                     const double fraction = static_cast<double>(insideCount) / static_cast<double>(totalFiltered);
 
                     if (fraction >= this->yoloPointFractionThresh_){
+                        // Only mark as yolo_candidate here. is_dynamic is a classification
+                        // label set exclusively by classificationCB — never by the detection pipeline.
                         filteredBBoxesTemp[j].is_yolo_candidate = true;
-                        filteredBBoxesTemp[j].is_dynamic = true;
                     }
                 }
             }
@@ -3417,7 +3617,7 @@ namespace onboardDetector{
         filteredPoints.clear();
         std::cout<<"Ground Height is: "<<this->groundHeight_<<", Roof Height is: "<<this->roofHeight_<<std::endl;
         for (const auto& point : voxelFilteredPoints){
-            if (point.z() <= this->roofHeight_ && point.z() >= this->groundHeight_){
+            if (point.z() <= this->roofHeight_ && point.z() >= this->groundHeight_ && !this->isInsideAnyWall(point)){
                 filteredPoints.push_back(point);
             }
         }
@@ -3576,7 +3776,7 @@ namespace onboardDetector{
         for (int i=0; i<this->projPointsNum_; ++i){
             Eigen::Vector3d p = points[i];
 
-            if (this->isInFilterRange(p) and p(2) >= this->groundHeight_ and this->pointsDepth_[i] <= this->raycastMaxLength_){
+            if (this->isInFilterRange(p) and p(2) >= this->groundHeight_ and this->pointsDepth_[i] <= this->raycastMaxLength_ and !this->isInsideAnyWall(p)){
                 // find the corresponding voxel id in the vector and check whether it is occupied
                 int pID = this->posToAddress(p, res);
 
@@ -3589,109 +3789,6 @@ namespace onboardDetector{
                 }
             }
         } 
-    }
-
-    void dynamicDetector::estimateGroundHeight(){
-        if (this->depthImage_.empty()){
-            return;
-        }
-
-        // sanity check: if the depth camera's z-axis in the map frame
-        // is far from horizontal, the bottom rows don't reliably see ground.
-        // orientationDepth_ columns are the camera axes expressed in map frame.
-        // column 1 (camera y-down) projected onto map z should be near +1.
-        Eigen::Vector3d camYinMap = this->orientationDepth_.col(1);
-        if (std::abs(camYinMap(2)) < 0.5){
-            // camera is too tilted; skip this frame
-            return;
-        }
-
-        int rows = this->depthImage_.rows;
-        int cols = this->depthImage_.cols;
-        int startRow = rows - rows / this->groundEstimBottomFraction_;
-
-        const double inv_factor = 1.0 / this->depthScale_;
-        const double inv_fx     = 1.0 / this->fx_;
-        const double inv_fy     = 1.0 / this->fy_;
-
-        std::vector<double> zValues;
-        zValues.reserve(
-            (rows - startRow) * cols /
-            (this->skipPixel_ * this->skipPixel_));
-
-        for (int v = startRow; v < rows; v += this->skipPixel_){
-            const uint16_t* rowPtr = this->depthImage_.ptr<uint16_t>(v);
-            for (int u = 0; u < cols; u += this->skipPixel_){
-                double depth = rowPtr[u] * inv_factor;
-                if (depth < this->depthMinValue_ || depth > this->depthMaxValue_){
-                    continue;
-                }
-                Eigen::Vector3d ptCam;
-                ptCam(0) = (u - this->cx_) * depth * inv_fx;
-                ptCam(1) = (v - this->cy_) * depth * inv_fy;
-                ptCam(2) = depth;
-
-                // project into map frame — z is height above map origin
-                Eigen::Vector3d ptMap =
-                    this->orientationDepth_ * ptCam + this->positionDepth_;
-
-                // keep only points that are plausibly on the floor:
-                // below the camera and within a reasonable absolute height range
-                if (ptMap(2) > this->positionDepth_(2)){
-                    continue; // above the camera, skip
-                }
-
-                zValues.push_back(ptMap(2));
-            }
-        }
-
-        if ((int)zValues.size() < this->groundEstimMinInliers_){
-            return;
-        }
-
-        // RANSAC on z = c (horizontal plane in map frame)
-        const double inlierThresh = 0.05; // 5 cm
-        const int    maxIter      = 60;
-
-        int    bestInliers = 0;
-        double bestZ       = 0.0;
-
-        std::mt19937 rng(42);
-        std::uniform_int_distribution<int> dist(
-            0, static_cast<int>(zValues.size()) - 1);
-
-        for (int iter = 0; iter < maxIter; ++iter){
-            double zHyp = zValues[dist(rng)];
-
-            int    inliers = 0;
-            double zSum    = 0.0;
-            for (double z : zValues){
-                if (std::abs(z - zHyp) < inlierThresh){
-                    ++inliers;
-                    zSum += z;
-                }
-            }
-
-            if (inliers > bestInliers){
-                bestInliers = inliers;
-                bestZ       = zSum / inliers;
-            }
-        }
-
-        if (bestInliers < this->groundEstimMinInliers_){
-            return;
-        }
-
-        if (!this->groundEstimated_){
-            this->groundHeight_    = bestZ + 0.1;
-            this->groundEstimated_ = true;
-        }
-        else{
-            const double alpha  = 0.05;
-            this->groundHeight_ = (1.0 - alpha) * this->groundHeight_ + alpha * (bestZ + 0.1);
-        }
-
-        this->roofHeight_ = this->groundHeight_ + this->groundRoofOffset_;
     }
 
     void dynamicDetector::calcPcFeat(const std::vector<Eigen::Vector3d>& pcCluster, Eigen::Vector3d& pcClusterCenter, Eigen::Vector3d& pcClusterStd){
@@ -4017,9 +4114,9 @@ namespace onboardDetector{
             const double denom = std::max(obsSpeedDir * prevSpeedDir, 1e-6);
             const double cosSim = dot / denom;
 
-            // più tolleranza per dinamici o già confirmed
+            // più tolleranza per YOLO objects (persons, vehicles)
             double minCos = this->minDirectionConsistencyCos_;
-            if (currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate){
+            if (currDetectedBBox.is_yolo_candidate){
                 minCos = std::min(-0.60, this->minDirectionConsistencyCos_);
             }
             else if (this->isTrackConfirmedByIdx(trackIdx)){
@@ -4125,8 +4222,8 @@ namespace onboardDetector{
 
         const double err = this->computeVelocityDirectionError(trackIdx, currDetectedBBox);
 
-        // dinamici/umani: molto più permissivi
-        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate){
+        // YOLO objects (persons, vehicles): more permissive direction gate
+        if (currDetectedBBox.is_yolo_candidate){
             if (alreadyConfirmed){
                 return err <= this->maxVelocityDirectionErrorTrackedDynamic_;
             }
@@ -4153,7 +4250,7 @@ namespace onboardDetector{
     double dynamicDetector::getAdaptiveMaxInnovation(int trackIdx,
                                                     const onboardDetector::box3D& currDetectedBBox) const
     {
-        if (currDetectedBBox.is_dynamic || currDetectedBBox.is_yolo_candidate){
+        if (currDetectedBBox.is_yolo_candidate){
             return this->maxNaturalInnovationDynamic_;
         }
 
@@ -4167,7 +4264,7 @@ namespace onboardDetector{
     double dynamicDetector::getAdaptiveMinMatchScore(int trackIdx,
                                                     const onboardDetector::box3D& currentBox) const
     {
-        if (currentBox.is_dynamic || currentBox.is_yolo_candidate){
+        if (currentBox.is_yolo_candidate){
             return this->minMatchScoreDynamic_;
         }
 
@@ -4187,12 +4284,28 @@ namespace onboardDetector{
             return false;
         }
 
-        // YOLO-certified objects (persons, vehicles, …) are confirmed regardless of speed:
-        // YOLO already guarantees the detection belongs to a dynamic class. The object may
-        // simply be standing still at the moment of first detection.
-        if (currDetectedBBox.is_yolo_candidate){
+        // YOLO-certified objects: confirm regardless of speed, even when stationary.
+        // Two sources are checked:
+        //   1. Current frame: YOLO is actively seeing the object right now.
+        //   2. Track history (sticky): boxHist_[0].is_yolo_candidate propagates forward
+        //      each frame via `newEstimatedBBox.is_yolo_candidate = curr || prev`.
+        //      If the history contains YOLO evidence it means this track has represented
+        //      a dynamic object (person/vehicle) at some point. We keep tracking it even
+        //      when it is stationary and/or outside the camera FOV, because the object
+        //      may have simply stopped moving temporarily.
+        // NOTE: is_dynamic is intentionally NOT used here — classification is separate.
+        const bool historyHasYolo = (trackIdx >= 0 &&
+                                     trackIdx < static_cast<int>(this->boxHist_.size()) &&
+                                     !this->boxHist_[trackIdx].empty() &&
+                                     this->boxHist_[trackIdx][0].is_yolo_candidate);
+        if (currDetectedBBox.is_yolo_candidate || historyHasYolo){
             return true;
         }
+
+        // NOTE: is_dynamic is intentionally NOT checked here.
+        // Classification (is_dynamic) is determined by classificationCB and must remain
+        // decoupled from the tracking confirmation logic. Confirmed tracks stay confirmed
+        // via the `oldConfirmed || shouldConfirmTrack(...)` pattern at the call site.
 
         // For all other detections, require observed motion to avoid confirming static
         // clutter (walls, furniture, sensor noise).
@@ -4212,6 +4325,46 @@ namespace onboardDetector{
 
         if (!this->passesVelocityDirectionGate(trackIdx, currDetectedBBox, false)){
             return false;
+        }
+
+        // Outside camera FOV: require Kalman velocity to be consistently above threshold
+        // across history to filter out LiDAR jitter that produces apparent single-frame motion.
+        const double dx_cam = currDetectedBBox.x - this->positionDepth_(0);
+        const double dy_cam = currDetectedBBox.y - this->positionDepth_(1);
+        const double dz_cam = currDetectedBBox.z - this->positionDepth_(2);
+        const double distToCamera = std::sqrt(dx_cam*dx_cam + dy_cam*dy_cam + dz_cam*dz_cam);
+
+        if (distToCamera > this->depthMaxValue_){
+            const int nSamples = static_cast<int>(this->boxHist_[trackIdx].size());
+            if (nSamples < 2){
+                return false; // not enough history to assess consistency outside FOV
+            }
+
+            double kfVelMean = 0.0;
+            for (int k = 0; k < nSamples; ++k){
+                const double vx = this->boxHist_[trackIdx][k].Vx;
+                const double vy = this->boxHist_[trackIdx][k].Vy;
+                kfVelMean += std::sqrt(vx*vx + vy*vy);
+            }
+            kfVelMean /= static_cast<double>(nSamples);
+
+            if (kfVelMean < this->dynaVelThresh_){
+                return false;
+            }
+
+            double kfVelVar = 0.0;
+            for (int k = 0; k < nSamples; ++k){
+                const double vx = this->boxHist_[trackIdx][k].Vx;
+                const double vy = this->boxHist_[trackIdx][k].Vy;
+                const double v = std::sqrt(vx*vx + vy*vy);
+                kfVelVar += (v - kfVelMean) * (v - kfVelMean);
+            }
+            kfVelVar /= static_cast<double>(nSamples);
+            const double kfVelStd = std::sqrt(kfVelVar);
+
+            if (kfVelStd > this->dynaKfVelStdRatio_ * kfVelMean){
+                return false; // velocity too erratic — likely jitter
+            }
         }
 
         return true;
@@ -4509,8 +4662,18 @@ namespace onboardDetector{
             newEstimatedBBox.x_width = currDetectedBBox.x_width;
             newEstimatedBBox.y_width = currDetectedBBox.y_width;
             newEstimatedBBox.z_width = currDetectedBBox.z_width;
-            newEstimatedBBox.is_dynamic = currDetectedBBox.is_dynamic;
-            newEstimatedBBox.is_yolo_candidate = currDetectedBBox.is_yolo_candidate;
+            // Sticky flags: once a track has been flagged as yolo_candidate or dynamic,
+            // the flag persists in boxHist_ even when the object exits the camera FOV
+            // (no new YOLO detection, no fresh point cloud). This ensures classificationCB
+            // CASE I keeps firing and force_dynamic keeps the is_dynamic label alive.
+            const bool prevYoloCand = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_yolo_candidate;
+            const bool prevDynamic  = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_dynamic;
+            // is_yolo_candidate: sticky from YOLO detector (sensor output, track-level).
+            newEstimatedBBox.is_yolo_candidate = currDetectedBBox.is_yolo_candidate || prevYoloCand;
+            // is_dynamic: set exclusively by classificationCB, never by the detection pipeline.
+            // Carry it forward from the previous history entry so classificationCB's label
+            // persists across frames where the object is outside the camera FOV.
+            newEstimatedBBox.is_dynamic = prevDynamic;
             newEstimatedBBox.id = this->boxHist_[matchIdx][0].id;
 
             if (int(boxHistTemp.back().size()) == this->histSize_){
@@ -4544,16 +4707,42 @@ namespace onboardDetector{
             confirmedTracksTemp.push_back(newConfirmed);
 
             if (newConfirmed){
-                // Use detected (measured) geometry for the output bbox so the
-                // visualised box sits on the actual detection, not the Kalman prediction.
-                // Velocity/acceleration come from the Kalman filter.
-                onboardDetector::box3D outputBBox = currDetectedBBox;
-                outputBBox.Vx = newEstimatedBBox.Vx;
-                outputBBox.Vy = newEstimatedBBox.Vy;
-                outputBBox.Ax = newEstimatedBBox.Ax;
-                outputBBox.Ay = newEstimatedBBox.Ay;
-                outputBBox.id = newEstimatedBBox.id;
-                trackedBBoxesTemp.push_back(outputBBox);
+                // newEstimatedBBox.is_yolo_candidate carries TRACK-level YOLO evidence:
+                //   is_yolo_candidate = currDetectedBBox.is_yolo_candidate || prevYoloCand
+                // where prevYoloCand is read from boxHist_ (previous frame's sticky).
+                // This means it is true if YOLO fired on this track in ANY past frame,
+                // regardless of whether YOLO is firing this frame (YOLO runs slower).
+                // currDetectedBBox.is_yolo_candidate alone would be false on frames where
+                // YOLO hasn't updated — using newEstimatedBBox here is intentional.
+
+                // Suppress stationary non-YOLO tracks from the output topic.
+                // A confirmed non-YOLO track that has stopped moving is kept alive
+                // internally (confirmedTracks_ remains true) so it can quickly re-enter
+                // the output when it moves again, but it is not published.
+                // Tracks with YOLO evidence (current or sticky history) are always published
+                // even when stationary — they represent known dynamic objects (people, vehicles).
+                const double kfSpeed = std::sqrt(newEstimatedBBox.Vx * newEstimatedBBox.Vx +
+                                                  newEstimatedBBox.Vy * newEstimatedBBox.Vy);
+                const bool suppressStationary = !newEstimatedBBox.is_yolo_candidate &&
+                                                (kfSpeed < this->stationarySpeedThresh_);
+
+                if (!suppressStationary){
+                    // Use detected (measured) geometry for the output bbox so the
+                    // visualised box sits on the actual detection, not the Kalman prediction.
+                    // Velocity/acceleration come from the Kalman filter.
+                    // is_yolo_candidate and is_dynamic are taken from newEstimatedBBox
+                    // (track-level sticky flags) so that consumers of /tracked_bboxes
+                    // always see the correct track status regardless of YOLO timing.
+                    onboardDetector::box3D outputBBox = currDetectedBBox;
+                    outputBBox.Vx               = newEstimatedBBox.Vx;
+                    outputBBox.Vy               = newEstimatedBBox.Vy;
+                    outputBBox.Ax               = newEstimatedBBox.Ax;
+                    outputBBox.Ay               = newEstimatedBBox.Ay;
+                    outputBBox.id               = newEstimatedBBox.id;
+                    outputBBox.is_yolo_candidate = newEstimatedBBox.is_yolo_candidate;
+                    outputBBox.is_dynamic        = newEstimatedBBox.is_dynamic;
+                    trackedBBoxesTemp.push_back(outputBBox);
+                }
             }
 
             if (this->enableTrackingDebugLogs_){
@@ -4728,44 +4917,12 @@ namespace onboardDetector{
             }
         }
 
-        // 4) Stabilizzazione dimensioni solo sulle track pubblicate
-        if (!trackedBBoxesTemp.empty() && !boxHistTemp.empty()){
-            for (size_t i = 0; i < trackedBBoxesTemp.size(); ++i){
-                const int trackId = static_cast<int>(trackedBBoxesTemp[i].id);
-                const int histIdx = this->findTrackHistoryIndexById(boxHistTemp, trackId);
-
-                if (histIdx < 0){
-                    continue;
-                }
-
-                if (static_cast<int>(boxHistTemp[histIdx].size()) < this->fixSizeHistThresh_){
-                    continue;
-                }
-
-                if (boxHistTemp[histIdx].size() < 2){
-                    continue;
-                }
-
-                const onboardDetector::box3D& prevBox = boxHistTemp[histIdx][1];
-
-                const double relDx = std::abs(trackedBBoxesTemp[i].x_width - prevBox.x_width) / std::max(prevBox.x_width, 1e-6);
-                const double relDy = std::abs(trackedBBoxesTemp[i].y_width - prevBox.y_width) / std::max(prevBox.y_width, 1e-6);
-                const double relDz = std::abs(trackedBBoxesTemp[i].z_width - prevBox.z_width) / std::max(prevBox.z_width, 1e-6);
-
-                if (relDx <= this->fixSizeDimThresh_ &&
-                    relDy <= this->fixSizeDimThresh_ &&
-                    relDz <= this->fixSizeDimThresh_)
-                {
-                    trackedBBoxesTemp[i].x_width = prevBox.x_width;
-                    trackedBBoxesTemp[i].y_width = prevBox.y_width;
-                    trackedBBoxesTemp[i].z_width = prevBox.z_width;
-
-                    boxHistTemp[histIdx][0].x_width = trackedBBoxesTemp[i].x_width;
-                    boxHistTemp[histIdx][0].y_width = trackedBBoxesTemp[i].y_width;
-                    boxHistTemp[histIdx][0].z_width = trackedBBoxesTemp[i].z_width;
-                }
-            }
-        }
+        // 4) Tracked bbox dimensions: always taken directly from the current detection
+        // (outputBBox = currDetectedBBox). No history-based dimension override is applied
+        // because any lock-to-prev logic creates a self-reinforcing loop when a bad merged
+        // detection enters history — the bad dimension propagates forward indefinitely and
+        // the output diverges from the filtered bbox. The detection pipeline (merging,
+        // DBSCAN, UV filter) is the authoritative source for bbox dimensions.
 
         this->boxHist_ = boxHistTemp;
         this->pcHist_ = pcHistTemp;
@@ -5391,19 +5548,40 @@ namespace onboardDetector{
             velDirPenalty = this->computeVelocityDirectionError(matchedTrackIdx, currentBox);
         }
 
+        // Penalise matching a YOLO track to a non-YOLO detection, but ONLY when
+        // the track's predicted position is still within the depth camera range.
+        // Outside the camera FOV all detections come from LiDAR DBSCAN and will not have
+        // is_yolo_candidate=true — applying the penalty there would break correct
+        // associations between the person's LiDAR cluster and her own track.
+        // Only is_yolo_candidate is used here: is_dynamic is a classification label and
+        // must not influence tracking/association decisions.
+        double yoloClassConsistencyPenalty = 0.0;
+        if (foundTrackIdx && predictedBox.is_yolo_candidate){
+            if (!currentBox.is_yolo_candidate){
+                const double dx_cam = predictedBox.x - this->positionDepth_(0);
+                const double dy_cam = predictedBox.y - this->positionDepth_(1);
+                const double dz_cam = predictedBox.z - this->positionDepth_(2);
+                const double distToCamera = std::sqrt(dx_cam*dx_cam + dy_cam*dy_cam + dz_cam*dz_cam);
+                if (distToCamera <= this->depthMaxValue_){
+                    yoloClassConsistencyPenalty = 1.0;
+                }
+            }
+        }
+
         double score =
             - this->matchPosScoreWeight_ * normPredPosDist
             - this->matchSizeScoreWeight_ * relSizeDiff
             + this->matchIou2DScoreWeight_ * predIou2d
             - this->matchPrevObsPosScoreWeight_ * normPrevObsPosDist
             + this->matchPrevObsIou2DScoreWeight_ * prevObsIou2d
-            - this->matchVelocityDirectionScoreWeight_ * velDirPenalty;
+            - this->matchVelocityDirectionScoreWeight_ * velDirPenalty
+            - this->matchYoloClassConsistencyWeight_ * yoloClassConsistencyPenalty;
 
         if (foundTrackIdx){
             if (alreadyConfirmed){
                 score += this->confirmedTrackAssocBonus_;
             }
-            if (currentBox.is_dynamic || currentBox.is_yolo_candidate){
+            if (currentBox.is_yolo_candidate){
                 score += this->dynamicTrackAssocBonus_;
             }
         }

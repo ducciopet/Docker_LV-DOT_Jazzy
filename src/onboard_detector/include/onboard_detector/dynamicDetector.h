@@ -33,9 +33,12 @@
 #include <onboard_detector/kalmanFilter.h>
 #include <onboard_detector/utils.h>
 #include <onboard_detector/srv/get_dynamic_obstacles.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
 #include <random>
+#include <mutex>
 
 namespace onboardDetector{
+
     class dynamicDetector{
 
     private:
@@ -60,6 +63,13 @@ namespace onboardDetector{
         std::shared_ptr<message_filters::Synchronizer<lidarOdomSync>> lidarOdomSync_;
         rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr colorImgSub_;
         rclcpp::Subscription<vision_msgs::msg::Detection2DArray>::SharedPtr yoloDetectionSub_;
+        rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr groundHeightSub_;
+        rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr wallMarkersSub_;
+
+        // Wall bounding boxes received from wall_detector
+        std::vector<WallOBB> wallBBoxes_;
+        std::mutex wallBBoxesMutex_;
+
         rclcpp::TimerBase::SharedPtr detectionTimer_;
         rclcpp::TimerBase::SharedPtr lidarDetectionTimer_;
         rclcpp::TimerBase::SharedPtr trackingTimer_;
@@ -132,9 +142,8 @@ namespace onboardDetector{
         double groundHeight_;
         double roofHeight_;
         double groundRoofOffset_;
+        double trackMaxZminAboveGround_;  // bboxes with zmin > groundHeight_ + this are not tracked
         bool groundEstimated_;
-        int groundEstimBottomFraction_; // fraction of image rows used (e.g. 4 = bottom 1/4)
-        int groundEstimMinInliers_;     // RANSAC minimum inliers
 
                 
         // DBSCAN visual param
@@ -179,6 +188,7 @@ namespace onboardDetector{
         bool dbUnmergedFlag_;
         bool lidarUnmergedFlag_;
         bool visualUnmergedFlag_;
+        bool finalMergeFlag_;
 
         // Tracking and data association
         int nextTrackId_ = 0;
@@ -223,6 +233,7 @@ namespace onboardDetector{
         double matchIou2DScoreWeight_;
         double maxRelativeSizeDiffMatch_;
         double matchVelocityDirectionScoreWeight_;
+        double matchYoloClassConsistencyWeight_; // penalty when yolo track matches non-yolo detection
 
         double newTrackMinDist_;
         double newTrackMinPcDist_;
@@ -278,6 +289,7 @@ namespace onboardDetector{
         int skipFrame_;
         double dynaVelThresh_;
         double dynaVoteThresh_;
+        double dynaKfVelStdRatio_; // max std/mean ratio for Kalman velocity to be considered confident
         int forceDynaFrames_;
         int forceDynaCheckRange_;
         int dynamicConsistThresh_;
@@ -358,6 +370,8 @@ namespace onboardDetector{
         void lidarOdomCB(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloudMsg, const nav_msgs::msg::Odometry::ConstSharedPtr& odom);
         void colorImgCB(const sensor_msgs::msg::Image::ConstSharedPtr& img);
         void yoloDetectionCB(const vision_msgs::msg::Detection2DArray::ConstSharedPtr& detections);
+        void groundHeightCB(const std_msgs::msg::Float64MultiArray::ConstSharedPtr& msg);
+        void wallMarkersCB(const visualization_msgs::msg::MarkerArray::ConstSharedPtr& msg);
         void detectionCB();
         void lidarDetectionCB();
         void trackingCB();
@@ -381,7 +395,6 @@ namespace onboardDetector{
         void calcPcFeat(const std::vector<Eigen::Vector3d>& pcCluster, Eigen::Vector3d& pcClusterCenter, Eigen::Vector3d& pcClusterStd);
         double calBoxIOU(const onboardDetector::box3D& box1, const onboardDetector::box3D& box2, bool ignoreZmin=false);
         double calBoxIOV(const onboardDetector::box3D& box1, const onboardDetector::box3D& box2, bool ignoreZmin=false);
-        void estimateGroundHeight();
 
         // Data association and tracking functions
         void boxAssociation(std::vector<int>& bestMatch);
@@ -494,6 +507,7 @@ namespace onboardDetector{
 
         // inline helper functions
         bool isInFilterRange(const Eigen::Vector3d& pos);
+        bool isInsideAnyWall(const Eigen::Vector3d& pos) const;
         void posToIndex(const Eigen::Vector3d& pos, Eigen::Vector3i& idx, double res);
         int indexToAddress(const Eigen::Vector3i& idx, double res);
         int posToAddress(const Eigen::Vector3d& pos, double res);
@@ -518,6 +532,13 @@ namespace onboardDetector{
         else{
             return false;
         }        
+    }
+
+    inline bool dynamicDetector::isInsideAnyWall(const Eigen::Vector3d& pos) const {
+        for (const auto& wall : wallBBoxes_) {
+            if (wall.contains(pos)) return true;
+        }
+        return false;
     }
 
     inline void dynamicDetector::posToIndex(const Eigen::Vector3d& pos, Eigen::Vector3i& idx, double res){

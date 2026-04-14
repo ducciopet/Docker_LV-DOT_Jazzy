@@ -1,3 +1,62 @@
+# =========================================================================
+# Wall Detector Node
+# =========================================================================
+wall_detector_node:
+  ros__parameters:
+    wall_detector:
+      # ROS Topics & Frames
+      lidar_topic: /velodyne_points
+      map_frame: map
+      lidar_frame: velodyne
+      use_tf_pose: true
+
+      # Calibration gate
+      calibration_child_frame: camera_refined
+
+      # Enable/disable wall detection (ground estimation always runs)
+      enable_wall_detection: true
+
+      # -----------------------------------------------------------------------
+      # Depth Camera (for ground/roof estimation via RANSAC)
+      # -----------------------------------------------------------------------
+      depth_image_topic: /front_camera/camera/depth/image_rect_raw
+      depth_frame: camera_refined  # TF frame for the depth camera
+      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]
+      depth_scale_factor: 1000.0
+      depth_min_value: 0.5
+      depth_max_value: 4.5
+      depth_skip_pixel: 2
+      ground_estim_bottom_fraction: 4
+      ground_estim_min_inliers: 50
+
+      # Ground / Roof estimation
+      ground_height: -0.7          # initial ground height [m]
+      ground_roof_offset: 5.0      # roof = ground + offset
+      ground_ema_alpha: 0.05       # EMA smoothing factor
+
+      # -----------------------------------------------------------------------
+      # Wall Filter (RANSAC plane detection on LiDAR)
+      # -----------------------------------------------------------------------
+      voxel_resolution: 0.25
+      ransac_max_iterations: 100
+      ransac_inlier_threshold: 0.07
+      ransac_min_inliers: 30
+      ransac_confidence: 0.99
+      wall_vertical_angle_deg: 5.0
+      max_planes: 8
+      wall_bbox_max_aspect_ratio: 5.0
+
+      # Wall BBox Registry (tracking across frames)
+      overlap_threshold: 0.3
+      merge_weight: 0.3
+      enable_expiry: true
+      max_missed_frames: 30
+      min_normal_dot: 0.9
+      max_center_distance: 5.0
+
+# =========================================================================
+# Detector Node
+# =========================================================================
 detector_node:
   ros__parameters:
     onboard_detector:
@@ -50,13 +109,13 @@ detector_node:
       local_lidar_range: [10.0, 10.0, 5.0]  # [m] ±X, ±Y, ±Z around robot — LiDAR pipeline only
 
       # -----------------------------------------------------------------------
-      # Ground & Roof Estimation
+      # Ground & Roof Initial Values
+      # (estimation now runs in wall_detector_node; these are initial fallbacks)
       # -----------------------------------------------------------------------
-      ground_height: -0.7  # [m] initial ground Z in world frame — updated dynamically each frame via RANSAC
-      roof_height: 4.0     # [m] static fallback; overridden by ground_height + ground_roof_offset when estimation runs
-      ground_roof_offset: 5.0         # [m] roofHeight = groundHeight + this value
-      ground_estim_bottom_fraction: 4 # use bottom 1/N rows of depth image for ground plane fitting (4 = bottom 25%)
-      ground_estim_min_inliers: 50    # minimum RANSAC inliers required to accept the ground estimate
+      ground_height: -0.7  # [m] initial ground Z in world frame
+      roof_height: 4.0     # [m] initial roof height
+      ground_roof_offset: 5.0  # [m] roofHeight = groundHeight + this value
+      track_max_zmin_above_ground: 1.5  # [m] bboxes with zmin > groundHeight + this are not tracked
 
       # -----------------------------------------------------------------------
       # Voxel Filter (depth pipeline only)
@@ -67,16 +126,16 @@ detector_node:
       # -----------------------------------------------------------------------
       # UV Detection Filtering
       # -----------------------------------------------------------------------
-      uv_box_max_diagonal: 2.5  # [m] max XY diagonal of a UV-map bbox; larger detections are discarded as spurious
+      uv_box_max_diagonal: 1.5  # [m] max XY diagonal of a UV-map bbox; larger detections are discarded as spurious
 
       # -----------------------------------------------------------------------
       # Visual DBSCAN Parameters (depth point cloud)
       # -----------------------------------------------------------------------
-      dbscan_min_points_cluster: 20    # min points per cluster (higher = less noise, misses more distant objects)
+      dbscan_min_points_cluster: 15    # min points per cluster (higher = less noise, misses more distant objects)
       dbscan_search_range_epsilon: 0.08 # [m] neighbourhood radius for DBSCAN core-point test
 
-      downsample_threshold: 6500   # if projected points exceed this count, apply Gaussian downsampling
-      gaussian_downsample_rate: 8  # keep 1 in N points after Gaussian downsampling
+      downsample_threshold: 7000   # if projected points exceed this count, apply Gaussian downsampling
+      gaussian_downsample_rate: 10  # keep 1 in N points after Gaussian downsampling
 
       # -----------------------------------------------------------------------
       # DBSCAN Refinement (recursive cluster splitting)
@@ -96,15 +155,15 @@ detector_node:
       # -----------------------------------------------------------------------
       # LiDAR DBSCAN Parameters
       # -----------------------------------------------------------------------
-      lidar_DBSCAN_min_points: 10  # min points per LiDAR cluster
+      lidar_DBSCAN_min_points: 10 # min points per LiDAR cluster
       lidar_DBSCAN_epsilon: 0.04   # [m] DBSCAN neighbourhood radius for LiDAR
 
       # -----------------------------------------------------------------------
       # BBox Merging — Intra-group (same detection source)
       # -----------------------------------------------------------------------
       # Applied inside mergeNestedGroup() before any cross-source merging.
-      samegroupIOU_threshold: 0.2  # mutual IOU above this → merge as overlapping peers
-      samegroupIOV_threshold: 0.3   # IOV (intersection / volume of smaller box) above this → merge as nested
+      samegroupIOU_threshold: 0.4  # mutual IOU above this → merge as overlapping peers
+      samegroupIOV_threshold: 0.5   # IOV (intersection / volume of smaller box) above this → merge as nested
 
       # -----------------------------------------------------------------------
       # BBox Merging — UV <-> DBSCAN (visual pipeline)
@@ -124,8 +183,16 @@ detector_node:
       lidar_visual_merger_leaf_only: false                # if true, "smaller" mode outputs only leaf bboxes (no conservative parent+child merge)
       lidar_visual_filtering_BBox_IOU_threshold: 0.6    # mutual IOU threshold for visual<->LiDAR peer merge
       lidar_visual_filtering_BBox_IOV_threshold: 0.7   # IOV threshold for visual<->LiDAR nesting detection
-      visual_unmerged_flag: true  # if true, visual bboxes with no LiDAR match are kept in output
+      visual_unmerged_flag: false  # if true, visual bboxes with no LiDAR match are kept in output
       lidar_unmerged_flag: true   # if true, LiDAR bboxes with no visual match are kept in output
+
+      # -----------------------------------------------------------------------
+      # BBox Merging — Final pass (pre-YOLO)
+      # -----------------------------------------------------------------------
+      # Extra mergeNestedGroup pass applied to filteredBBoxes after the full visual+LiDAR
+      # fusion and before YOLO association. Collapses residual overlapping/nested duplicates
+      # that survived earlier merging stages. Uses the same samegroupIOU / samegroupIOV thresholds.
+      final_merge_flag: true  # set to true to enable the final merging pass
 
       # -----------------------------------------------------------------------
       # Tracking & Data Association
@@ -166,6 +233,8 @@ detector_node:
       match_iou2d_score_weight: 0.15          # weight on 2D IOU term
       match_iou2d_weight: 0.20                # secondary IOU weight (used in combined score)
       match_velocity_direction_score_weight: 0.12  # weight on velocity direction consistency
+      match_yolo_class_consistency_weight: 0.50    # penalty when a YOLO/dynamic track is matched to a non-YOLO detection;
+                                                   # prevents ID swap to walls when person changes direction near one
       match_prev_obs_pos_score_weight: 0.25   # weight on distance to previous observation position
       match_prev_obs_iou2d_score_weight: 0.10 # weight on IOU with previous observation bbox
       match_feat_score_weight: 0.15           # weight on point cloud feature similarity
@@ -241,12 +310,18 @@ detector_node:
       #   - frames_force_dynamic / frames_force_dynamic_check_range: if the object
       #     was confirmed dynamic for enough of the recent history, it stays dynamic
       #     even while stationary (handles pedestrians stopping, cars decelerating, etc.)
-      frame_skip: 5                         # [frames] gap for point cloud displacement estimate
-      dynamic_velocity_threshold: 0.3      # [m/s] min speed to cast a vote (per-point) AND confirm (Kalman); ~slow walk
-      dynamic_voting_threshold: 0.80        # fraction of consistent votes required — 80% majority filters noisy static clusters
-      frames_force_dynamic: 20              # min dynamic frames in window to force sticky label (out of check_range below)
-      frames_force_dynamic_check_range: 30  # [frames] window = ~1.8s; keeps recently-moving objects dynamic after they stop
-      dynamic_consistency_threshold: 22     # consecutive candidate frames before confirming (~1.4s at 0.12s/frame)
+      frame_skip: 2                         # [frames] gap for point cloud displacement estimate (3 × 0.12s = 0.36s)
+                                            # shorter gap → faster response; longer gap → more robust against jitter
+      dynamic_velocity_threshold: 0.25     # [m/s] min speed to cast a vote (per-point) AND Kalman gate; catches slow walks
+      dynamic_voting_threshold: 0.70        # fraction of consistent votes required; 70% balances sensitivity vs. false positives
+      dynamic_kf_vel_std_ratio: 0.60        # max (std/mean) of Kalman speed over frame_skip frames to consider estimate confident;
+                                            # 0.60 allows moderate speed changes (e.g. person slowing); lower = stricter
+      frames_force_dynamic: 7               # min dynamic frames in window to keep sticky label (out of check_range below)
+                                            # lowered: once confirmed, few frames of evidence enough to sustain the label
+      frames_force_dynamic_check_range: 10  # [frames] window = 1.2s; a person stopped for >1.2s loses the forced label
+      dynamic_consistency_threshold: 5      # consecutive candidate frames before confirming (~0.36s at 0.12s/frame)
+                                            # was 22 (~2.6s) which caused very delayed classification; 3 frames is sufficient
+                                            # given the other gates (vote ratio + Kalman gate) already filter out noise
 
       # -----------------------------------------------------------------------
       # Object Size Constraints

@@ -125,6 +125,20 @@ namespace onboardDetector{
 
         return stds;
     }
+
+    // Oriented bounding box parsed from wall_detector marker messages
+    struct WallOBB {
+        Eigen::Vector3d center;
+        Eigen::Matrix3d rotation;
+        Eigen::Vector3d half_size;   // half extents in local frame
+
+        bool contains(const Eigen::Vector3d& p) const {
+            Eigen::Vector3d local = rotation.transpose() * (p - center);
+            return (std::abs(local.x()) <= half_size.x()) &&
+                   (std::abs(local.y()) <= half_size.y()) &&
+                   (std::abs(local.z()) <= half_size.z());
+        }
+    };
 }
 
 #endif

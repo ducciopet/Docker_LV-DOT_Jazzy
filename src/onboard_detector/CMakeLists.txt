@@ -39,6 +39,7 @@ find_package(Open3D REQUIRED)
 set(CMAKE_WARN_DEPRECATED TRUE)
 find_package(pcl_conversions REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
 # Open3D from /usr/local may export hardcoded LLVM libc++ paths that are not
@@ -175,7 +176,28 @@ target_link_libraries(calibration_icp_node
   Open3D::Open3D
 )
 
-# --------------------------------------------------
+# Wall detector node executable (standalone, under scripts/wall_detector/)
+add_executable(wall_detector_node
+  scripts/wall_detector/wall_detector_node.cpp
+  scripts/wall_detector/wallDetector.cpp
+)
+target_include_directories(wall_detector_node PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/wall_detector
+)
+target_link_libraries(wall_detector_node ${PCL_LIBRARIES})
+ament_target_dependencies(wall_detector_node
+  rclcpp
+  geometry_msgs
+  sensor_msgs
+  std_msgs
+  visualization_msgs
+  pcl_conversions
+  cv_bridge
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
 # --------------------------------------------------
 # Install
 # --------------------------------------------------
@@ -184,6 +206,7 @@ install(TARGETS
   detector_node
   calibration_node
   calibration_icp_node
+  wall_detector_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -23,7 +23,7 @@ def generate_launch_description():
 
     pkg_dir = get_package_share_directory('onboard_detector')
     config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac.yaml')
-    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_jo_zotac.rviz')
+    rviz_config_file = os.path.join(pkg_dir, 'rviz', 'wall_detector_debug.rviz')
 
     calibration_params = _load_node_params(config_file, 'calibration_icp_node')
     detector_params = _load_node_params(config_file, 'detector_node')
@@ -159,6 +159,17 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
+    wall_detector_node = Node(
+        package='onboard_detector',
+        executable='wall_detector_node',
+        name='wall_detector_node',
+        output='screen',
+        parameters=[
+            ParameterFile(config_file, allow_substs=True),
+            {'use_sim_time': True},
+        ],
+    )
+
     return LaunchDescription([
         pythonpath_action,
         # static_tf_base_to_imu,
@@ -167,6 +178,7 @@ def generate_launch_description():
         static_tf_velodyne_to_camera_link_initial_guess,
         calibration_node,
         detector_node,
+        wall_detector_node,
         yolo_node,
         rviz_node,
     ])
