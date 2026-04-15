@@ -671,6 +671,14 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": max_missed_frames_yolo set to: " << this->maxMissedFramesYolo_ << std::endl;
         }
 
+        if (!this->nh_->get_parameter(pname("max_non_yolo_in_fov_frames"), this->maxNonYoloInFovFrames_)){
+            this->maxNonYoloInFovFrames_ = 5;
+            std::cout << this->hint_ << ": No max_non_yolo_in_fov_frames. Use default: 5." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": max_non_yolo_in_fov_frames set to: " << this->maxNonYoloInFovFrames_ << std::endl;
+        }
+
         // Kalman Filter V2 parameters (position-only observation model)
         std::vector<double> kfV2Params;
         if (!this->nh_->get_parameter(pname("kalman_filter_v2_param"), kfV2Params)){
@@ -1056,12 +1064,12 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Confirmed track assoc bonus: " << this->confirmedTrackAssocBonus_ << std::endl;
         }
 
-        if (!this->nh_->get_parameter(pname("dynamic_track_assoc_bonus"), this->dynamicTrackAssocBonus_)){
-            this->dynamicTrackAssocBonus_ = 0.25;
-            std::cout << this->hint_ << ": No dynamic_track_assoc_bonus. Use default: 0.25." << std::endl;
+        if (!this->nh_->get_parameter(pname("yolo_track_assoc_bonus"), this->yoloTrackAssocBonus_)){
+            this->yoloTrackAssocBonus_ = 0.25;
+            std::cout << this->hint_ << ": No yolo_track_assoc_bonus. Use default: 0.25." << std::endl;
         }
         else{
-            std::cout << this->hint_ << ": Dynamic track assoc bonus: " << this->dynamicTrackAssocBonus_ << std::endl;
+            std::cout << this->hint_ << ": YOLO track assoc bonus: " << this->yoloTrackAssocBonus_ << std::endl;
         }
 
         if (!this->nh_->get_parameter(pname("max_natural_innovation_confirmed"), this->maxNaturalInnovationConfirmed_)){
@@ -1862,12 +1870,27 @@ namespace onboardDetector{
         // Debug: Print history sizes before classification
         RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] boxHist_ size: %zu, pcHist_ size: %zu, dynamicBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->dynamicBBoxes_.size());
 
+        // Build set of track IDs currently in the tracked output.
+        // Classification runs ONLY on tracks that appear in trackedBBoxes_
+        // (confirmed + not stationary-suppressed + not predicted-only).
+        // This ensures every blue (dynamic) bbox corresponds to a yellow (tracked) bbox.
+        std::unordered_set<int> outputTrackIds;
+        for (const auto& tb : this->trackedBBoxes_){
+            outputTrackIds.insert(static_cast<int>(tb.id));
+        }
+
         // Identification thread
         std::vector<onboardDetector::box3D> dynamicBBoxesTemp;
 
         // Iterate through all pointcloud/bounding boxes history (note that yolo's pointclouds are dummy pointcloud (empty))
         // NOTE: There are 3 cases which we don't need to perform dynamic obstacle identification.
         for (size_t i=0; i<this->pcHist_.size() ; ++i){
+            // Skip tracks that are not in the tracked output.
+            if (this->boxHist_[i].empty() ||
+                outputTrackIds.find(static_cast<int>(this->boxHist_[i][0].id)) == outputTrackIds.end()){
+                continue;
+            }
+
             // ===================================================================================
             // CASE I: YOLO-certified object → always dynamic, maintained until track is lost.
             // Explicitly set is_dynamic=true in boxHist_ so force_dynamic (CASE III) can count
@@ -1893,9 +1916,10 @@ namespace onboardDetector{
 
 
             // ==================================================================================
-            // CASE III: Force Dynamic (if the obstacle was classified as dynamic for enough
-            // recent frames). With sticky is_dynamic flags and CASE I writing is_dynamic=true,
-            // this correctly propagates even when the object exits the camera FOV.
+            // CASE III: Force Dynamic — if the obstacle was classified as dynamic for enough
+            // recent frames AND is currently moving. Since is_dynamic is not sticky, the
+            // history entries [1..N] reflect classificationCB decisions from previous frames.
+            // Velocity is required: a non-YOLO track that stops should lose the dynamic label.
             int dynaFrames = 0;
             if (int(this->boxHist_[i].size()) > this->forceDynaCheckRange_){
                 for (int j=1 ; j<this->forceDynaCheckRange_+1 ; ++j){
@@ -1906,9 +1930,13 @@ namespace onboardDetector{
             }
 
             if (dynaFrames >= this->forceDynaFrames_){
-                this->boxHist_[i][0].is_dynamic = true;
-                dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
-                continue;
+                const double kfSpeed = std::sqrt(this->boxHist_[i][0].Vx * this->boxHist_[i][0].Vx +
+                                                  this->boxHist_[i][0].Vy * this->boxHist_[i][0].Vy);
+                if (kfSpeed >= this->dynaVelThresh_){
+                    this->boxHist_[i][0].is_dynamic = true;
+                    dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
+                    continue;
+                }
             }
             // ===================================================================================
 
@@ -4408,6 +4436,7 @@ namespace onboardDetector{
         std::vector<int> trackAgeTemp;
         std::vector<bool> confirmedTracksTemp;
         std::vector<int> staticStreakTemp;
+        std::vector<int> nonYoloInFovStreakTemp;
 
         std::deque<onboardDetector::box3D> newSingleBoxHist;
         std::deque<std::vector<Eigen::Vector3d>> newSinglePcHist;
@@ -4452,18 +4481,38 @@ namespace onboardDetector{
             newEstimatedBBox.x_width = currDetectedBBox.x_width;
             newEstimatedBBox.y_width = currDetectedBBox.y_width;
             newEstimatedBBox.z_width = currDetectedBBox.z_width;
-            // Sticky flags: once a track has been flagged as yolo_candidate or dynamic,
-            // the flag persists in boxHist_ even when the object exits the camera FOV
-            // (no new YOLO detection, no fresh point cloud). This ensures classificationCB
-            // CASE I keeps firing and force_dynamic keeps the is_dynamic label alive.
+            // Sticky flags: is_yolo_candidate propagates forward so CASE I in
+            // classificationCB keeps firing even outside the camera FOV.
+            // is_dynamic is NOT propagated: classificationCB decides fresh each frame.
             const bool prevYoloCand = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_yolo_candidate;
             const bool prevDynamic  = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_dynamic;
             // is_yolo_candidate: sticky from YOLO detector (sensor output, track-level).
             newEstimatedBBox.is_yolo_candidate = currDetectedBBox.is_yolo_candidate || prevYoloCand;
-            // is_dynamic: set exclusively by classificationCB, never by the detection pipeline.
-            // Carry it forward from the previous history entry so classificationCB's label
-            // persists across frames where the object is outside the camera FOV.
-            newEstimatedBBox.is_dynamic = prevDynamic;
+
+            // YOLO decay: if the track is inside the camera FOV and the current detection
+            // is NOT a YOLO detection, increment a counter. After maxNonYoloInFovFrames_
+            // consecutive frames, the sticky YOLO flag is cleared — the object is no longer
+            // considered a person/vehicle. This handles ID swaps where a stationary object
+            // inherits the YOLO flag from a departing person.
+            const Eigen::Vector3d bboxPos(newEstimatedBBox.x, newEstimatedBBox.y, newEstimatedBBox.z);
+            const bool insideFov = this->isInCameraFOV(bboxPos);
+            const int oldNonYoloStreak =
+                (matchIdx < static_cast<int>(this->nonYoloInFovStreak_.size())) ? this->nonYoloInFovStreak_[matchIdx] : 0;
+            int newNonYoloStreak = 0;
+            if (newEstimatedBBox.is_yolo_candidate && insideFov && !currDetectedBBox.is_yolo_candidate){
+                newNonYoloStreak = oldNonYoloStreak + 1;
+            }
+            // Reset if current detection IS yolo or track is outside FOV
+            // (outside FOV we can't judge — YOLO doesn't see there)
+
+            if (newNonYoloStreak >= this->maxNonYoloInFovFrames_){
+                newEstimatedBBox.is_yolo_candidate = false;
+                newNonYoloStreak = 0;
+            }
+            nonYoloInFovStreakTemp.push_back(newNonYoloStreak);
+
+            // is_dynamic: starts false; classificationCB will set it if appropriate.
+            newEstimatedBBox.is_dynamic = false;
             newEstimatedBBox.id = this->boxHist_[matchIdx][0].id;
 
             if (int(boxHistTemp.back().size()) == this->histSize_){
@@ -4517,12 +4566,9 @@ namespace onboardDetector{
                                                 (kfSpeed < this->stationarySpeedThresh_);
 
                 if (!suppressStationary){
-                    // Use detected (measured) geometry for the output bbox so the
-                    // visualised box sits on the actual detection, not the Kalman prediction.
-                    // Velocity/acceleration come from the Kalman filter.
-                    // is_yolo_candidate and is_dynamic are taken from newEstimatedBBox
-                    // (track-level sticky flags) so that consumers of /tracked_bboxes
-                    // always see the correct track status regardless of YOLO timing.
+                    // is_yolo_candidate is taken from newEstimatedBBox (track-level sticky).
+                    // is_dynamic: use previous frame's classification result (1-frame delay)
+                    // since classificationCB runs after tracking.
                     onboardDetector::box3D outputBBox = currDetectedBBox;
                     outputBBox.Vx               = newEstimatedBBox.Vx;
                     outputBBox.Vy               = newEstimatedBBox.Vy;
@@ -4530,7 +4576,7 @@ namespace onboardDetector{
                     outputBBox.Ay               = newEstimatedBBox.Ay;
                     outputBBox.id               = newEstimatedBBox.id;
                     outputBBox.is_yolo_candidate = newEstimatedBBox.is_yolo_candidate;
-                    outputBBox.is_dynamic        = newEstimatedBBox.is_dynamic;
+                    outputBBox.is_dynamic        = prevDynamic;
                     trackedBBoxesTemp.push_back(outputBBox);
                 }
             }
@@ -4590,6 +4636,8 @@ namespace onboardDetector{
             predictedBBox.Ax = filter.output(4);
             predictedBBox.Ay = filter.output(5);
             predictedBBox.id = hist.front().id;
+            // is_dynamic not propagated: classificationCB decides fresh each frame.
+            predictedBBox.is_dynamic = false;
 
             if (int(hist.size()) == this->histSize_){
                 hist.pop_back();
@@ -4622,6 +4670,10 @@ namespace onboardDetector{
             const int oldStaticStreakMissed =
                 (j < static_cast<int>(this->staticStreak_.size())) ? this->staticStreak_[j] : 0;
             staticStreakTemp.push_back(oldStaticStreakMissed); // no detection → keep existing streak
+
+            const int oldNonYoloStreakMissed =
+                (j < static_cast<int>(this->nonYoloInFovStreak_.size())) ? this->nonYoloInFovStreak_[j] : 0;
+            nonYoloInFovStreakTemp.push_back(oldNonYoloStreakMissed); // no detection → keep existing streak
 
             hitStreakTemp.push_back(0);
             trackAgeTemp.push_back(oldTrackAge + 1);
@@ -4693,6 +4745,7 @@ namespace onboardDetector{
             hitStreakTemp.push_back(1);
             trackAgeTemp.push_back(1);
             staticStreakTemp.push_back(0); // new track, no static history
+            nonYoloInFovStreakTemp.push_back(0); // new track, no YOLO decay history
 
             // YOLO detections are confirmed immediately on their first frame.
             // Non-YOLO detections start tentative and need minConfirmHits_ to confirm.
@@ -4735,6 +4788,7 @@ namespace onboardDetector{
         this->trackAge_ = trackAgeTemp;
         this->confirmedTracks_ = confirmedTracksTemp;
         this->staticStreak_ = staticStreakTemp;
+        this->nonYoloInFovStreak_ = nonYoloInFovStreakTemp;
     }
 
     // ============================================================================
@@ -5250,7 +5304,7 @@ namespace onboardDetector{
                 score += this->confirmedTrackAssocBonus_;
             }
             if (currentBox.is_yolo_candidate){
-                score += this->dynamicTrackAssocBonus_;
+                score += this->yoloTrackAssocBonus_;
             }
         }
 

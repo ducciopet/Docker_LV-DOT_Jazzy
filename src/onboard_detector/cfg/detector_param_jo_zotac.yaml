@@ -213,7 +213,8 @@ detector_node:
       # kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05]
       kalman_filter_averaging_frames: 3  # smooth velocity estimate over this many frames
       max_missed_frames: 5               # delete a track after this many consecutive missed detections
-      max_missed_frames_yolo: 15         # extended lifetime for YOLO-confirmed tracks (persons/vehicles)
+      max_missed_frames_yolo: 10         # extended lifetime for YOLO-confirmed tracks (persons/vehicles)
+      max_non_yolo_in_fov_frames: 3      # consecutive non-YOLO frames inside FOV to clear sticky YOLO flag
 
       # -----------------------------------------------------------------------
       # Association Scoring Weights
@@ -241,7 +242,7 @@ detector_node:
       duplicate_size_rel_threshold: 0.6    # relative size ratio above this → treat as duplicates
 
       confirmed_track_assoc_bonus: 0.20  # score bonus when matching to a confirmed track
-      dynamic_track_assoc_bonus: 0.25    # score bonus when matching to a dynamic track
+      yolo_track_assoc_bonus: 0.25       # score bonus when matching a YOLO-flagged detection
 
       enable_tracking_debug_logs: true
 

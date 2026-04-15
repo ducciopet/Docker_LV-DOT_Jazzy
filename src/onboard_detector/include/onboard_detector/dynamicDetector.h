@@ -217,6 +217,8 @@ namespace onboardDetector{
         std::vector<int> trackAge_;
         std::vector<bool> confirmedTracks_;
         std::vector<int> staticStreak_;  // consecutive frames a confirmed track has been stationary
+        std::vector<int> nonYoloInFovStreak_;  // consecutive frames inside FOV matched to non-YOLO detection
+        int maxNonYoloInFovFrames_;  // after this many frames, clear sticky is_yolo_candidate
 
         double minMatchScore_;
 
@@ -252,7 +254,7 @@ namespace onboardDetector{
         double maxVelocityDirectionErrorTracked_;
         double stationarySpeedThresh_;
         double confirmedTrackAssocBonus_;
-        double dynamicTrackAssocBonus_;
+        double yoloTrackAssocBonus_;
         double maxNaturalInnovationConfirmed_;
         double maxNaturalInnovationDynamic_;
         double maxVelocityDirectionErrorConfirmDynamic_;
