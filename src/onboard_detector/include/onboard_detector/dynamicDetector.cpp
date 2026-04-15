@@ -612,25 +612,7 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": History for tracking is set to: " << this->histSize_ << std::endl;
         }
 
-        // history threshold for fixing box size
-        if (!this->nh_->get_parameter(pname("fix_size_history_threshold"), this->fixSizeHistThresh_)){
-            this->fixSizeHistThresh_ = 10;
-            std::cout << this->hint_ << ": No history threshold for fixing size parameter found. Use default: 10." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": History threshold for fixing size parameter is set to: " << this->fixSizeHistThresh_ << std::endl;
-        }
-
-        // dimension threshold for fixing box size
-        if (!this->nh_->get_parameter(pname("fix_size_dimension_threshold"), this->fixSizeDimThresh_)){
-            this->fixSizeDimThresh_ = 0.4;
-            std::cout << this->hint_ << ": No dimension threshold for fixing size parameter found. Use default: 0.4." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Dimension threshold for fixing size parameter is set to: " << this->fixSizeDimThresh_ << std::endl;
-        }
-
-        // kalman filter parameters
+        // kalman filter parameters (V1 — kept for commented-out reference functions)
         std::vector<double> kalmanFilterParams;
         if (!this->nh_->get_parameter(pname("kalman_filter_param"), kalmanFilterParams)){
             this->eP_ = 0.5;
@@ -681,6 +663,14 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Number of frames used in KF for observation is set to: " << this->kfAvgFrames_ << std::endl;
         }
 
+        if (!this->nh_->get_parameter(pname("max_missed_frames_yolo"), this->maxMissedFramesYolo_)){
+            this->maxMissedFramesYolo_ = 15;
+            std::cout << this->hint_ << ": No max_missed_frames_yolo. Use default: 15." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": max_missed_frames_yolo set to: " << this->maxMissedFramesYolo_ << std::endl;
+        }
+
         // Kalman Filter V2 parameters (position-only observation model)
         std::vector<double> kfV2Params;
         if (!this->nh_->get_parameter(pname("kalman_filter_v2_param"), kfV2Params)){
@@ -712,33 +702,6 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": Minimum match score is set to: " << this->minMatchScore_ << std::endl;
-        }
-
-        // thresholds for new track initialization
-        if (!this->nh_->get_parameter(pname("new_track_min_dist"), this->newTrackMinDist_)){
-            this->newTrackMinDist_ = 0.8;
-            std::cout << this->hint_ << ": No minimum distance for new track parameter found. Use default: 0.8." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Minimum distance for new track is set to: " << this->newTrackMinDist_ << std::endl;
-        }
-
-        // minimum point cloud distance for new track initialization
-        if (!this->nh_->get_parameter(pname("new_track_min_pc_dist"), this->newTrackMinPcDist_)){
-            this->newTrackMinPcDist_ = 1.0;
-            std::cout << this->hint_ << ": No minimum point cloud distance for new track parameter found. Use default: 1.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Minimum point cloud distance for new track is set to: " << this->newTrackMinPcDist_ << std::endl;
-        }
-
-        // maximum velocity difference for matching
-        if (!this->nh_->get_parameter(pname("max_match_vel_diff"), this->maxMatchVelDiff_)){
-            this->maxMatchVelDiff_ = 3.0;
-            std::cout << this->hint_ << ": No maximum velocity difference for matching parameter found. Use default: 3.0." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Maximum velocity difference for matching is set to: " << this->maxMatchVelDiff_ << std::endl;
         }
 
         // skip frame for classification
@@ -1024,78 +987,6 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": Match prev obs IoU2D score weight: " << this->matchPrevObsIou2DScoreWeight_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("static_assoc_speed_thresh"), this->staticAssocSpeedThresh_)){
-            this->staticAssocSpeedThresh_ = 0.35;
-            std::cout << this->hint_ << ": No static_assoc_speed_thresh. Use default: 0.35." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Static assoc speed thresh: " << this->staticAssocSpeedThresh_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("static_assoc_dist_thresh"), this->staticAssocDistThresh_)){
-            this->staticAssocDistThresh_ = 0.45;
-            std::cout << this->hint_ << ": No static_assoc_dist_thresh. Use default: 0.45." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Static assoc dist thresh: " << this->staticAssocDistThresh_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("dynamic_assoc_dist_base"), this->dynamicAssocDistBase_)){
-            this->dynamicAssocDistBase_ = 0.60;
-            std::cout << this->hint_ << ": No dynamic_assoc_dist_base. Use default: 0.60." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Dynamic assoc dist base: " << this->dynamicAssocDistBase_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("dynamic_assoc_dist_gain"), this->dynamicAssocDistGain_)){
-            this->dynamicAssocDistGain_ = 1.20;
-            std::cout << this->hint_ << ": No dynamic_assoc_dist_gain. Use default: 1.20." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Dynamic assoc dist gain: " << this->dynamicAssocDistGain_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("dynamic_assoc_dist_max"), this->dynamicAssocDistMax_)){
-            this->dynamicAssocDistMax_ = 2.50;
-            std::cout << this->hint_ << ": No dynamic_assoc_dist_max. Use default: 2.50." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Dynamic assoc dist max: " << this->dynamicAssocDistMax_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("static_assoc_min_iou2d"), this->staticAssocMinIoU2D_)){
-            this->staticAssocMinIoU2D_ = 0.08;
-            std::cout << this->hint_ << ": No static_assoc_min_iou2d. Use default: 0.08." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Static assoc min IoU2D: " << this->staticAssocMinIoU2D_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("assoc_max_rel_size_diff"), this->assocMaxRelSizeDiff_)){
-            this->assocMaxRelSizeDiff_ = 0.75;
-            std::cout << this->hint_ << ": No assoc_max_rel_size_diff. Use default: 0.75." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Assoc max rel size diff: " << this->assocMaxRelSizeDiff_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("match_feat_score_weight"), this->matchFeatScoreWeight_)){
-            this->matchFeatScoreWeight_ = 0.15;
-            std::cout << this->hint_ << ": No match_feat_score_weight. Use default: 0.15." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Match feat score weight: " << this->matchFeatScoreWeight_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("match_iou2d_weight"), this->matchIoU2DWeight_)){
-            this->matchIoU2DWeight_ = 0.20;
-            std::cout << this->hint_ << ": No match_iou2d_weight. Use default: 0.20." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Match IoU2D weight: " << this->matchIoU2DWeight_ << std::endl;
         }
 
         // =========================
@@ -3525,6 +3416,12 @@ namespace onboardDetector{
                 }
             }
         }
+        // Consume YOLO detections: clear so the same detection is not reapplied
+        // to future detection-loop iterations that run before the next YOLO frame.
+        // The is_yolo_candidate flag is now sticky in boxHist_ (via kalmanFilterAndUpdateHist),
+        // so the track survives without needing the raw YOLO result again.
+        this->yoloDetectionResults_.detections.clear();
+
         this->filteredBBoxes_ = filteredBBoxesTemp;
         this->filteredPcClusters_ = filteredPcClustersTemp;
         this->filteredPcClusterCenters_ = filteredPcClusterCentersTemp;
@@ -4024,34 +3921,6 @@ namespace onboardDetector{
         return interArea / unionArea;
     } 
 
-    double dynamicDetector::computeBoxIoU2DFromCorners(int tlXA, int tlYA, int brXA, int brYA,
-                                                    int tlXB, int tlYB, int brXB, int brYB) const
-    {
-        const int interLeft   = std::max(tlXA, tlXB);
-        const int interTop    = std::max(tlYA, tlYB);
-        const int interRight  = std::min(brXA, brXB);
-        const int interBottom = std::min(brYA, brYB);
-
-        const int interW = std::max(0, interRight - interLeft);
-        const int interH = std::max(0, interBottom - interTop);
-        const double interArea = static_cast<double>(interW) * static_cast<double>(interH);
-
-        const int wA = std::max(0, brXA - tlXA);
-        const int hA = std::max(0, brYA - tlYA);
-        const int wB = std::max(0, brXB - tlXB);
-        const int hB = std::max(0, brYB - tlYB);
-
-        const double areaA = static_cast<double>(wA) * static_cast<double>(hA);
-        const double areaB = static_cast<double>(wB) * static_cast<double>(hB);
-        const double unionArea = areaA + areaB - interArea;
-
-        if (unionArea <= 1e-9){
-            return 0.0;
-        }
-
-        return interArea / unionArea;
-    }
-
     bool dynamicDetector::isNaturalMotion(int trackIdx,
                                         const onboardDetector::box3D& currDetectedBBox) const
     {
@@ -4442,36 +4311,6 @@ namespace onboardDetector{
         }
     }
 
-    void dynamicDetector::genFeatHelper(const std::vector<onboardDetector::box3D>& boxes,
-                                    const std::vector<Eigen::Vector3d>& pcCenters,
-                                    std::vector<Eigen::VectorXd>& features){
-        Eigen::VectorXd featureWeights = Eigen::VectorXd::Zero(9);
-        featureWeights = this->featureWeights_;
-        features.resize(boxes.size());
-
-        for (size_t i = 0; i < boxes.size(); ++i) {
-            Eigen::VectorXd feature = Eigen::VectorXd::Zero(9);
-
-            feature(0) = (boxes[i].x - this->position_(0)) * featureWeights(0);
-            feature(1) = (boxes[i].y - this->position_(1)) * featureWeights(1);
-            feature(2) = (boxes[i].z - this->position_(2)) * featureWeights(2);
-            feature(3) = boxes[i].x_width * featureWeights(3);
-            feature(4) = boxes[i].y_width * featureWeights(4);
-            feature(5) = boxes[i].z_width * featureWeights(5);
-            feature(6) = pcCenters[i](0) * featureWeights(6);
-            feature(7) = pcCenters[i](1) * featureWeights(7);
-            feature(8) = pcCenters[i](2) * featureWeights(8);
-
-            for (int j = 0; j < feature.size(); ++j) {
-                if (std::isnan(feature(j)) || std::isinf(feature(j))) {
-                    feature(j) = 0.0;
-                }
-            }
-
-            features[i] = feature;
-        }
-    }
-
     void dynamicDetector::getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters){
         onboardDetector::box3D prevBox;
         for (size_t i=0 ; i<this->boxHist_.size() ; i++){
@@ -4767,15 +4606,20 @@ namespace onboardDetector{
             }
 
             int newMissed = this->missedFrames_[j] + 1;
-            if (newMissed > this->maxMissedFrames_){
+            // YOLO-confirmed tracks survive longer: they represent known dynamic objects
+            // (persons, vehicles) that may temporarily leave the FOV or be occluded.
+            const bool trackIsYolo = !this->boxHist_[j].empty() && this->boxHist_[j][0].is_yolo_candidate;
+            const int effectiveMaxMissed = trackIsYolo ? this->maxMissedFramesYolo_ : this->maxMissedFrames_;
+            if (newMissed > effectiveMaxMissed){
                 if (this->enableTrackingDebugLogs_){
                     int oldTrackId = (!this->boxHist_[j].empty()) ? static_cast<int>(this->boxHist_[j][0].id) : -1;
                     RCLCPP_DEBUG(
                         this->nh_->get_logger(),
-                        "[TRACK_DROP_MISSED] track_id=%d missed=%d maxMissed=%d",
+                        "[TRACK_DROP_MISSED] track_id=%d missed=%d maxMissed=%d yolo=%d",
                         oldTrackId,
                         newMissed,
-                        this->maxMissedFrames_);
+                        effectiveMaxMissed,
+                        trackIsYolo ? 1 : 0);
                 }
                 continue;
             }
@@ -4832,11 +4676,9 @@ namespace onboardDetector{
             trackAgeTemp.push_back(oldTrackAge + 1);
             confirmedTracksTemp.push_back(oldConfirmed);
 
-            // Coasting: confirmed tracks with short miss gaps still appear in output
-            // using their Kalman-predicted position. This prevents ID loss on merge flicker.
-            if (oldConfirmed && newMissed <= this->coastingMaxMissedFrames_){
-                trackedBBoxesTemp.push_back(predictedBBox);
-            }
+            // Unmatched tracks are kept alive internally (boxHistTemp, filtersTemp) so
+            // they can re-associate with future detections, but are never pushed to
+            // trackedBBoxesTemp: no Kalman-predicted bbox ever appears in the output.
 
             if (this->enableTrackingDebugLogs_){
                 RCLCPP_DEBUG(
@@ -4936,6 +4778,11 @@ namespace onboardDetector{
         this->staticStreak_ = staticStreakTemp;
     }
 
+    // ============================================================================
+    // Kalman Filter V1 functions — kept for reference, not called by active code.
+    // Active code uses kalmanFilterMatrixAccV2 + getKalmanObservationAccV2 only.
+    // ============================================================================
+    /*
     void dynamicDetector::kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R){
         states.resize(4,1);
         states(0) = currDetectedBBox.x;
@@ -5079,6 +4926,7 @@ namespace onboardDetector{
             }
         }
     }
+    */ // end Kalman Filter V1
 
     // ============================================================================
     // Kalman Filter V2: position-only observation model
@@ -5261,126 +5109,6 @@ namespace onboardDetector{
         return duplicateByStrongOverlap;
     }
 
-    int dynamicDetector::findTrackHistoryIndexById(const std::vector<std::deque<onboardDetector::box3D>>& boxHist,
-                                                int trackId) const
-    {
-        for (size_t i = 0; i < boxHist.size(); ++i){
-            if (!boxHist[i].empty() && static_cast<int>(boxHist[i][0].id) == trackId){
-                return static_cast<int>(i);
-            }
-        }
-        return -1;
-    }
-
-    onboardDetector::clusterGeometry dynamicDetector::computeClusterGeometry(const std::vector<Eigen::Vector3d>& cluster){
-        onboardDetector::clusterGeometry geom;
-        geom.numPoints = static_cast<double>(cluster.size());
-        geom.sizeX = 0.0;
-        geom.sizeY = 0.0;
-        geom.sizeZ = 0.0;
-        geom.varX = 0.0;
-        geom.varY = 0.0;
-        geom.varZ = 0.0;
-
-        if (cluster.empty()){
-            return geom;
-        }
-
-        double minX = cluster[0](0);
-        double maxX = cluster[0](0);
-        double minY = cluster[0](1);
-        double maxY = cluster[0](1);
-        double minZ = cluster[0](2);
-        double maxZ = cluster[0](2);
-
-        double meanX = 0.0;
-        double meanY = 0.0;
-        double meanZ = 0.0;
-
-        for (size_t i = 0; i < cluster.size(); ++i){
-            double x = cluster[i](0);
-            double y = cluster[i](1);
-            double z = cluster[i](2);
-
-            minX = std::min(minX, x);
-            maxX = std::max(maxX, x);
-            minY = std::min(minY, y);
-            maxY = std::max(maxY, y);
-            minZ = std::min(minZ, z);
-            maxZ = std::max(maxZ, z);
-
-            meanX += x;
-            meanY += y;
-            meanZ += z;
-        }
-
-        meanX /= static_cast<double>(cluster.size());
-        meanY /= static_cast<double>(cluster.size());
-        meanZ /= static_cast<double>(cluster.size());
-
-        double varX = 0.0;
-        double varY = 0.0;
-        double varZ = 0.0;
-
-        for (size_t i = 0; i < cluster.size(); ++i){
-            double dx = cluster[i](0) - meanX;
-            double dy = cluster[i](1) - meanY;
-            double dz = cluster[i](2) - meanZ;
-
-            varX += dx * dx;
-            varY += dy * dy;
-            varZ += dz * dz;
-        }
-
-        varX /= static_cast<double>(cluster.size());
-        varY /= static_cast<double>(cluster.size());
-        varZ /= static_cast<double>(cluster.size());
-
-        geom.sizeX = maxX - minX;
-        geom.sizeY = maxY - minY;
-        geom.sizeZ = maxZ - minZ;
-        geom.varX = varX;
-        geom.varY = varY;
-        geom.varZ = varZ;
-
-        return geom;
-    }
-
-    double dynamicDetector::computeClusterGeometrySimilarity(const onboardDetector::clusterGeometry& geomA,
-                                                            const onboardDetector::clusterGeometry& geomB)
-    {
-        double eps = 1e-6;
-
-        double numPointsDiff = std::abs(geomA.numPoints - geomB.numPoints) / std::max(std::max(geomA.numPoints, geomB.numPoints), 1.0);
-        double sizeXDiff = std::abs(geomA.sizeX - geomB.sizeX) / std::max(std::max(geomA.sizeX, geomB.sizeX), eps);
-        double sizeYDiff = std::abs(geomA.sizeY - geomB.sizeY) / std::max(std::max(geomA.sizeY, geomB.sizeY), eps);
-        double sizeZDiff = std::abs(geomA.sizeZ - geomB.sizeZ) / std::max(std::max(geomA.sizeZ, geomB.sizeZ), eps);
-
-        double varXDiff = std::abs(geomA.varX - geomB.varX) / std::max(std::max(geomA.varX, geomB.varX), eps);
-        double varYDiff = std::abs(geomA.varY - geomB.varY) / std::max(std::max(geomA.varY, geomB.varY), eps);
-        double varZDiff = std::abs(geomA.varZ - geomB.varZ) / std::max(std::max(geomA.varZ, geomB.varZ), eps);
-
-        double avgDiff =
-            (1.0 * numPointsDiff +
-            1.0 * sizeXDiff +
-            1.0 * sizeYDiff +
-            1.0 * sizeZDiff +
-            0.5 * varXDiff +
-            0.5 * varYDiff +
-            0.5 * varZDiff) / 5.5;
-
-        double similarity = 1.0 - avgDiff;
-
-        if (similarity < 0.0){
-            similarity = 0.0;
-        }
-        if (similarity > 1.0){
-            similarity = 1.0;
-        }
-
-        return similarity;
-    }
-
     double dynamicDetector::computeRelativeSizeDiff(const onboardDetector::box3D& a,
                                                     const onboardDetector::box3D& b) const
     {
@@ -5428,38 +5156,6 @@ namespace onboardDetector{
         }
 
         return false;
-    }
-
-    void dynamicDetector::logMatchCandidate(int currIdx,
-                                            int prevIdx,
-                                            int trackId,
-                                            double posDist,
-                                            double pcDist,
-                                            double velDiff,
-                                            double sizeDiff,
-                                            double featScore,
-                                            double clusterGeomSim,
-                                            double score,
-                                            const std::string& status) const
-    {
-        if (!this->enableTrackingDebugLogs_){
-            return;
-        }
-
-        RCLCPP_DEBUG(
-            this->nh_->get_logger(),
-            "[TRACK_%s] curr=%d prev=%d track_id=%d posDist=%.3f pcDist=%.3f velDiff=%.3f sizeDiff=%.3f featScore=%.3f shapeSim=%.3f score=%.3f",
-            status.c_str(),
-            currIdx,
-            prevIdx,
-            trackId,
-            posDist,
-            pcDist,
-            velDiff,
-            sizeDiff,
-            featScore,
-            clusterGeomSim,
-            score);
     }
 
     double dynamicDetector::clampPositive(double value, double minValue) const
@@ -5542,6 +5238,14 @@ namespace onboardDetector{
         if (foundTrackIdx){
             if (!this->passesVelocityDirectionGate(matchedTrackIdx, currentBox, alreadyConfirmed)){
                 rejectReason = alreadyConfirmed ? "REJECT_VELDIR_TRACKED" : "REJECT_VELDIR_CONFIRM";
+                return -1e9;
+            }
+
+            // Natural motion gate: checks innovation + direction + distance range.
+            // YOLO tracks are exempt (they may stop/start or be briefly occluded).
+            if (!currentBox.is_yolo_candidate &&
+                !this->isNaturalMotion(matchedTrackIdx, currentBox)){
+                rejectReason = "REJECT_NATURAL_MOTION";
                 return -1e9;
             }
 
@@ -5802,40 +5506,52 @@ namespace onboardDetector{
 
 
     void dynamicDetector::publishHistoryTraj(){
+        // Build a set of track IDs currently in the output (trackedBBoxes_).
+        // Only draw trajectories for active tracks — not for lost/unmatched tracks
+        // that are still alive internally but have no current detection.
+        std::unordered_set<int> activeIds;
+        for (const auto& tb : this->trackedBBoxes_){
+            activeIds.insert(static_cast<int>(tb.id));
+        }
+
         visualization_msgs::msg::MarkerArray trajMsg;
         int countMarker = 0;
         for (size_t i=0; i<this->boxHist_.size(); ++i){
-            if (this->boxHist_[i].size() > 1){
-                visualization_msgs::msg::Marker traj;
-                traj.header.frame_id = "map";
-                traj.header.stamp = this->nh_->now();
-                traj.ns = "dynamic_detector";
-                traj.id = countMarker;
-                traj.type = visualization_msgs::msg::Marker::LINE_LIST;
-                traj.scale.x = 0.03;
-                traj.scale.y = 0.03;
-                traj.scale.z = 0.03;
-                traj.color.a = 1.0; // Don't forget to set the alpha!
-                traj.color.r = 0.0;
-                traj.color.g = 1.0;
-                traj.color.b = 0.0;
-                traj.pose.orientation.w = 1.0;
-                traj.pose.orientation.x = 0.0;
-                traj.pose.orientation.y = 0.0;
-                traj.pose.orientation.z = 0.0;
-                for (size_t j=0; j<this->boxHist_[i].size()-1; ++j){
-                    geometry_msgs::msg::Point p1, p2;
-                    onboardDetector::box3D box1 = this->boxHist_[i][j];
-                    onboardDetector::box3D box2 = this->boxHist_[i][j+1];
-                    p1.x = box1.x; p1.y = box1.y; p1.z = box1.z;
-                    p2.x = box2.x; p2.y = box2.y; p2.z = box2.z;
-                    traj.points.push_back(p1);
-                    traj.points.push_back(p2);
-                }
+            if (this->boxHist_[i].size() <= 1) continue;
 
-                ++countMarker;
-                trajMsg.markers.push_back(traj);
+            // Skip tracks not currently in the output
+            const int trackId = static_cast<int>(this->boxHist_[i][0].id);
+            if (activeIds.find(trackId) == activeIds.end()) continue;
+
+            visualization_msgs::msg::Marker traj;
+            traj.header.frame_id = "map";
+            traj.header.stamp = this->nh_->now();
+            traj.ns = "dynamic_detector";
+            traj.id = countMarker;
+            traj.type = visualization_msgs::msg::Marker::LINE_LIST;
+            traj.scale.x = 0.03;
+            traj.scale.y = 0.03;
+            traj.scale.z = 0.03;
+            traj.color.a = 1.0;
+            traj.color.r = 0.0;
+            traj.color.g = 1.0;
+            traj.color.b = 0.0;
+            traj.pose.orientation.w = 1.0;
+            traj.pose.orientation.x = 0.0;
+            traj.pose.orientation.y = 0.0;
+            traj.pose.orientation.z = 0.0;
+            for (size_t j=0; j<this->boxHist_[i].size()-1; ++j){
+                geometry_msgs::msg::Point p1, p2;
+                onboardDetector::box3D box1 = this->boxHist_[i][j];
+                onboardDetector::box3D box2 = this->boxHist_[i][j+1];
+                p1.x = box1.x; p1.y = box1.y; p1.z = box1.z;
+                p2.x = box2.x; p2.y = box2.y; p2.z = box2.z;
+                traj.points.push_back(p1);
+                traj.points.push_back(p2);
             }
+
+            ++countMarker;
+            trajMsg.markers.push_back(traj);
         }
         this->historyTrajPub_->publish(trajMsg);
     }

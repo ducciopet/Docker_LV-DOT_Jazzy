@@ -36,6 +36,7 @@
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <random>
 #include <mutex>
+#include <unordered_set>
 
 namespace onboardDetector{
 
@@ -196,15 +197,8 @@ namespace onboardDetector{
         double maxMatchSizeRange_;
         Eigen::VectorXd featureWeights_;
         int histSize_;
-        int fixSizeHistThresh_;
-        double fixSizeDimThresh_;
-        double eP_; // kalman filter initial uncertainty matrix
-        double eQPos_; // motion model uncertainty matrix for position
-        double eQVel_; // motion model uncertainty matrix for velocity
-        double eQAcc_; // motion model uncertainty matrix for acceleration
-        double eRPos_; // observation uncertainty matrix for position
-        double eRVel_; // observation uncertainty matrix for velocity
-        double eRAcc_; // observation uncertainty matrix for acceleration
+        // eP_, eQPos_, eQVel_, eQAcc_, eRPos_, eRVel_, eRAcc_ — KF V1 params, kept for reference inside commented-out functions
+        double eP_; double eQPos_; double eQVel_; double eQAcc_; double eRPos_; double eRVel_; double eRAcc_;
         int kfAvgFrames_;
 
         // Kalman Filter V2 parameters (position-only observation)
@@ -214,16 +208,15 @@ namespace onboardDetector{
         double eQAcc_v2_;
         double eRPos_v2_;
 
-        // Coasting: confirmed tracks survive short miss gaps in output
-        int coastingMaxMissedFrames_;
+        // (coastingMaxMissedFrames_ removed: predicted bboxes are never put in output)
 
         std::vector<int> missedFrames_;
         int maxMissedFrames_;
+        int maxMissedFramesYolo_;    // extended lifetime for YOLO-confirmed tracks
         std::vector<int> hitStreak_;
         std::vector<int> trackAge_;
         std::vector<bool> confirmedTracks_;
         std::vector<int> staticStreak_;  // consecutive frames a confirmed track has been stationary
-        int maxStaticFrames_;            // de-confirm after this many consecutive static frames
 
         double minMatchScore_;
 
@@ -235,30 +228,14 @@ namespace onboardDetector{
         double matchVelocityDirectionScoreWeight_;
         double matchYoloClassConsistencyWeight_; // penalty when yolo track matches non-yolo detection
 
-        double newTrackMinDist_;
-        double newTrackMinPcDist_;
-        double maxMatchVelDiff_;
+        double duplicateTrackDistThresh_;
+        double duplicateTrackIou2DThresh_;
+        double duplicateSizeRelThresh_;
 
-        double duplicateTrackDistThresh_;      // [m] distanza XY per considerare una detection duplicata di un track esistente
-        double duplicateTrackIou2DThresh_;    // overlap XY minimo per considerare duplicato
-        double duplicateSizeRelThresh_;        // tolleranza relativa sulle dimensioni per controllo duplicato
+        bool enableTrackingDebugLogs_;
 
-        double shapeScoreWeight_;             // peso molto basso della forma cluster nel matching
-        bool enableTrackingDebugLogs_; 
-        
         double matchPrevObsPosScoreWeight_;
         double matchPrevObsIou2DScoreWeight_;
-
-        // Association robustness params
-        double staticAssocSpeedThresh_;
-        double staticAssocDistThresh_;
-        double dynamicAssocDistBase_;
-        double dynamicAssocDistGain_;
-        double dynamicAssocDistMax_;
-        double staticAssocMinIoU2D_;
-        double assocMaxRelSizeDiff_;
-        double matchFeatScoreWeight_;
-        double matchIoU2DWeight_;
 
         // YOLO Dynamic Classification
         std::vector<std::string> yoloDynamicClasses_;
@@ -402,86 +379,36 @@ namespace onboardDetector{
         void BboxesMerger(const std::vector<onboardDetector::box3D>& group1BBoxes_, const std::vector<onboardDetector::box3D>& group2BBoxes_, const std::vector<std::vector<Eigen::Vector3d>>& group1pcClusters_, const std::vector<Eigen::Vector3d>& group1pcClusterCenters_, const std::vector<Eigen::Vector3d>& group1pcClusterStds_, const std::vector<std::vector<Eigen::Vector3d>>& group2pcClusters_, const std::vector<Eigen::Vector3d>& group2pcClusterCenters_, const std::vector<Eigen::Vector3d>& group2pcClusterStds_, std::vector<onboardDetector::box3D>& BBoxesTemp, std::vector<std::vector<Eigen::Vector3d>>& PcClustersTemp, std::vector<Eigen::Vector3d>& PcClusterCentersTemp, std::vector<Eigen::Vector3d>& PcClusterStdsTemp, std::string merging_style, bool flag_group1, bool flag_group2, double boxIOUThresh_, double boxIOVThresh_, bool leaf_only = false);
         void mergeNestedGroup(const std::vector<onboardDetector::box3D>& inBoxes, const std::vector<std::vector<Eigen::Vector3d>>& inClusters, const std::vector<Eigen::Vector3d>& inCenters, const std::vector<Eigen::Vector3d>& inStds,     std::vector<onboardDetector::box3D>& outBoxes, std::vector<std::vector<Eigen::Vector3d>>& outClusters, std::vector<Eigen::Vector3d>& outCenters, std::vector<Eigen::Vector3d>& outStds);
         void mergeBoxesSet(const std::vector<onboardDetector::box3D>& boxes, const std::vector<std::vector<Eigen::Vector3d>>& clusters, const std::vector<int>& indices, onboardDetector::box3D& outBox, std::vector<Eigen::Vector3d>& outCluster, Eigen::Vector3d& center, Eigen::Vector3d& stddev);
-        void genFeatHelper(const std::vector<onboardDetector::box3D>& boxes, const std::vector<Eigen::Vector3d>& pcCenters, std::vector<Eigen::VectorXd>& feature);
         void getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters);
         void findBestMatch(const std::vector<onboardDetector::box3D>& predictedBBoxes, const std::vector<onboardDetector::box3D>& previousObservedBBoxes, std::vector<int>& bestMatch);
         void kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch);
-        void kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
-        void kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
+        // KF V1 — definitions commented out in .cpp, kept for reference
+        // void kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
+        // void kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
+        // void getKalmanObservationPos(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z);
+        // void getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
+        // void getKalmanObservationAcc(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
         void kalmanFilterMatrixAccV2(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
-        void getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
-        void getKalmanObservationAcc(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
         void getKalmanObservationAccV2(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z);
         double computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB) const;
         void getPredictedBBoxesFromFilters(std::vector<onboardDetector::box3D>& propedBBoxes, std::vector<Eigen::Vector3d>& propedPcCenters);
         bool isCloseToExistingTrack(const onboardDetector::box3D& currDetectedBBox, const Eigen::Vector3d& currPcCenter, const std::vector<bool>& prevMatched);
-        void getKalmanObservationPos(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z);
-        onboardDetector::clusterGeometry computeClusterGeometry(const std::vector<Eigen::Vector3d>& cluster);
-        double computeClusterGeometrySimilarity(const onboardDetector::clusterGeometry& geomA, const onboardDetector::clusterGeometry& geomB);
         double computeRelativeSizeDiff(const onboardDetector::box3D& a, const onboardDetector::box3D& b) const;
         bool areBoxesDuplicate2D(const onboardDetector::box3D& a, const onboardDetector::box3D& b) const;
         bool isDuplicateOfTrackedThisFrame(const onboardDetector::box3D& currDetectedBBox, const std::vector<onboardDetector::box3D>& trackedBBoxesTemp, int& duplicateTrackId) const;
-        void logMatchCandidate(int currIdx, int prevIdx, int trackId, double posDist, double pcDist, double velDiff, double sizeDiff, double featScore, double clusterGeomSim, double score, const std::string& status) const;
-        bool isDetectionDuplicateOfPrediction(const onboardDetector::box3D& currDetectedBBox,
-                                      const onboardDetector::box3D& predictedBox,
-                                      double& centerDist,
-                                      double& iou2d,
-                                      double& relSizeDiff) const;
-
-        double computeAssociationScore(const onboardDetector::box3D& predictedBox,
-                               const onboardDetector::box3D& previousObservedBox,
-                               const onboardDetector::box3D& currentBox,
-                               double dt,
-                               double& predPosDist,
-                               double& requiredSpeed,
-                               double& relSizeDiff,
-                               double& predIou2d,
-                               double& prevObsPosDist,
-                               double& prevObsIou2d,
-                               std::string& rejectReason) const;
-
+        bool isDetectionDuplicateOfPrediction(const onboardDetector::box3D& currDetectedBBox, const onboardDetector::box3D& predictedBox, double& centerDist, double& iou2d, double& relSizeDiff) const;
+        double computeAssociationScore(const onboardDetector::box3D& predictedBox, const onboardDetector::box3D& previousObservedBox, const onboardDetector::box3D& currentBox, double dt, double& predPosDist, double& requiredSpeed, double& relSizeDiff, double& predIou2d, double& prevObsPosDist, double& prevObsIou2d, std::string& rejectReason) const;
         double clampPositive(double value, double minValue) const;
-        int findTrackHistoryIndexById(const std::vector<std::deque<onboardDetector::box3D>>& boxHist,
-                              int trackId) const;
         void getPreviousObservedBBoxes(std::vector<onboardDetector::box3D>& previousObservedBBoxes) const;
-        bool tryAugmentDetectionMatch(int detIdx,
-                              const std::vector<std::vector<int>>& candidatePrevIdxByCurr,
-                              std::vector<int>& assignedPrevToCurr,
-                              std::vector<int>& assignedCurrToPrev,
-                              std::vector<int>& visitTokenByPrev,
-                              int visitToken) const;
-
-        void assignMatchesGlobally(const std::vector<onboardDetector::matchCandidate>& candidates,
-                                int numCurr,
-                                int numPrev,
-                                std::vector<int>& bestMatch) const;
-
-        double computeBoxIoU2DFromCorners(int tlXA, int tlYA, int brXA, int brYA,
-                                  int tlXB, int tlYB, int brXB, int brYB) const;
-
-
-        
-        bool isNaturalMotion(int trackIdx,
-                             const onboardDetector::box3D& currDetectedBBox) const;
-
-        bool shouldConfirmTrack(int trackIdx,
-                                const onboardDetector::box3D& currDetectedBBox,
-                                int newHitStreak) const;
-
-        double computeVelocityDirectionError(int trackIdx,
-                                     const onboardDetector::box3D& currDetectedBBox) const;
-
-        bool passesVelocityDirectionGate(int trackIdx,
-                                        const onboardDetector::box3D& currDetectedBBox,
-                                        bool alreadyConfirmed) const;
-
+        bool tryAugmentDetectionMatch(int detIdx, const std::vector<std::vector<int>>& candidatePrevIdxByCurr, std::vector<int>& assignedPrevToCurr, std::vector<int>& assignedCurrToPrev, std::vector<int>& visitTokenByPrev, int visitToken) const;
+        void assignMatchesGlobally(const std::vector<onboardDetector::matchCandidate>& candidates, int numCurr, int numPrev, std::vector<int>& bestMatch) const;
+        bool isNaturalMotion(int trackIdx, const onboardDetector::box3D& currDetectedBBox) const;
+        bool shouldConfirmTrack(int trackIdx, const onboardDetector::box3D& currDetectedBBox, int newHitStreak) const;
+        double computeVelocityDirectionError(int trackIdx, const onboardDetector::box3D& currDetectedBBox) const;
+        bool passesVelocityDirectionGate(int trackIdx, const onboardDetector::box3D& currDetectedBBox, bool alreadyConfirmed) const;
         bool isTrackConfirmedByIdx(int trackIdx) const;
-
-        double getAdaptiveMaxInnovation(int trackIdx,
-                                        const onboardDetector::box3D& currDetectedBBox) const;
-
-        double getAdaptiveMinMatchScore(int trackIdx,
-                                        const onboardDetector::box3D& currentBox) const;
+        double getAdaptiveMaxInnovation(int trackIdx, const onboardDetector::box3D& currDetectedBBox) const;
+        double getAdaptiveMinMatchScore(int trackIdx, const onboardDetector::box3D& currentBox) const;
 
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);
@@ -496,14 +423,11 @@ namespace onboardDetector{
         void publishRawDynamicPoints();
 
         // helper function
-        void transformBBox(const Eigen::Vector3d& center, const Eigen::Vector3d& size, const Eigen::Vector3d& position, const Eigen::Matrix3d& orientation,
-                                  Eigen::Vector3d& newCenter, Eigen::Vector3d& newSize);
+        void transformBBox(const Eigen::Vector3d& center, const Eigen::Vector3d& size, const Eigen::Vector3d& position, const Eigen::Matrix3d& orientation, Eigen::Vector3d& newCenter, Eigen::Vector3d& newSize);
 
         // user functions
         void getDynamicObstacles(std::vector<onboardDetector::box3D>& incomeDynamicBBoxes, const Eigen::Vector3d &robotSize = Eigen::Vector3d(0.0,0.0,0.0));
-        void getDynamicObstaclesHist(std::vector<std::vector<Eigen::Vector3d>>& posHist, 
-									 std::vector<std::vector<Eigen::Vector3d>>& velHist, 
-									 std::vector<std::vector<Eigen::Vector3d>>& sizeHist, const Eigen::Vector3d &robotSize = Eigen::Vector3d(0.0,0.0,0.0));
+        void getDynamicObstaclesHist(std::vector<std::vector<Eigen::Vector3d>>& posHist, std::vector<std::vector<Eigen::Vector3d>>& velHist, std::vector<std::vector<Eigen::Vector3d>>& sizeHist, const Eigen::Vector3d &robotSize = Eigen::Vector3d(0.0,0.0,0.0));
 
         // inline helper functions
         bool isInFilterRange(const Eigen::Vector3d& pos);
