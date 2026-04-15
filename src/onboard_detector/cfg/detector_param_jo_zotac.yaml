@@ -254,8 +254,6 @@ detector_node:
       max_natural_innovation: 0.60         # [m] max Kalman innovation for an unconfirmed track
       max_natural_innovation_confirmed: 1.00  # [m] same, for confirmed tracks
       max_natural_innovation_dynamic: 1.20    # [m] same, for dynamic tracks
-      min_direction_consistency_cos: 0.0    # cos(angle) threshold: consecutive velocity vectors must not be too anti-parallel
-      min_velocity_for_direction_check: 0.10  # [m/s] direction check only applied above this speed
       max_velocity_direction_error_confirm: 1.20   # [rad] max heading error for confirming a track
       max_velocity_direction_error_tracked: 2.50   # [rad] max heading error for a tracked (non-dynamic) track
       max_velocity_direction_error_confirm_dynamic: 2.20  # [rad] same, for confirming a dynamic track

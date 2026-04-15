@@ -248,8 +248,6 @@ namespace onboardDetector{
         double minNaturalMotionDist_;
         double maxNaturalMotionDist_;
         double maxNaturalInnovation_;
-        double minDirectionConsistencyCos_;
-        double minVelocityForDirectionCheck_;
         double maxVelocityDirectionErrorConfirm_;
         double maxVelocityDirectionErrorTracked_;
         double stationarySpeedThresh_;
@@ -405,7 +403,7 @@ namespace onboardDetector{
         bool isNaturalMotion(int trackIdx, const onboardDetector::box3D& currDetectedBBox) const;
         bool shouldConfirmTrack(int trackIdx, const onboardDetector::box3D& currDetectedBBox, int newHitStreak) const;
         double computeVelocityDirectionError(int trackIdx, const onboardDetector::box3D& currDetectedBBox) const;
-        bool passesVelocityDirectionGate(int trackIdx, const onboardDetector::box3D& currDetectedBBox, bool alreadyConfirmed) const;
+        bool passesVelocityDirectionGate(int trackIdx, const onboardDetector::box3D& currDetectedBBox, bool alreadyConfirmed, bool yoloExempt = false) const;
         bool isTrackConfirmedByIdx(int trackIdx) const;
         double getAdaptiveMaxInnovation(int trackIdx, const onboardDetector::box3D& currDetectedBBox) const;
         double getAdaptiveMinMatchScore(int trackIdx, const onboardDetector::box3D& currentBox) const;
@@ -431,6 +429,7 @@ namespace onboardDetector{
 
         // inline helper functions
         bool isInFilterRange(const Eigen::Vector3d& pos);
+        bool isInCameraFOV(const Eigen::Vector3d& worldPoint) const;
         bool isInsideAnyWall(const Eigen::Vector3d& pos) const;
         void posToIndex(const Eigen::Vector3d& pos, Eigen::Vector3i& idx, double res);
         int indexToAddress(const Eigen::Vector3i& idx, double res);
@@ -456,6 +455,17 @@ namespace onboardDetector{
         else{
             return false;
         }        
+    }
+
+    inline bool dynamicDetector::isInCameraFOV(const Eigen::Vector3d& worldPoint) const {
+        // Transform world point into the depth camera frame
+        Eigen::Vector3d ptCam = orientationDepth_.transpose() * (worldPoint - positionDepth_);
+        // ptCam.z() is depth along the camera optical axis
+        if (ptCam.z() < depthMinValue_ || ptCam.z() > depthMaxValue_) return false;
+        // Project onto image plane and check pixel bounds
+        double u = fx_ * ptCam.x() / ptCam.z() + cx_;
+        double v = fy_ * ptCam.y() / ptCam.z() + cy_;
+        return (u >= 0.0 && u < imgCols_ && v >= 0.0 && v < imgRows_);
     }
 
     inline bool dynamicDetector::isInsideAnyWall(const Eigen::Vector3d& pos) const {

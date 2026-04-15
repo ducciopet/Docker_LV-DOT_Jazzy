@@ -1024,22 +1024,6 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Max natural innovation: " << this->maxNaturalInnovation_ << std::endl;
         }
 
-        if (!this->nh_->get_parameter(pname("min_direction_consistency_cos"), this->minDirectionConsistencyCos_)){
-            this->minDirectionConsistencyCos_ = -0.20;
-            std::cout << this->hint_ << ": No min_direction_consistency_cos. Use default: -0.20." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Min direction consistency cos: " << this->minDirectionConsistencyCos_ << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("min_velocity_for_direction_check"), this->minVelocityForDirectionCheck_)){
-            this->minVelocityForDirectionCheck_ = 0.10;
-            std::cout << this->hint_ << ": No min_velocity_for_direction_check. Use default: 0.10." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": Min velocity for direction check: " << this->minVelocityForDirectionCheck_ << std::endl;
-        }
-
         if (!this->nh_->get_parameter(pname("max_velocity_direction_error_confirm"), this->maxVelocityDirectionErrorConfirm_)){
             this->maxVelocityDirectionErrorConfirm_ = 1.20;
             std::cout << this->hint_ << ": No max_velocity_direction_error_confirm. Use default: 1.20." << std::endl;
@@ -3933,20 +3917,13 @@ namespace onboardDetector{
         }
 
         const onboardDetector::box3D& prevBBox = this->boxHist_[trackIdx].front();
-        const double dt = this->clampPositive(this->dt_, 1e-3);
 
         const double dx = currDetectedBBox.x - prevBBox.x;
         const double dy = currDetectedBBox.y - prevBBox.y;
         const double obsDist = std::sqrt(dx * dx + dy * dy);
 
-        // Stationary bypass: if both observed and predicted velocities are near-zero,
-        // the object is consistently stationary — that IS natural motion for a static object.
-        const double prevSpeed = std::sqrt(prevBBox.Vx * prevBBox.Vx + prevBBox.Vy * prevBBox.Vy);
-        const double obsSpeed = std::sqrt(dx * dx + dy * dy) / dt;
-        if (obsSpeed < this->stationarySpeedThresh_ && prevSpeed < this->stationarySpeedThresh_){
-            return true;
-        }
-
+        // Reject stationary non-YOLO objects: they should not accumulate tracking hits.
+        // (YOLO and confirmed tracks already skip isNaturalMotion entirely.)
         if (obsDist < this->minNaturalMotionDist_){
             return false;
         }
@@ -3970,32 +3947,8 @@ namespace onboardDetector{
             return false;
         }
 
-        const double obsVx = dx / dt;
-        const double obsVy = dy / dt;
-        const double obsSpeedDir = std::sqrt(obsVx * obsVx + obsVy * obsVy);
-
-        const double prevSpeedDir = std::sqrt(prevBBox.Vx * prevBBox.Vx + prevBBox.Vy * prevBBox.Vy);
-
-        if (obsSpeedDir > this->minVelocityForDirectionCheck_ &&
-            prevSpeedDir > this->minVelocityForDirectionCheck_)
-        {
-            const double dot = obsVx * prevBBox.Vx + obsVy * prevBBox.Vy;
-            const double denom = std::max(obsSpeedDir * prevSpeedDir, 1e-6);
-            const double cosSim = dot / denom;
-
-            // più tolleranza per YOLO objects (persons, vehicles)
-            double minCos = this->minDirectionConsistencyCos_;
-            if (currDetectedBBox.is_yolo_candidate){
-                minCos = std::min(-0.60, this->minDirectionConsistencyCos_);
-            }
-            else if (this->isTrackConfirmedByIdx(trackIdx)){
-                minCos = std::min(-0.40, this->minDirectionConsistencyCos_);
-            }
-
-            if (cosSim < minCos){
-                return false;
-            }
-        }
+        // Direction check is NOT done here — passesVelocityDirectionGate() is the
+        // sole hard gate for velocity direction, avoiding redundant checks.
 
         return true;
     }
@@ -4057,7 +4010,8 @@ namespace onboardDetector{
 
     bool dynamicDetector::passesVelocityDirectionGate(int trackIdx,
                                                     const onboardDetector::box3D& currDetectedBBox,
-                                                    bool alreadyConfirmed) const
+                                                    bool alreadyConfirmed,
+                                                    bool yoloExempt) const
     {
         if (trackIdx < 0 || trackIdx >= static_cast<int>(this->boxHist_.size())){
             return false;
@@ -4081,7 +4035,7 @@ namespace onboardDetector{
         const double predVy = predictedFilter.output(3);
         const double predSpeed = std::sqrt(predVx * predVx + predVy * predVy);
 
-        // Track già confermata e quasi ferma -> passa sempre
+        // Confirmed track and nearly stationary → always pass
         if (alreadyConfirmed &&
             obsSpeed < this->stationarySpeedThresh_ &&
             predSpeed < this->stationarySpeedThresh_)
@@ -4091,20 +4045,21 @@ namespace onboardDetector{
 
         const double err = this->computeVelocityDirectionError(trackIdx, currDetectedBBox);
 
-        // YOLO objects (persons, vehicles): more permissive direction gate
-        if (currDetectedBBox.is_yolo_candidate){
+        // YOLO-exempt: current detection is YOLO OR track has YOLO history.
+        // Use the most permissive thresholds (person may change direction freely).
+        if (yoloExempt){
             if (alreadyConfirmed){
                 return err <= this->maxVelocityDirectionErrorTrackedDynamic_;
             }
             return err <= this->maxVelocityDirectionErrorConfirmDynamic_;
         }
 
-        // track già buona: permissiva
+        // Confirmed non-YOLO track: permissive
         if (alreadyConfirmed){
             return err <= this->maxVelocityDirectionErrorTracked_;
         }
 
-        // nuove/non confermate: severa
+        // Unconfirmed: strict
         return err <= this->maxVelocityDirectionErrorConfirm_;
     }
 
@@ -4148,12 +4103,7 @@ namespace onboardDetector{
                                             const onboardDetector::box3D& currDetectedBBox,
                                             int newHitStreak) const
     {
-        // Minimum consecutive hits required before any confirmation.
-        if (newHitStreak < this->minConfirmHits_){
-            return false;
-        }
-
-        // YOLO-certified objects: confirm regardless of speed, even when stationary.
+        // YOLO-certified objects: confirm immediately, no minConfirmHits required.
         // Two sources are checked:
         //   1. Current frame: YOLO is actively seeing the object right now.
         //   2. Track history (sticky): boxHist_[0].is_yolo_candidate propagates forward
@@ -4169,6 +4119,11 @@ namespace onboardDetector{
                                      this->boxHist_[trackIdx][0].is_yolo_candidate);
         if (currDetectedBBox.is_yolo_candidate || historyHasYolo){
             return true;
+        }
+
+        // Non-YOLO detections: require minimum consecutive hits.
+        if (newHitStreak < this->minConfirmHits_){
+            return false;
         }
 
         // NOTE: is_dynamic is intentionally NOT checked here.
@@ -4198,12 +4153,8 @@ namespace onboardDetector{
 
         // Outside camera FOV: require Kalman velocity to be consistently above threshold
         // across history to filter out LiDAR jitter that produces apparent single-frame motion.
-        const double dx_cam = currDetectedBBox.x - this->positionDepth_(0);
-        const double dy_cam = currDetectedBBox.y - this->positionDepth_(1);
-        const double dz_cam = currDetectedBBox.z - this->positionDepth_(2);
-        const double distToCamera = std::sqrt(dx_cam*dx_cam + dy_cam*dy_cam + dz_cam*dz_cam);
-
-        if (distToCamera > this->depthMaxValue_){
+        const Eigen::Vector3d bboxPos(currDetectedBBox.x, currDetectedBBox.y, currDetectedBBox.z);
+        if (!this->isInCameraFOV(bboxPos)){
             const int nSamples = static_cast<int>(this->boxHist_[trackIdx].size());
             if (nSamples < 2){
                 return false; // not enough history to assess consistency outside FOV
@@ -4743,8 +4694,16 @@ namespace onboardDetector{
             trackAgeTemp.push_back(1);
             staticStreakTemp.push_back(0); // new track, no static history
 
-            // Always start tentative: minConfirmHits_ hits required before output.
-            confirmedTracksTemp.push_back(false);
+            // YOLO detections are confirmed immediately on their first frame.
+            // Non-YOLO detections start tentative and need minConfirmHits_ to confirm.
+            const bool immediateConfirm = currDetectedBBox.is_yolo_candidate;
+            confirmedTracksTemp.push_back(immediateConfirm);
+
+            if (immediateConfirm){
+                onboardDetector::box3D outputBBox = currDetectedBBox;
+                outputBBox.id = newEstimatedBBox.id;
+                trackedBBoxesTemp.push_back(outputBBox);
+            }
 
             if (this->enableTrackingDebugLogs_){
                 RCLCPP_INFO(
@@ -4755,7 +4714,7 @@ namespace onboardDetector{
                     newEstimatedBBox.x,
                     newEstimatedBBox.y,
                     newEstimatedBBox.z,
-                    0);
+                    immediateConfirm ? 1 : 0);
             }
         }
 
@@ -5236,14 +5195,22 @@ namespace onboardDetector{
         }
 
         if (foundTrackIdx){
-            if (!this->passesVelocityDirectionGate(matchedTrackIdx, currentBox, alreadyConfirmed)){
+            // Check if the track itself has YOLO history (sticky flag)
+            const bool trackHasYolo = (matchedTrackIdx >= 0 &&
+                                       matchedTrackIdx < static_cast<int>(this->boxHist_.size()) &&
+                                       !this->boxHist_[matchedTrackIdx].empty() &&
+                                       this->boxHist_[matchedTrackIdx][0].is_yolo_candidate);
+            const bool yoloExempt = currentBox.is_yolo_candidate || trackHasYolo;
+
+            if (!this->passesVelocityDirectionGate(matchedTrackIdx, currentBox, alreadyConfirmed, yoloExempt)){
                 rejectReason = alreadyConfirmed ? "REJECT_VELDIR_TRACKED" : "REJECT_VELDIR_CONFIRM";
                 return -1e9;
             }
 
             // Natural motion gate: checks innovation + direction + distance range.
-            // YOLO tracks are exempt (they may stop/start or be briefly occluded).
-            if (!currentBox.is_yolo_candidate &&
+            // YOLO tracks (current detection or track history) are exempt.
+            // Confirmed tracks are also exempt — they have proven themselves already.
+            if (!yoloExempt && !alreadyConfirmed &&
                 !this->isNaturalMotion(matchedTrackIdx, currentBox)){
                 rejectReason = "REJECT_NATURAL_MOTION";
                 return -1e9;
@@ -5262,11 +5229,8 @@ namespace onboardDetector{
         double yoloClassConsistencyPenalty = 0.0;
         if (foundTrackIdx && predictedBox.is_yolo_candidate){
             if (!currentBox.is_yolo_candidate){
-                const double dx_cam = predictedBox.x - this->positionDepth_(0);
-                const double dy_cam = predictedBox.y - this->positionDepth_(1);
-                const double dz_cam = predictedBox.z - this->positionDepth_(2);
-                const double distToCamera = std::sqrt(dx_cam*dx_cam + dy_cam*dy_cam + dz_cam*dz_cam);
-                if (distToCamera <= this->depthMaxValue_){
+                const Eigen::Vector3d predPos(predictedBox.x, predictedBox.y, predictedBox.z);
+                if (this->isInCameraFOV(predPos)){
                     yoloClassConsistencyPenalty = 1.0;
                 }
             }
