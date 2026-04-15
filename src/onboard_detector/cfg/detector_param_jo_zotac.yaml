@@ -98,14 +98,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # Detection Ranges
       # -----------------------------------------------------------------------
-      # local_sensor_range: axis-aligned box centred on the robot used to size the
-      #   voxel-filter grid for the DEPTH camera pipeline ONLY (UV + DBSCAN visual).
-      #   The actual detection range is hard-bounded by depth_max_value (4.5 m), so
-      #   XY values larger than depth_max_value waste memory. Set XY ≈ depth_max_value.
       local_sensor_range: [5.0, 5.0, 5.0]   # [m] ±X, ±Y, ±Z around robot — depth/visual pipeline only
-
-      # local_lidar_range: PassThrough filter applied to the raw LiDAR cloud before
-      #   DBSCAN clustering. This is the effective detection range for the LiDAR pipeline.
       local_lidar_range: [10.0, 10.0, 5.0]  # [m] ±X, ±Y, ±Z around robot — LiDAR pipeline only
 
       # -----------------------------------------------------------------------
@@ -146,7 +139,7 @@ detector_node:
       dbscan_refine_split_min_pts: 10      # min points required in each sub-cluster after a split
       dbscan_refine_split_eps: 0.07        # [m] DBSCAN epsilon used during the split pass
       dbscan_refine_min_subcluster_pts: 12 # sub-clusters smaller than this are discarded after splitting
-      dbscan_refine_axis_slice_width: 0.6 # [m] slice width along dominant axis when splitting
+      dbscan_refine_axis_slice_width: 0.6  # [m] slice width along dominant axis when splitting
       dbscan_refine_max_depth: 2           # maximum recursion depth for splitting
       dbscan_refine_recursive: true
       dbscan_refine_min_box_volume: 0.0001 # [m³] bounding boxes smaller than this are discarded
@@ -160,66 +153,51 @@ detector_node:
       # -----------------------------------------------------------------------
       # BBox Merging — Intra-group (same detection source)
       # -----------------------------------------------------------------------
-      # Applied inside mergeNestedGroup() before any cross-source merging.
       samegroupIOU_threshold: 0.4  # mutual IOU above this → merge as overlapping peers
       samegroupIOV_threshold: 0.5   # IOV (intersection / volume of smaller box) above this → merge as nested
 
       # -----------------------------------------------------------------------
       # BBox Merging — UV <-> DBSCAN (visual pipeline)
       # -----------------------------------------------------------------------
-      # UV bboxes come from the U-V disparity map; they have no associated point cloud.
-      # DBSCAN bboxes come from depth clustering and carry a depth point cloud cluster.
       visual_merging_flag: "smaller"             # "smaller": tight bbox containing both; "bigger": union; "none": skip
       visual_filtering_BBox_IOU_threshold: 0.6   # mutual IOU threshold for UV<->DBSCAN peer merge
-      visual_filtering_BBox_IOV_threshold: 0.7  # IOV threshold for UV<->DBSCAN nesting detection
+      visual_filtering_BBox_IOV_threshold: 0.7   # IOV threshold for UV<->DBSCAN nesting detection
       uv_unmerged_flag: false  # if true, UV bboxes with no DBSCAN match are kept in output
       db_unmerged_flag: true   # if true, DBSCAN bboxes with no UV match are kept in output
 
       # -----------------------------------------------------------------------
       # BBox Merging — Visual <-> LiDAR (final fusion)
       # -----------------------------------------------------------------------
-      lidar_visual_merging_flag: "smaller"             # same options as visual_merging_flag
-      lidar_visual_merger_leaf_only: false                # if true, "smaller" mode outputs only leaf bboxes (no conservative parent+child merge)
+      lidar_visual_merging_flag: "smaller"              # same options as visual_merging_flag
+      lidar_visual_merger_leaf_only: false               # if true, "smaller" mode outputs only leaf bboxes (no conservative parent+child merge)
       lidar_visual_filtering_BBox_IOU_threshold: 0.6    # mutual IOU threshold for visual<->LiDAR peer merge
-      lidar_visual_filtering_BBox_IOV_threshold: 0.7   # IOV threshold for visual<->LiDAR nesting detection
+      lidar_visual_filtering_BBox_IOV_threshold: 0.7    # IOV threshold for visual<->LiDAR nesting detection
       visual_unmerged_flag: false  # if true, visual bboxes with no LiDAR match are kept in output
-      lidar_unmerged_flag: true   # if true, LiDAR bboxes with no visual match are kept in output
+      lidar_unmerged_flag: true    # if true, LiDAR bboxes with no visual match are kept in output
 
       # -----------------------------------------------------------------------
       # BBox Merging — Final pass (pre-YOLO)
       # -----------------------------------------------------------------------
-      # Extra mergeNestedGroup pass applied to filteredBBoxes after the full visual+LiDAR
-      # fusion and before YOLO association. Collapses residual overlapping/nested duplicates
-      # that survived earlier merging stages. Uses the same samegroupIOU / samegroupIOV thresholds.
-      final_merge_flag: true  # set to true to enable the final merging pass
+      final_merge_flag: true  # extra mergeNestedGroup pass after full fusion and before YOLO association
 
       # -----------------------------------------------------------------------
       # Tracking & Data Association
       # -----------------------------------------------------------------------
       max_match_range: 2.0       # [m] max positional distance to match a detection to an existing track
       track_max_zmin_above_ground: 1.5  # [m] bboxes with zmin > groundHeight + this are not tracked
-      feature_weight: [3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0.05, 0.05, 0.01] # weights for feature vector [3×pos, 3×size, 3×pc_centroid]
       history_size: 100           # number of past frames stored per track (history[0] = current)
       # Kalman Filter V2 — position-only observation; velocity & acceleration estimated internally
       # Parameters: [eP, eQPos, eQVel, eQAcc, eRPos]
-      #   eP:    initial state covariance
-      #   eQPos: process noise on position
-      #   eQVel: process noise on velocity
-      #   eQAcc: process noise on acceleration
-      #   eRPos: measurement noise on position
       kalman_filter_v2_param: [0.25, 0.05, 0.15, 0.10, 0.02]
       # OLD Kalman V1 params (kept for reference, not used by active code):
       # kalman_filter_param:     [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
       # kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05]
       kalman_filter_averaging_frames: 3  # smooth velocity estimate over this many frames
       max_missed_frames: 5               # delete a track after this many consecutive missed detections
-      max_missed_frames_yolo: 10         # extended lifetime for YOLO-confirmed tracks (persons/vehicles)
-      max_non_yolo_in_fov_frames: 3      # consecutive non-YOLO frames inside FOV to clear sticky YOLO flag
 
       # -----------------------------------------------------------------------
       # Association Scoring Weights
       # -----------------------------------------------------------------------
-      # The final match score combines several terms; weights control their relative importance.
       min_match_score: -2.5             # detections with score below this are not matched to any track
       min_match_score_confirmed: -1.20  # stricter threshold for already-confirmed tracks
       min_match_score_dynamic: -1.50    # stricter threshold for dynamic tracks
@@ -229,8 +207,7 @@ detector_node:
       match_size_score_weight: 0.35           # weight on relative size difference term
       match_iou2d_score_weight: 0.15          # weight on 2D IOU term
       match_velocity_direction_score_weight: 0.12  # weight on velocity direction consistency
-      match_yolo_class_consistency_weight: 0.50    # penalty when a YOLO/dynamic track is matched to a non-YOLO detection;
-                                                   # prevents ID swap to walls when person changes direction near one
+      match_yolo_class_consistency_weight: 0.50    # penalty when a YOLO/dynamic track is matched to a non-YOLO detection
       match_prev_obs_pos_score_weight: 0.25   # weight on distance to previous observation position
       match_prev_obs_iou2d_score_weight: 0.10 # weight on IOU with previous observation bbox
       match_feat_score_weight: 0.15           # weight on point cloud feature similarity
@@ -264,47 +241,23 @@ detector_node:
       # -----------------------------------------------------------------------
       # YOLO Dynamic Classification
       # -----------------------------------------------------------------------
-      # For each YOLO detection of a target class, depth points inside the 2D bbox
-      # are back-projected to 3D and checked against the merged 3D bboxes.
-      # A 3D bbox is marked dynamic if enough YOLO points fall inside it.
       yolo_dynamic_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
       yolo_point_fraction_threshold: 0.2   # min fraction of foreground YOLO points inside a 3D bbox to mark it dynamic
       yolo_depth_tolerance: 1.0             # [m] depth window beyond the foreground percentile to keep (background rejection)
-      yolo_centroid_dist_threshold: 1.5     # [m] max XY distance from YOLO point cloud centroid to a 3D bbox center;
-                                            # prevents walls/clusters behind the detected person from being flagged
-
+      max_missed_frames_yolo: 10         # extended lifetime for YOLO-confirmed tracks (persons/vehicles)
+      max_non_yolo_in_fov_frames: 3      # consecutive non-YOLO frames inside FOV to clear sticky YOLO flag
+      max_yolo_base_mismatch_frames: 3
+      yolo_base_mismatch_thresh: 0.70
       # -----------------------------------------------------------------------
       # Dynamic Classification (point cloud motion voting)
       # -----------------------------------------------------------------------
-      # For each track, points in the current cluster are matched to the nearest
-      # point in the cluster from `frame_skip` frames ago. Each matched point
-      # casts a vote if its estimated velocity exceeds `dynamic_velocity_threshold`
-      # AND its direction is consistent with the bbox displacement direction.
-      # A track becomes a dynamic candidate if the vote ratio >= dynamic_voting_threshold
-      # AND the Kalman velocity also exceeds the threshold.
-      #
-      # Anti-false-positive logic:
-      #   - dynamic_velocity_threshold: hard gate on per-point speed AND Kalman speed
-      #   - dynamic_voting_threshold:   requires a large majority of consistent votes
-      #   - dynamic_consistency_threshold: requires sustained motion over many frames
-      #     (at 0.12s/frame, value 12 = ~1.4s of continuous motion before confirmation)
-      #
-      # "Was moving, now stopped" logic:
-      #   - frames_force_dynamic / frames_force_dynamic_check_range: if the object
-      #     was confirmed dynamic for enough of the recent history, it stays dynamic
-      #     even while stationary (handles pedestrians stopping, cars decelerating, etc.)
-      frame_skip: 2                         # [frames] gap for point cloud displacement estimate (3 × 0.12s = 0.36s)
-                                            # shorter gap → faster response; longer gap → more robust against jitter
-      dynamic_velocity_threshold: 0.25     # [m/s] min speed to cast a vote (per-point) AND Kalman gate; catches slow walks
-      dynamic_voting_threshold: 0.70        # fraction of consistent votes required; 70% balances sensitivity vs. false positives
-      dynamic_kf_vel_std_ratio: 0.60        # max (std/mean) of Kalman speed over frame_skip frames to consider estimate confident;
-                                            # 0.60 allows moderate speed changes (e.g. person slowing); lower = stricter
-      frames_force_dynamic: 7               # min dynamic frames in window to keep sticky label (out of check_range below)
-                                            # lowered: once confirmed, few frames of evidence enough to sustain the label
-      frames_force_dynamic_check_range: 10  # [frames] window = 1.2s; a person stopped for >1.2s loses the forced label
-      dynamic_consistency_threshold: 5      # consecutive candidate frames before confirming (~0.36s at 0.12s/frame)
-                                            # was 22 (~2.6s) which caused very delayed classification; 3 frames is sufficient
-                                            # given the other gates (vote ratio + Kalman gate) already filter out noise
+      frame_skip: 2                         # [frames] gap for point cloud displacement estimate
+      dynamic_velocity_threshold: 0.25      # [m/s] min speed to cast a vote (per-point) AND Kalman gate
+      dynamic_voting_threshold: 0.70        # fraction of consistent votes required
+      dynamic_kf_vel_std_ratio: 0.60        # max (std/mean) of Kalman speed over frame_skip frames
+      frames_force_dynamic: 7               # min dynamic frames in window to keep sticky label
+      frames_force_dynamic_check_range: 10  # [frames] sliding window for sticky label check
+      dynamic_consistency_threshold: 5      # consecutive candidate frames before confirming
 
       # -----------------------------------------------------------------------
       # Object Size Constraints

@@ -99,6 +99,7 @@ namespace onboardDetector{
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr downSamplePointsPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr rawLidarPointsPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredLidarVelodynePub_;
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr yoloPointsPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr historyTrajPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr velVisPub_;
         rclcpp::Service<onboard_detector::srv::GetDynamicObstacles>::SharedPtr getDynamicObstacleServer_;
@@ -219,6 +220,11 @@ namespace onboardDetector{
         std::vector<int> staticStreak_;  // consecutive frames a confirmed track has been stationary
         std::vector<int> nonYoloInFovStreak_;  // consecutive frames inside FOV matched to non-YOLO detection
         int maxNonYoloInFovFrames_;  // after this many frames, clear sticky is_yolo_candidate
+        std::vector<double> yoloXWidth_;  // x_width of the YOLO detection that created the YOLO flag
+        std::vector<double> yoloYWidth_;  // y_width of the YOLO detection that created the YOLO flag
+        std::vector<int> yoloBaseMismatchStreak_;  // consecutive frames where base size differs from original
+        int maxYoloBaseMismatchFrames_;  // after this many frames, clear sticky is_yolo_candidate
+        double yoloBaseMismatchThresh_;  // relative diff threshold to count as mismatch
 
         double minMatchScore_;
 
@@ -242,7 +248,6 @@ namespace onboardDetector{
         // YOLO Dynamic Classification
         std::vector<std::string> yoloDynamicClasses_;
         double yoloPointFractionThresh_;
-        double yoloCentroidDistThresh_; // max XY distance from YOLO cloud centroid to 3D bbox center
         double yoloDepthTolerance_;
 
         // Track confirmation / natural motion

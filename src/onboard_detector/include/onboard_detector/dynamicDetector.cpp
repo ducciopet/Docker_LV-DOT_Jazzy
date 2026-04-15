@@ -584,25 +584,6 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Max match range is set to: " << this->maxMatchRange_  << "m." << std::endl;
         }
 
-        // feature weight
-        std::vector<double> tempWeights;
-        if (!this->nh_->get_parameter(pname("feature_weight"), tempWeights)) {
-            this->featureWeights_ = Eigen::VectorXd(10);
-            this->featureWeights_ << 3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0, 0, 0;
-            std::cout << this->hint_ << ": No feature weights parameter found. Using default feature weights: [3.0, 3.0, 0.1, 0.5, 0.5, 0.05, 0, 0, 0]." << std::endl;
-        }
-        else {
-            this->featureWeights_ = Eigen::Map<Eigen::VectorXd>(tempWeights.data(), tempWeights.size());
-            std::cout <<  this->hint_ << ": Feature weights are set to: [";
-            for (size_t i = 0; i < tempWeights.size(); ++i) {
-                std::cout << tempWeights[i];
-                if (i != tempWeights.size()-1){
-                    std::cout << ", ";
-                }
-            }
-            std::cout << "]." << std::endl;
-        }
-
         // tracking history size
         if (!this->nh_->get_parameter(pname("history_size"), this->histSize_)){
             this->histSize_ = 5;
@@ -677,6 +658,22 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": max_non_yolo_in_fov_frames set to: " << this->maxNonYoloInFovFrames_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("max_yolo_base_mismatch_frames"), this->maxYoloBaseMismatchFrames_)){
+            this->maxYoloBaseMismatchFrames_ = 5;
+            std::cout << this->hint_ << ": No max_yolo_base_mismatch_frames. Use default: 5." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": max_yolo_base_mismatch_frames set to: " << this->maxYoloBaseMismatchFrames_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_base_mismatch_thresh"), this->yoloBaseMismatchThresh_)){
+            this->yoloBaseMismatchThresh_ = 0.50;
+            std::cout << this->hint_ << ": No yolo_base_mismatch_thresh. Use default: 0.50." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": yolo_base_mismatch_thresh set to: " << this->yoloBaseMismatchThresh_ << std::endl;
         }
 
         // Kalman Filter V2 parameters (position-only observation model)
@@ -889,14 +886,6 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": YOLO depth tolerance: " << this->yoloDepthTolerance_ << " m" << std::endl;
-        }
-
-        if (!this->nh_->get_parameter(pname("yolo_centroid_dist_threshold"), this->yoloCentroidDistThresh_)){
-            this->yoloCentroidDistThresh_ = 1.5;
-            std::cout << this->hint_ << ": No yolo_centroid_dist_threshold. Use default: 1.5 m." << std::endl;
-        }
-        else{
-            std::cout << this->hint_ << ": YOLO centroid distance threshold: " << this->yoloCentroidDistThresh_ << " m" << std::endl;
         }
 
         // =========================
@@ -1241,6 +1230,9 @@ namespace onboardDetector{
         
         // filtered lidar points in velodyne frame pub
         this->filteredLidarVelodynePub_ = this->nh_->create_publisher<sensor_msgs::msg::PointCloud2>(this->ns_.empty() ? "/filtered_lidar_points_velodyne_frame" : this->ns_ + "/filtered_lidar_points_velodyne_frame", 10);
+
+        // YOLO foreground points pub
+        this->yoloPointsPub_ = this->nh_->create_publisher<sensor_msgs::msg::PointCloud2>(this->ns_.empty() ? "/yolo_points" : this->ns_ + "/yolo_points", 10);
     }   
 
     void dynamicDetector::registerCallback(){
@@ -3267,6 +3259,7 @@ namespace onboardDetector{
         //      of the 10th-percentile depth).
         //   3) For each filtered point, check which filteredBBoxesTemp it falls in.
         //   4) If a bbox captures enough of the filtered YOLO points → mark dynamic.
+        std::vector<Eigen::Vector3d> allYoloPoints; // collect for visualization
         if (!this->yoloDetectionResults_.detections.empty() && !this->depthImage_.empty())
         {
             // Precompute constants for depth → 3D → world
@@ -3380,54 +3373,91 @@ namespace onboardDetector{
 
                 if (filteredYoloPoints.empty()) continue;
 
+                // Accumulate for visualization
+                allYoloPoints.insert(allYoloPoints.end(), filteredYoloPoints.begin(), filteredYoloPoints.end());
+
                 // --------------------------------------------------
                 // STEP 3 & 4: Check which bboxes contain these points
                 // --------------------------------------------------
-                // Compute centroid of the YOLO foreground point cloud in world frame.
-                // Used as a spatial gate: 3D bboxes whose center is farther than
-                // yoloCentroidDistThresh_ from this centroid are skipped, preventing
-                // walls or other clusters behind the detected person from being flagged.
-                Eigen::Vector3d yoloCentroid = Eigen::Vector3d::Zero();
-                for (const auto& pt : filteredYoloPoints){ yoloCentroid += pt; }
-                yoloCentroid /= static_cast<double>(filteredYoloPoints.size());
-
                 for (size_t j = 0; j < filteredBBoxesTemp.size(); ++j){
                     const auto& bb = filteredBBoxesTemp[j];
-                    const double cdx = bb.x - yoloCentroid(0);
-                    const double cdy = bb.y - yoloCentroid(1);
-                    if (std::sqrt(cdx*cdx + cdy*cdy) > this->yoloCentroidDistThresh_) continue;
                     const double hx = bb.x_width * 0.5;
                     const double hy = bb.y_width * 0.5;
                     const double hz = bb.z_width * 0.5;
 
-                    int insideCount = 0;
+                    std::vector<Eigen::Vector3d> yoloInsidePoints;
                     for (const auto& pt : filteredYoloPoints){
                         if (std::abs(pt(0) - bb.x) <= hx &&
                             std::abs(pt(1) - bb.y) <= hy &&
                             std::abs(pt(2) - bb.z) <= hz){
-                            ++insideCount;
+                            yoloInsidePoints.push_back(pt);
                         }
                     }
 
-                    if (insideCount == 0) continue;
+                    if (yoloInsidePoints.empty()) continue;
 
-                    // Fraction of YOLO foreground points that fall inside this 3D bbox.
-                    // Background is already removed in STEP 2 (10th-percentile depth filter),
-                    // so totalFiltered contains only foreground points belonging to the detected
-                    // object. Using the YOLO-relative denominator is correct: it measures how
-                    // concentrated the detection's foreground is inside this bbox, independently
-                    // of LiDAR points that may also be in the 3D cluster.
                     const int totalFiltered = static_cast<int>(filteredYoloPoints.size());
-                    const double fraction = static_cast<double>(insideCount) / static_cast<double>(totalFiltered);
+                    const double fraction = static_cast<double>(yoloInsidePoints.size()) / static_cast<double>(totalFiltered);
 
                     if (fraction >= this->yoloPointFractionThresh_){
-                        // Only mark as yolo_candidate here. is_dynamic is a classification
-                        // label set exclusively by classificationCB — never by the detection pipeline.
                         filteredBBoxesTemp[j].is_yolo_candidate = true;
+
+                        // Resize box base (x, y) to tightly fit the YOLO foreground
+                        // points; keep z (height) and z_width unchanged.
+                        double minX = std::numeric_limits<double>::max(), maxX = std::numeric_limits<double>::lowest();
+                        double minY = std::numeric_limits<double>::max(), maxY = std::numeric_limits<double>::lowest();
+                        for (const auto& pt : yoloInsidePoints){
+                            if (pt(0) < minX) minX = pt(0);
+                            if (pt(0) > maxX) maxX = pt(0);
+                            if (pt(1) < minY) minY = pt(1);
+                            if (pt(1) > maxY) maxY = pt(1);
+                        }
+
+                        const double newXWidth = maxX - minX;
+                        const double newYWidth = maxY - minY;
+                        const double newCenterX = (minX + maxX) * 0.5;
+                        const double newCenterY = (minY + maxY) * 0.5;
+
+                        filteredBBoxesTemp[j].x = newCenterX;
+                        filteredBBoxesTemp[j].y = newCenterY;
+                        filteredBBoxesTemp[j].x_width = newXWidth;
+                        filteredBBoxesTemp[j].y_width = newYWidth;
+
+                        // Re-filter the associated point cloud to stay within the new box
+                        const double nhx = newXWidth * 0.5;
+                        const double nhy = newYWidth * 0.5;
+                        const double nhz = filteredBBoxesTemp[j].z_width * 0.5;
+                        const double ncz = filteredBBoxesTemp[j].z;
+
+                        std::vector<Eigen::Vector3d> newCluster;
+                        for (const auto& pt : filteredPcClustersTemp[j]){
+                            if (std::abs(pt(0) - newCenterX) <= nhx &&
+                                std::abs(pt(1) - newCenterY) <= nhy &&
+                                std::abs(pt(2) - ncz) <= nhz){
+                                newCluster.push_back(pt);
+                            }
+                        }
+                        filteredPcClustersTemp[j] = newCluster;
+
+                        // Recompute cluster center and std for the trimmed cloud
+                        if (!newCluster.empty()){
+                            Eigen::Vector3d center = Eigen::Vector3d::Zero();
+                            for (const auto& pt : newCluster) center += pt;
+                            center /= static_cast<double>(newCluster.size());
+                            filteredPcClusterCentersTemp[j] = center;
+
+                            Eigen::Vector3d stddev = Eigen::Vector3d::Zero();
+                            for (const auto& pt : newCluster)
+                                stddev += (pt - center).cwiseAbs2();
+                            filteredPcClusterStdsTemp[j] = (stddev / static_cast<double>(newCluster.size())).cwiseSqrt();
+                        }
                     }
                 }
             }
         }
+        // Publish YOLO foreground points for visualization
+        this->publishPoints(allYoloPoints, this->yoloPointsPub_);
+
         // Consume YOLO detections: clear so the same detection is not reapplied
         // to future detection-loop iterations that run before the next YOLO frame.
         // The is_yolo_candidate flag is now sticky in boxHist_ (via kalmanFilterAndUpdateHist),
@@ -4437,6 +4467,9 @@ namespace onboardDetector{
         std::vector<bool> confirmedTracksTemp;
         std::vector<int> staticStreakTemp;
         std::vector<int> nonYoloInFovStreakTemp;
+        std::vector<double> yoloXWidthTemp;
+        std::vector<double> yoloYWidthTemp;
+        std::vector<int> yoloBaseMismatchStreakTemp;
 
         std::deque<onboardDetector::box3D> newSingleBoxHist;
         std::deque<std::vector<Eigen::Vector3d>> newSinglePcHist;
@@ -4489,11 +4522,8 @@ namespace onboardDetector{
             // is_yolo_candidate: sticky from YOLO detector (sensor output, track-level).
             newEstimatedBBox.is_yolo_candidate = currDetectedBBox.is_yolo_candidate || prevYoloCand;
 
-            // YOLO decay: if the track is inside the camera FOV and the current detection
-            // is NOT a YOLO detection, increment a counter. After maxNonYoloInFovFrames_
-            // consecutive frames, the sticky YOLO flag is cleared — the object is no longer
-            // considered a person/vehicle. This handles ID swaps where a stationary object
-            // inherits the YOLO flag from a departing person.
+            // YOLO decay (FOV-based): if the track is inside the camera FOV and the current
+            // detection is NOT a YOLO detection, increment a counter.
             const Eigen::Vector3d bboxPos(newEstimatedBBox.x, newEstimatedBBox.y, newEstimatedBBox.z);
             const bool insideFov = this->isInCameraFOV(bboxPos);
             const int oldNonYoloStreak =
@@ -4502,14 +4532,46 @@ namespace onboardDetector{
             if (newEstimatedBBox.is_yolo_candidate && insideFov && !currDetectedBBox.is_yolo_candidate){
                 newNonYoloStreak = oldNonYoloStreak + 1;
             }
-            // Reset if current detection IS yolo or track is outside FOV
-            // (outside FOV we can't judge — YOLO doesn't see there)
 
             if (newNonYoloStreak >= this->maxNonYoloInFovFrames_){
                 newEstimatedBBox.is_yolo_candidate = false;
                 newNonYoloStreak = 0;
             }
             nonYoloInFovStreakTemp.push_back(newNonYoloStreak);
+
+            // YOLO decay (base size mismatch): ONLY outside FOV.
+            // Compare the current detection's base dimensions against the last
+            // YOLO detection's dims. If size differs too much for several
+            // consecutive frames, this is likely an ID swap.
+            double XW = (matchIdx < static_cast<int>(this->yoloXWidth_.size())) ? this->yoloXWidth_[matchIdx] : 0.0;
+            double YW = (matchIdx < static_cast<int>(this->yoloYWidth_.size())) ? this->yoloYWidth_[matchIdx] : 0.0;
+            int oldBaseMismatch = (matchIdx < static_cast<int>(this->yoloBaseMismatchStreak_.size())) ? this->yoloBaseMismatchStreak_[matchIdx] : 0;
+
+            // Update stored dims whenever we get a fresh YOLO detection.
+            if (currDetectedBBox.is_yolo_candidate){
+                XW = currDetectedBBox.x_width;
+                YW = currDetectedBBox.y_width;
+            }
+
+            int newBaseMismatch = 0;
+            if (!insideFov && newEstimatedBBox.is_yolo_candidate && XW > 0.0 && YW > 0.0){
+                const double relDiffX = std::abs(currDetectedBBox.x_width - XW) / std::max(XW, 0.01);
+                const double relDiffY = std::abs(currDetectedBBox.y_width - YW) / std::max(YW, 0.01);
+                if (relDiffX > this->yoloBaseMismatchThresh_ || relDiffY > this->yoloBaseMismatchThresh_){
+                    newBaseMismatch = oldBaseMismatch + 1;
+                }
+                // else: reset to 0 (dimensions match → legitimate track)
+            }
+
+            if (newBaseMismatch >= this->maxYoloBaseMismatchFrames_){
+                newEstimatedBBox.is_yolo_candidate = false;
+                newBaseMismatch = 0;
+                XW = 0.0;
+                YW = 0.0;
+            }
+            yoloXWidthTemp.push_back(XW);
+            yoloYWidthTemp.push_back(YW);
+            yoloBaseMismatchStreakTemp.push_back(newBaseMismatch);
 
             // is_dynamic: starts false; classificationCB will set it if appropriate.
             newEstimatedBBox.is_dynamic = false;
@@ -4675,6 +4737,13 @@ namespace onboardDetector{
                 (j < static_cast<int>(this->nonYoloInFovStreak_.size())) ? this->nonYoloInFovStreak_[j] : 0;
             nonYoloInFovStreakTemp.push_back(oldNonYoloStreakMissed); // no detection → keep existing streak
 
+            const double oldXW = (j < static_cast<int>(this->yoloXWidth_.size())) ? this->yoloXWidth_[j] : 0.0;
+            const double oldYW = (j < static_cast<int>(this->yoloYWidth_.size())) ? this->yoloYWidth_[j] : 0.0;
+            const int oldBaseMismatchMissed = (j < static_cast<int>(this->yoloBaseMismatchStreak_.size())) ? this->yoloBaseMismatchStreak_[j] : 0;
+            yoloXWidthTemp.push_back(oldXW);
+            yoloYWidthTemp.push_back(oldYW);
+            yoloBaseMismatchStreakTemp.push_back(oldBaseMismatchMissed); // no detection → keep existing streak
+
             hitStreakTemp.push_back(0);
             trackAgeTemp.push_back(oldTrackAge + 1);
             confirmedTracksTemp.push_back(oldConfirmed);
@@ -4746,6 +4815,15 @@ namespace onboardDetector{
             trackAgeTemp.push_back(1);
             staticStreakTemp.push_back(0); // new track, no static history
             nonYoloInFovStreakTemp.push_back(0); // new track, no YOLO decay history
+            // Store original YOLO base dimensions if this is a YOLO detection.
+            if (currDetectedBBox.is_yolo_candidate){
+                yoloXWidthTemp.push_back(currDetectedBBox.x_width);
+                yoloYWidthTemp.push_back(currDetectedBBox.y_width);
+            } else {
+                yoloXWidthTemp.push_back(0.0);
+                yoloYWidthTemp.push_back(0.0);
+            }
+            yoloBaseMismatchStreakTemp.push_back(0);
 
             // YOLO detections are confirmed immediately on their first frame.
             // Non-YOLO detections start tentative and need minConfirmHits_ to confirm.
@@ -4789,6 +4867,9 @@ namespace onboardDetector{
         this->confirmedTracks_ = confirmedTracksTemp;
         this->staticStreak_ = staticStreakTemp;
         this->nonYoloInFovStreak_ = nonYoloInFovStreakTemp;
+        this->yoloXWidth_ = yoloXWidthTemp;
+        this->yoloYWidth_ = yoloYWidthTemp;
+        this->yoloBaseMismatchStreak_ = yoloBaseMismatchStreakTemp;
     }
 
     // ============================================================================
