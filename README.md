@@ -2,429 +2,213 @@
 
 ![ROS2](https://img.shields.io/badge/ROS-2%20Jazzy-green) ![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-blue) ![Linux](https://img.shields.io/badge/Platform-Linux-orange) ![License](https://img.shields.io/badge/License-MIT-blue)
 
-This repository contains a Dockerized ROS 2 Jazzy workspace for LV-DOT, a lightweight visual and LiDAR-based dynamic obstacle detection and tracking framework.
+Dockerized ROS 2 Jazzy workspace for **LV-DOT**, a LiDAR + depth camera dynamic obstacle detection and tracking system.
 
-Original project:
-- https://github.com/Zhefan-Xu/LV-DOT
-
-Repository variants:
-- Jazzy version: https://github.com/ducciopet/Docker_LV-DOT_Jazzy
-- Previous Humble version: https://github.com/ducciopet/Docker_LV-DOT
-
-## Overview
-
-The workspace combines:
-- a C++ detector pipeline for depth, LiDAR, fusion, and tracking
-- a Python YOLO node for 2D detections
-- an ICP-based calibration node for refining `velodyne -> rs1_link_refined`
-- RViz configurations for runtime and debugging
-- Docker support for a reproducible ROS 2 Jazzy environment
-
-The main runtime idea is:
-1. publish the base TF chain
-2. run ICP calibration to obtain `velodyne -> rs1_link_refined`
-3. start the main detector only after the refined transform exists
-4. fuse depth, LiDAR, and YOLO detections for dynamic obstacle tracking
+Original project: https://github.com/Zhefan-Xu/LV-DOT  
+Jazzy fork: https://github.com/ducciopet/Docker_LV-DOT_Jazzy  
+Previous Humble version: https://github.com/ducciopet/Docker_LV-DOT
 
 ---
 
-## Top-level repository structure
+## What it does
 
-```text
+The system fuses three sensing modalities to detect and track dynamic obstacles in 3D:
+
+- **Depth camera** — dense short-range 3D point cloud extraction and UV-based obstacle detection
+- **LiDAR (Velodyne)** — sparse long-range DBSCAN clustering
+- **YOLOv11** — 2D human detection used to tag 3D bboxes as dynamic candidates
+
+A separate **wall detector** estimates ground/roof height and detects planar walls, feeding those results back into the main detector to suppress static structure from both the point cloud and the bbox pipeline.
+
+A one-shot **ICP calibration** node refines the LiDAR-to-camera extrinsic transform before detection starts.
+
+For a complete technical description of every stage see [FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md).
+
+---
+
+## Repository structure
+
+```
 Docker_LV-DOT_Jazzy/
 ├── compose.yaml
 ├── compose_build.bash
 ├── entrypoint.sh
-├── DockerFiles/
-│   └── Dockerfile
+├── DockerFiles/Dockerfile
 ├── bags/
-├── media/
 ├── FRAMEWORK_ARCHITECTURE.md
 ├── README.md
 └── src/
-    ├── CMakeLists.txt
     └── onboard_detector/
+        ├── cfg/
+        │   └── detector_param_jo_zotac.yaml
+        ├── include/onboard_detector/
+        │   ├── dynamicDetector.cpp / .h
+        │   ├── uvDetector.cpp / .h
+        │   ├── lidarDetector.cpp / .h
+        │   ├── dbscan.cpp / .h
+        │   ├── kalmanFilter.cpp / .h
+        │   └── utils.h
+        ├── launch/
+        │   ├── run_detector.launch.py
+        │   └── run_calibration_icp.launch.py
+        ├── rviz/
+        ├── scripts/
+        │   └── yolo_detector/
+        │       ├── yolov11_detector_node.py
+        │       ├── yolov11_detector.py
+        │       ├── weights/
+        │       └── config/
+        ├── src/
+        │   ├── detector_node.cpp
+        │   ├── calibration_icp_node.cpp
+        │   └── wall_detector_node.cpp
+        └── srv/
+            └── GetDynamicObstacles.srv
 ```
 
-### Top-level files
+---
 
-- `compose.yaml`  
-  Docker Compose definition for the Jazzy runtime container.
+## Runtime nodes
 
-- `compose_build.bash`  
-  Convenience script to build the Docker image.
-
-- `entrypoint.sh`  
-  Container startup script.
-
-- `DockerFiles/Dockerfile`  
-  Base image and system dependencies.
-
-- `bags/`  
-  Local ROS 2 bag storage used during testing.
-
-- `FRAMEWORK_ARCHITECTURE.md`  
-  Detailed notes about the detection, fusion, and tracking pipeline.
+| Node | Language | Role |
+|------|----------|------|
+| `calibration_icp_node` | C++ | One-shot LiDAR-to-camera extrinsic refinement via ICP |
+| `wall_detector_node` | C++ | Ground/roof height estimation + planar wall OBB detection |
+| `detector_node` | C++ | Main fusion, tracking, and dynamic classification |
+| `yolov11_detector_node.py` | Python | 2D human detection with YOLOv11 |
+| `rviz2` | — | Visualization |
 
 ---
 
-## ROS package structure
+## TF chain
 
-The main package is `src/onboard_detector`.
-
-```text
-src/onboard_detector/
-├── CMakeLists.txt
-├── package.xml
-├── cfg/
-├── include/onboard_detector/
-├── launch/
-├── rviz/
-├── scripts/
-├── src/
-└── srv/
+```
+map
+└── base_link
+    └── imu_link
+        └── velodyne
+            ├── camera_initial_guess    (static, published at launch)
+            └── camera_refined          (static, published by calibration_icp_node)
 ```
 
-### `cfg/`
-
-Configuration files for runtime parameters.
-
-Main files:
-- `detector_param_jo_zotac.yaml` — main active Jazzy config
-
-`detector_param_jo_zotac.yaml` contains two important parameter groups:
-- `detector_node: ros__parameters:`
-- `calibration_icp_node: ros__parameters:`
-
-These parameters control:
-- topic names
-- TF frame names
-- camera intrinsics
-- ICP thresholds
-- clustering thresholds
-- tracking parameters
-
-### `include/onboard_detector/`
-
-Core detector implementation:
-
-- `dynamicDetector.cpp` / `dynamicDetector.h`  
-  Main fusion and tracking logic.
-
-- `uvDetector.cpp` / `uvDetector.h`  
-  UV/depth based detection path.
-
-- `lidarDetector.cpp` / `lidarDetector.h`  
-  LiDAR clustering and box extraction.
-
-- `dbscan.cpp` / `dbscan.h`  
-  DBSCAN implementation.
-
-- `kalmanFilter.cpp` / `kalmanFilter.h`  
-  Tracking filter logic.
-
-- `utils.h`  
-  Shared helpers.
-
-### `src/`
-
-ROS executables:
-
-- `detector_node.cpp`  
-  Main detector executable.
-
-- `calibration_icp_node.cpp`  
-  One-shot ICP calibration executable. It computes the refined transform and publishes calibration debug clouds.
-
-- `calibration_node.cpp`  
-  Legacy / alternate calibration executable retained in the package.
-
-### `scripts/`
-
-Python code and helper scripts.
-
-Important contents:
-- `create_bag_with_pose.py`
-- `yolo_detector/`
-
-Inside `scripts/yolo_detector/`:
-- `yolov11_detector_node.py` — ROS 2 node wrapper for YOLOv11
-- `yolov11_detector.py` — main inference logic
-- `yolo_detector_node.py`, `yolo_detector.py` — older YOLO code paths
-- `config/` — labels and model config
-- `module/` — helper modules and custom layers
-- `weights/` — local model weights
-
-### `launch/`
-
-Main launch files:
-- `run_detector.launch.py` — full runtime launch
-- `run_calibration_icp.launch.py` — calibration-only launch with RViz
-- `run_calibration.launch.py` — older calibration launch flow
-
-### `rviz/`
-
-RViz presets for runtime and debugging:
-- `detector_jo_zotac.rviz`
-- `detector_debug.rviz`
-
-### `srv/`
-
-- `GetDynamicObstacles.srv`  
-  Service definition exported by the package.
+The main detector and the wall detector both use `camera_refined`. The detector gates all processing on a successful TF lookup for `velodyne → camera_refined`.
 
 ---
 
-## Build system structure
+## Key input topics
 
-### `CMakeLists.txt`
-
-The package builds:
-- the shared detector library
-- `detector_node`
-- `calibration_node`
-- `calibration_icp_node`
-- the `GetDynamicObstacles.srv` interface
-
-Main external dependencies include:
-- `rclcpp`
-- `sensor_msgs`, `geometry_msgs`, `nav_msgs`, `visualization_msgs`
-- `message_filters`
-- `cv_bridge`
-- `PCL`
-- `Open3D`
-- `tf2`, `tf2_geometry_msgs`
-
-### `package.xml`
-
-Declares the package metadata and the ROS dependency list used by the executables and the generated service interface.
+| Topic | Consumer |
+|-------|----------|
+| `/velodyne_points` | detector, wall\_detector, calibration |
+| `/front_camera/camera/depth/image_rect_raw` | detector, wall\_detector, calibration |
+| color image topic (configured in YAML) | detector, YOLO |
+| `/clock` (bag playback) | all nodes |
 
 ---
 
-## Runtime architecture
+## Key output topics
 
-### Calibration path
-
-`calibration_icp_node`:
-- subscribes to synchronized LiDAR and depth streams
-- reads the initial TF guess from `velodyne -> rs1_link`
-- runs one-shot ICP refinement
-- publishes:
-  - `/calibration/velodyne_points`
-  - `/calibration/depth_cloud_in_velodyne`
-  - static transform `velodyne -> rs1_link_refined`
-
-### Detector path
-
-`detector_node`:
-- loads parameters from `detector_param_jo_zotac.yaml`
-- uses refined camera/depth frames (`rs1_link_refined`)
-- combines depth, LiDAR, and YOLO outputs
-- performs association and tracking
-
-### YOLO path
-
-`yolov11_detector_node.py`:
-- runs 2D human detection
-- publishes bounding boxes and debug image topics
+| Topic | Description |
+|-------|-------------|
+| `/onboard_detector/tracked_bboxes` | Confirmed tracked bboxes (yellow in RViz) |
+| `/onboard_detector/dynamic_bboxes` | Bboxes classified as dynamic (blue) |
+| `/onboard_detector/filtered_bboxes` | Post-fusion bboxes before tracking |
+| `/onboard_detector/filtered_point_cloud` | Fused obstacle points |
+| `/onboard_detector/dynamic_point_cloud` | Points belonging to dynamic bboxes |
+| `/onboard_detector/history_trajectories` | Track history lines |
+| `/onboard_detector/velocity_visualizaton` | Velocity arrows |
+| `/onboard_detector/yolo_points` | 3D foreground points extracted from YOLO ROI |
+| `/wall_detector/wall_markers` | Wall oriented bounding boxes |
+| `/wall_detector/ground_height` | `[ground_z, roof_z, offset]` |
+| `yolo_detector/detected_bounding_boxes` | YOLO 2D detections |
 
 ---
 
-## Current launch behavior
+## Service
 
-### `run_detector.launch.py`
+```
+onboard_detector/get_dynamic_obstacles
+  request:  current_position (Vector3), range (float)
+  response: position[], velocity[], size[]
+```
 
-This is the main runtime launch.
-
-It currently:
-1. sets `PYTHONPATH` for the YOLO scripts
-2. publishes static TFs:
-   - `map -> base_link`
-   - `base_link -> imu_link`
-   - `imu_link -> velodyne`
-   - `velodyne -> rs1_link`
-3. starts `calibration_icp_node`
-4. starts `yolov11_detector_node.py`
-5. starts `rviz2`
-6. waits for `velodyne -> rs1_link_refined`
-7. starts `detector_node` only after the refined transform is available
-
-This avoids starting the detector before the refined camera frame exists.
-
-### `run_calibration_icp.launch.py`
-
-This launch is intended for calibration debugging.
-
-It starts:
-- `calibration_icp_node`
-- `rviz2`
-- the initial static transform `velodyne -> rs1_link`
-
-All calibration parameters are loaded from `detector_param_jo_zotac.yaml`.
-
----
-
-## Frame structure
-
-Important frames in this workspace:
-- `map`
-- `base_link`
-- `imu_link`
-- `velodyne`
-- `rs1_link`
-- `rs1_link_refined`
-
-### Intended frame logic
-
-- `rs1_link` is the initial camera frame used by the initial guess transform
-- `rs1_link_refined` is produced by `calibration_icp_node`
-- detector-side depth and color TF parameters are configured to use `rs1_link_refined`
+Returns dynamic obstacles within `range` metres, sorted by distance.
 
 ---
 
 ## Setup and build
 
-### Clone the repository
-
 ```bash
 git clone https://github.com/ducciopet/Docker_LV-DOT_Jazzy.git
 cd Docker_LV-DOT_Jazzy
-```
 
-### Build the Docker image
-
-```bash
+# Build Docker image
 ./compose_build.bash
-```
 
-or:
-
-```bash
-docker compose build
-```
-
-### Start the container
-
-```bash
+# Start container
 docker compose up -d
-```
-
-### Enter the container
-
-```bash
 docker compose exec ros2_jazzy_sim bash
-```
 
-### Build the workspace inside the container
-
-```bash
+# Build workspace inside container
 cd ~/ros2_ws
-colcon build
+colcon build --packages-select onboard_detector
 source install/setup.bash
 ```
 
 ---
 
-## Main commands
-
-### Full runtime
+## Running
 
 ```bash
+# Full runtime
 ros2 launch onboard_detector run_detector.launch.py
-```
 
-### Calibration-only debug
+# Play a bag (in a separate terminal)
+ros2 bag play <bag_path> -s mcap --clock
 
-```bash
+# Calibration debug only
 ros2 launch onboard_detector run_calibration_icp.launch.py
 ```
 
-### Bag playback
-
-Use simulated time when replaying data:
-
-```bash
-ros2 bag play <bag_path> -s mcap --clock
-```
-
 ---
 
-## Required input topics
+## Launch sequence (`run_detector.launch.py`)
 
-Typical required runtime inputs include:
-- `/velodyne_points`
-- `/camera1/rs1/depth/image_rect_raw`
-- the configured color image topic used by YOLO
-- `/clock` during bag playback
+1. Sets `PYTHONPATH` for YOLO scripts
+2. Publishes static TF `velodyne → camera_initial_guess` (initial guess for calibration)
+3. Publishes static TF `velodyne → camera_refined` (overridden by ICP when it converges)
+4. Starts `calibration_icp_node`
+5. Starts `detector_node`
+6. Starts `wall_detector_node`
+7. Starts `yolov11_detector_node.py`
+8. Starts `rviz2`
 
-If your topic names differ, update `detector_param_jo_zotac.yaml`.
-
----
-
-## Important outputs
-
-### Calibration outputs
-
-- `/calibration/velodyne_points`
-- `/calibration/depth_cloud_in_velodyne`
-- refined static TF `velodyne -> rs1_link_refined`
-
-### Detector outputs
-
-The detector publishes obstacle and tracking results, including bounding boxes, debug images, and point-cloud outputs depending on configuration.
-
-### YOLO outputs
-
-The YOLO node publishes 2D detections, debug images, and timing-related topics.
+The detector does not process data until `lookupTfMatrix("velodyne", "camera_refined")` succeeds — this flag (`lidarToDepthCamOk_`) is checked at the top of every timer callback.
 
 ---
 
 ## Troubleshooting
 
-### `detector_node` does not start
-
-`run_detector.launch.py` waits for `velodyne -> rs1_link_refined`.
-
-If `detector_node` does not appear, verify:
-- `calibration_icp_node` is running
-- synchronized LiDAR and depth data are arriving
-- the refined TF was actually published
-
-### Refined TF seems missing
-
-The calibration node publishes the refined transform as a static transform.
-
-Check with:
-
+**Detector processes nothing** — `lidarToDepthCamOk_` is false. Check:
 ```bash
 ros2 topic echo /tf_static --qos-durability transient_local
 ```
+The `calibration_icp_node` must receive a synchronized LiDAR + depth pair before it can publish the refined TF.
 
-### Calibration debug clouds are empty
-
-The calibration node only publishes them after it receives synchronized LiDAR and depth data and completes ICP.
-
-### Old TF publishers interfere with startup
-
-If stale `static_transform_publisher` processes are still running, they can interfere with TF-dependent launch logic.
-
-Useful cleanup:
-
+**Stale static TF publishers from a previous run:**
 ```bash
 pkill -f static_transform_publisher
 ```
 
 ---
 
-## Additional documentation
+## Configuration
 
-- `FRAMEWORK_ARCHITECTURE.md` contains a more detailed explanation of the internal LV-DOT pipeline.
+All parameters are in `cfg/detector_param_jo_zotac.yaml`. Each parameter is commented. The file has four sections: `detector_node`, `wall_detector_node`, `calibration_icp_node`, `yolov11_detector_node`.
 
 ---
 
 ## Citation
-
-If you use LV-DOT academically, please cite the original work.
 
 ```bibtex
 @article{xu2022lvdot,
@@ -437,4 +221,4 @@ If you use LV-DOT academically, please cite the original work.
 
 ## License
 
-MIT, following the package metadata in this repository.
+MIT.
