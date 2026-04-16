@@ -195,8 +195,6 @@ namespace onboardDetector{
         // Tracking and data association
         int nextTrackId_ = 0;
         double maxMatchRange_;
-        double maxMatchSizeRange_;
-        Eigen::VectorXd featureWeights_;
         int histSize_;
         // eP_, eQPos_, eQVel_, eQAcc_, eRPos_, eRVel_, eRAcc_ — KF V1 params, kept for reference inside commented-out functions
         double eP_; double eQPos_; double eQVel_; double eQAcc_; double eRPos_; double eRVel_; double eRAcc_;
@@ -258,6 +256,7 @@ namespace onboardDetector{
         double maxVelocityDirectionErrorConfirm_;
         double maxVelocityDirectionErrorTracked_;
         double stationarySpeedThresh_;
+        bool trackSteadyObjects_;
         double confirmedTrackAssocBonus_;
         double yoloTrackAssocBonus_;
         double maxNaturalInnovationConfirmed_;
@@ -384,7 +383,6 @@ namespace onboardDetector{
         void BboxesMerger(const std::vector<onboardDetector::box3D>& group1BBoxes_, const std::vector<onboardDetector::box3D>& group2BBoxes_, const std::vector<std::vector<Eigen::Vector3d>>& group1pcClusters_, const std::vector<Eigen::Vector3d>& group1pcClusterCenters_, const std::vector<Eigen::Vector3d>& group1pcClusterStds_, const std::vector<std::vector<Eigen::Vector3d>>& group2pcClusters_, const std::vector<Eigen::Vector3d>& group2pcClusterCenters_, const std::vector<Eigen::Vector3d>& group2pcClusterStds_, std::vector<onboardDetector::box3D>& BBoxesTemp, std::vector<std::vector<Eigen::Vector3d>>& PcClustersTemp, std::vector<Eigen::Vector3d>& PcClusterCentersTemp, std::vector<Eigen::Vector3d>& PcClusterStdsTemp, std::string merging_style, bool flag_group1, bool flag_group2, double boxIOUThresh_, double boxIOVThresh_, bool leaf_only = false);
         void mergeNestedGroup(const std::vector<onboardDetector::box3D>& inBoxes, const std::vector<std::vector<Eigen::Vector3d>>& inClusters, const std::vector<Eigen::Vector3d>& inCenters, const std::vector<Eigen::Vector3d>& inStds,     std::vector<onboardDetector::box3D>& outBoxes, std::vector<std::vector<Eigen::Vector3d>>& outClusters, std::vector<Eigen::Vector3d>& outCenters, std::vector<Eigen::Vector3d>& outStds);
         void mergeBoxesSet(const std::vector<onboardDetector::box3D>& boxes, const std::vector<std::vector<Eigen::Vector3d>>& clusters, const std::vector<int>& indices, onboardDetector::box3D& outBox, std::vector<Eigen::Vector3d>& outCluster, Eigen::Vector3d& center, Eigen::Vector3d& stddev);
-        void getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters);
         void findBestMatch(const std::vector<onboardDetector::box3D>& predictedBBoxes, const std::vector<onboardDetector::box3D>& previousObservedBBoxes, std::vector<int>& bestMatch);
         void kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch);
         // KF V1 — definitions commented out in .cpp, kept for reference

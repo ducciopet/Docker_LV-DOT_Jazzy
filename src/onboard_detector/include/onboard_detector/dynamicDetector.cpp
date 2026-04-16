@@ -593,38 +593,11 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": History for tracking is set to: " << this->histSize_ << std::endl;
         }
 
-        // kalman filter parameters (V1 — kept for commented-out reference functions)
-        std::vector<double> kalmanFilterParams;
-        if (!this->nh_->get_parameter(pname("kalman_filter_param"), kalmanFilterParams)){
-            this->eP_ = 0.5;
-            this->eQPos_ = 0.5; // pos prediction noise
-            this->eQVel_ = 0.5; // vel prediction noise
-            this->eQAcc_ = 0.5; // acc prediction noise
-            this->eRPos_ = 0.5; // pos measurement noise
-            this->eRVel_ = 0.5; // vel measurement noise
-            this->eRAcc_ = 0.5; // acc measurement noise
-            std::cout << this->hint_ << ": No kalman filter parameter found. Use default: 0.5." << std::endl;
-        }
-        else{
-            this->eP_ = kalmanFilterParams[0];
-            this->eQPos_ = kalmanFilterParams[1]; // pos prediction noise
-            this->eQVel_ = kalmanFilterParams[2]; // vel prediction noise
-            this->eQAcc_ = kalmanFilterParams[3]; // acc prediction noise
-            this->eRPos_ = kalmanFilterParams[4]; // pos measurement noise
-            this->eRVel_ = kalmanFilterParams[5]; // vel measurement noise
-            this->eRAcc_ = kalmanFilterParams[6]; // acc measurement noise
-            std::cout << this->hint_ << ": Kalman filter parameter is set to: [";
-            for (int i=0; i<int(kalmanFilterParams.size()); ++i){
-                double param = kalmanFilterParams[i];
-                if (i != int(kalmanFilterParams.size())-1){
-                    std::cout << param << ", ";
-                }
-                else{
-                    std::cout << param;
-                }
-            }
-            std::cout << "]." << std::endl;
-        }
+        // KF V1 parameter loading — kept for reference, members used only inside commented-out KF V1 functions.
+        // YAML key: kalman_filter_param (commented out in cfg).
+        // this->eP_ = ...; this->eQPos_ = ...; etc. — initialized to 0.5 as fallback if ever uncommented.
+        this->eP_ = 0.5; this->eQPos_ = 0.5; this->eQVel_ = 0.5;
+        this->eQAcc_ = 0.5; this->eRPos_ = 0.5; this->eRVel_ = 0.5; this->eRAcc_ = 0.5;
 
         // num of frames used in KF for observation
         if (!this->nh_->get_parameter(pname("kalman_filter_averaging_frames"), this->kfAvgFrames_)){
@@ -1043,6 +1016,14 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": Stationary speed thresh: " << this->stationarySpeedThresh_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("track_steady_objects"), this->trackSteadyObjects_)){
+            this->trackSteadyObjects_ = false;
+            std::cout << this->hint_ << ": No track_steady_objects. Use default: false." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": Track steady objects: " << (this->trackSteadyObjects_ ? "true" : "false") << std::endl;
         }
 
         if (!this->nh_->get_parameter(pname("confirmed_track_assoc_bonus"), this->confirmedTrackAssocBonus_)){
@@ -2096,7 +2077,8 @@ namespace onboardDetector{
             double vx = this->trackedBBoxes_[i].Vx;
             double vy = this->trackedBBoxes_[i].Vy;
             double vnorm = std::sqrt(vx*vx + vy*vy);
-            idMarker.text = "ID: " + std::to_string(track_id) + " | |V|: " + std::to_string(vnorm);
+            idMarker.text = "ID: " + std::to_string(track_id) + " | |V|: " + std::to_string(vnorm)
+                          + (this->trackedBBoxes_[i].is_yolo_candidate ? " | YOLO" : "");
             idMarker.lifetime = rclcpp::Duration::from_seconds(0.1);
             trackIdMarkers.markers.push_back(idMarker);
         }
@@ -3366,7 +3348,9 @@ namespace onboardDetector{
                 std::vector<Eigen::Vector3d> filteredYoloPoints;
                 filteredYoloPoints.reserve(yoloPoints.size());
                 for (size_t k = 0; k < yoloPoints.size(); ++k){
-                    if (yoloDepths[k] <= maxAllowedDepth){
+                    if (yoloDepths[k] <= maxAllowedDepth &&
+                        yoloPoints[k].z() >= this->groundHeight_ &&
+                        yoloPoints[k].z() <= this->roofHeight_){
                         filteredYoloPoints.push_back(yoloPoints[k]);
                     }
                 }
@@ -3982,7 +3966,8 @@ namespace onboardDetector{
 
         // Reject stationary non-YOLO objects: they should not accumulate tracking hits.
         // (YOLO and confirmed tracks already skip isNaturalMotion entirely.)
-        if (obsDist < this->minNaturalMotionDist_){
+        // When trackSteadyObjects_ is true, allow stationary objects through.
+        if (!this->trackSteadyObjects_ && obsDist < this->minNaturalMotionDist_){
             return false;
         }
 
@@ -4093,8 +4078,9 @@ namespace onboardDetector{
         const double predVy = predictedFilter.output(3);
         const double predSpeed = std::sqrt(predVx * predVx + predVy * predVy);
 
-        // Confirmed track and nearly stationary → always pass
-        if (alreadyConfirmed &&
+        // Confirmed track and nearly stationary → always pass.
+        // When trackSteadyObjects_, also pass for non-confirmed tracks.
+        if ((alreadyConfirmed || this->trackSteadyObjects_) &&
             obsSpeed < this->stationarySpeedThresh_ &&
             predSpeed < this->stationarySpeedThresh_)
         {
@@ -4201,7 +4187,7 @@ namespace onboardDetector{
         const double dy = currDetectedBBox.y - prevBBox.y;
         const double obsSpeed = std::sqrt(dx * dx + dy * dy) / dt;
 
-        if (obsSpeed < this->stationarySpeedThresh_){
+        if (!this->trackSteadyObjects_ && obsSpeed < this->stationarySpeedThresh_){
             return false;
         }
 
@@ -4211,8 +4197,9 @@ namespace onboardDetector{
 
         // Outside camera FOV: require Kalman velocity to be consistently above threshold
         // across history to filter out LiDAR jitter that produces apparent single-frame motion.
+        // Skip this gate when trackSteadyObjects_ is true (we want to confirm stationary tracks).
         const Eigen::Vector3d bboxPos(currDetectedBBox.x, currDetectedBBox.y, currDetectedBBox.z);
-        if (!this->isInCameraFOV(bboxPos)){
+        if (!this->trackSteadyObjects_ && !this->isInCameraFOV(bboxPos)){
             const int nSamples = static_cast<int>(this->boxHist_[trackIdx].size());
             if (nSamples < 2){
                 return false; // not enough history to assess consistency outside FOV
@@ -4320,17 +4307,6 @@ namespace onboardDetector{
         }
     }
 
-    void dynamicDetector::getPrevBBoxes(std::vector<onboardDetector::box3D>& prevBoxes, std::vector<Eigen::Vector3d>& prevPcCenters){
-        onboardDetector::box3D prevBox;
-        for (size_t i=0 ; i<this->boxHist_.size() ; i++){
-            prevBox = this->boxHist_[i][0];
-            prevBoxes.push_back(prevBox);
-
-            Eigen::Vector3d prevPcCenter = this->pcCenterHist_[i][0];
-            prevPcCenters.push_back(prevPcCenter);
-        }
-    }
-      
     void dynamicDetector::findBestMatch(const std::vector<onboardDetector::box3D>& predictedBBoxes,
                                         const std::vector<onboardDetector::box3D>& previousObservedBBoxes,
                                         std::vector<int>& bestMatch)
@@ -4547,20 +4523,26 @@ namespace onboardDetector{
             double YW = (matchIdx < static_cast<int>(this->yoloYWidth_.size())) ? this->yoloYWidth_[matchIdx] : 0.0;
             int oldBaseMismatch = (matchIdx < static_cast<int>(this->yoloBaseMismatchStreak_.size())) ? this->yoloBaseMismatchStreak_[matchIdx] : 0;
 
-            // Update stored dims whenever we get a fresh YOLO detection.
+            // Update stored dims on a fresh YOLO detection: keep the maximum seen so far.
+            // Using the max prevents the baseline from shrinking (e.g. partial occlusion),
+            // so the ID-swap growth check is always relative to the largest known size.
             if (currDetectedBBox.is_yolo_candidate){
-                XW = currDetectedBBox.x_width;
-                YW = currDetectedBBox.y_width;
+                XW = std::max(XW, currDetectedBBox.x_width);
+                YW = std::max(YW, currDetectedBBox.y_width);
             }
 
             int newBaseMismatch = 0;
             if (!insideFov && newEstimatedBBox.is_yolo_candidate && XW > 0.0 && YW > 0.0){
-                const double relDiffX = std::abs(currDetectedBBox.x_width - XW) / std::max(XW, 0.01);
-                const double relDiffY = std::abs(currDetectedBBox.y_width - YW) / std::max(YW, 0.01);
-                if (relDiffX > this->yoloBaseMismatchThresh_ || relDiffY > this->yoloBaseMismatchThresh_){
+                // Outside FOV the bbox naturally shrinks (LiDAR-only is sparser than LiDAR+depth).
+                // Only flag growth: a bbox growing significantly vs. the YOLO baseline indicates
+                // an ID swap toward a larger object (wall, vehicle, noisy cluster).
+                // Shrinkage is ignored — it is a physical artifact, not an ID swap.
+                const double growthX = (currDetectedBBox.x_width - XW) / std::max(XW, 0.01);
+                const double growthY = (currDetectedBBox.y_width - YW) / std::max(YW, 0.01);
+                if (growthX > this->yoloBaseMismatchThresh_ || growthY > this->yoloBaseMismatchThresh_){
                     newBaseMismatch = oldBaseMismatch + 1;
                 }
-                // else: reset to 0 (dimensions match → legitimate track)
+                // else: reset to 0 (dimensions within expected range → legitimate track)
             }
 
             if (newBaseMismatch >= this->maxYoloBaseMismatchFrames_){
@@ -4624,7 +4606,8 @@ namespace onboardDetector{
                 // even when stationary — they represent known dynamic objects (people, vehicles).
                 const double kfSpeed = std::sqrt(newEstimatedBBox.Vx * newEstimatedBBox.Vx +
                                                   newEstimatedBBox.Vy * newEstimatedBBox.Vy);
-                const bool suppressStationary = !newEstimatedBBox.is_yolo_candidate &&
+                const bool suppressStationary = !this->trackSteadyObjects_ &&
+                                                !newEstimatedBBox.is_yolo_candidate &&
                                                 (kfSpeed < this->stationarySpeedThresh_);
 
                 if (!suppressStationary){

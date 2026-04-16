@@ -8,10 +8,10 @@ wall_detector_node:
       lidar_topic: /velodyne_points
       map_frame: map
       lidar_frame: velodyne
-      use_tf_pose: true
+      use_tf_pose: true  # if true, read robot pose from TF instead of pose/odom topic
 
       # Calibration gate
-      calibration_child_frame: camera_refined
+      calibration_child_frame: camera_refined  # detection starts only after this TF frame is published by ICP
 
       # Enable/disable wall detection (ground estimation always runs)
       enable_wall_detection: true
@@ -20,39 +20,39 @@ wall_detector_node:
       # Depth Camera (for ground/roof estimation via RANSAC)
       # -----------------------------------------------------------------------
       depth_image_topic: /front_camera/camera/depth/image_rect_raw
-      depth_frame: camera_refined  # TF frame for the depth camera
-      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]
-      depth_scale_factor: 1000.0
-      depth_min_value: 0.5
-      depth_max_value: 4.5
-      depth_skip_pixel: 2
-      ground_estim_bottom_fraction: 4
-      ground_estim_min_inliers: 50
+      depth_frame: camera_refined           # TF frame for the depth camera
+      depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906]  # [fx, fy, cx, cy]
+      depth_scale_factor: 1000.0            # raw_value / scale = meters (1000 for Intel RealSense 16-bit)
+      depth_min_value: 0.5                  # [m] points closer than this are discarded
+      depth_max_value: 4.5                  # [m] points farther than this are discarded
+      depth_skip_pixel: 2                   # subsample every N pixels to reduce computation
+      ground_estim_bottom_fraction: 4       # use the bottom 1/N rows of the depth image for ground estimation
+      ground_estim_min_inliers: 50          # min RANSAC inliers to accept a ground plane fit
 
       # Ground / Roof estimation
-      ground_height: -0.7          # initial ground height [m]
-      ground_roof_offset: 5.0      # roof = ground + offset
-      ground_ema_alpha: 0.05       # EMA smoothing factor
+      ground_height: -0.7          # [m] initial ground height (overwritten by RANSAC estimation)
+      ground_roof_offset: 5.0      # [m] roof = ground + offset
+      ground_ema_alpha: 0.05       # EMA smoothing factor for ground height updates (lower = slower response)
 
       # -----------------------------------------------------------------------
       # Wall Filter (RANSAC plane detection on LiDAR)
       # -----------------------------------------------------------------------
-      voxel_resolution: 0.25
-      ransac_max_iterations: 100
-      ransac_inlier_threshold: 0.07
-      ransac_min_inliers: 30
-      ransac_confidence: 0.99
-      wall_vertical_angle_deg: 5.0
-      max_planes: 8
-      wall_bbox_max_aspect_ratio: 5.0
+      voxel_resolution: 0.25              # [m] voxel down-sampling of the LiDAR cloud before RANSAC
+      ransac_max_iterations: 100          # max RANSAC iterations per plane extraction
+      ransac_inlier_threshold: 0.07       # [m] max point-to-plane distance to count as inlier
+      ransac_min_inliers: 30              # min inliers required to accept a plane
+      ransac_confidence: 0.99             # desired probability that at least one sample is outlier-free
+      wall_vertical_angle_deg: 5.0        # [deg] max angle between plane normal and horizontal to classify as wall
+      max_planes: 8                       # max number of wall planes extracted per scan
+      wall_bbox_max_aspect_ratio: 5.0     # OBB with longer/shorter axis ratio above this is discarded as non-wall
 
       # Wall BBox Registry (tracking across frames)
-      overlap_threshold: 0.3
-      merge_weight: 0.3
-      enable_expiry: true
-      max_missed_frames: 30
-      min_normal_dot: 0.9
-      max_center_distance: 5.0
+      overlap_threshold: 0.3       # IOV threshold above which two OBBs are considered overlapping for registry merge
+      merge_weight: 0.3            # EMA weight for merging incoming OBB into existing registry entry (0 = no update)
+      enable_expiry: true          # if true, remove wall entries not seen for max_missed_frames frames
+      max_missed_frames: 30        # frames before a wall entry expires (~3.6s at 8Hz LiDAR)
+      min_normal_dot: 0.9          # min dot product between normals to consider two planes as the same wall
+      max_center_distance: 5.0     # [m] max center-to-center distance to consider two OBBs as the same wall
 
 # =========================================================================
 # Detector Node
@@ -69,8 +69,8 @@ detector_node:
       depth_image_topic: /front_camera/camera/depth/image_rect_raw
       color_image_topic: /front_camera/camera/color/image_raw
       lidar_pointcloud_topic: /velodyne_points
-      pose_topic: /glim_ros/lidar_pose
-      odom_topic: /odom
+      pose_topic: /glim_ros/lidar_pose  # used when localization_mode=0
+      odom_topic: /odom                 # used when localization_mode=1
       use_tf_pose: true          # if true, read robot pose from TF instead of pose/odom topic
       tf_map_frame: map          # name of the fixed world frame in TF
       tf_lidar_frame: velodyne   # TF frame of the LiDAR sensor
@@ -105,8 +105,8 @@ detector_node:
       # Ground & Roof Initial Values
       # (estimation now runs in wall_detector_node; these are initial fallbacks)
       # -----------------------------------------------------------------------
-      ground_height: -0.7  # [m] initial ground Z in world frame
-      roof_height: 4.0     # [m] initial roof height
+      ground_height: -0.7      # [m] initial ground Z in world frame
+      roof_height: 4.0         # [m] initial roof height
       ground_roof_offset: 5.0  # [m] roofHeight = groundHeight + this value
 
       # -----------------------------------------------------------------------
@@ -123,38 +123,38 @@ detector_node:
       # -----------------------------------------------------------------------
       # Visual DBSCAN Parameters (depth point cloud)
       # -----------------------------------------------------------------------
-      dbscan_min_points_cluster: 15    # min points per cluster (higher = less noise, misses more distant objects)
+      dbscan_min_points_cluster: 15     # min points per cluster (higher = less noise, misses more distant objects)
       dbscan_search_range_epsilon: 0.08 # [m] neighbourhood radius for DBSCAN core-point test
 
-      downsample_threshold: 7000   # if projected points exceed this count, apply Gaussian downsampling
+      downsample_threshold: 7000    # if projected points exceed this count, apply Gaussian downsampling
       gaussian_downsample_rate: 10  # keep 1 in N points after Gaussian downsampling
 
       # -----------------------------------------------------------------------
       # DBSCAN Refinement (recursive cluster splitting)
       # -----------------------------------------------------------------------
-      dbscan_refinement_enable: true
+      dbscan_refinement_enable: true         # enable recursive splitting for LiDAR clusters
       visual_dbscan_refinement_enable: true  # if false, visual DBSCAN skips refinement (LiDAR still uses dbscan_refinement_enable)
-      dbscan_refine_max_diagonal: 2.5      # [m] clusters with diagonal > this are split (unless density is high enough)
-      dbscan_refine_min_density: 120.0     # [pts/m³] if density exceeds this, large clusters are kept as-is
-      dbscan_refine_split_min_pts: 10      # min points required in each sub-cluster after a split
-      dbscan_refine_split_eps: 0.07        # [m] DBSCAN epsilon used during the split pass
-      dbscan_refine_min_subcluster_pts: 12 # sub-clusters smaller than this are discarded after splitting
-      dbscan_refine_axis_slice_width: 0.6  # [m] slice width along dominant axis when splitting
-      dbscan_refine_max_depth: 2           # maximum recursion depth for splitting
-      dbscan_refine_recursive: true
-      dbscan_refine_min_box_volume: 0.0001 # [m³] bounding boxes smaller than this are discarded
+      dbscan_refine_max_diagonal: 2.5        # [m] clusters with diagonal > this are split (unless density is high enough)
+      dbscan_refine_min_density: 120.0       # [pts/m³] if density exceeds this, large clusters are kept as-is
+      dbscan_refine_split_min_pts: 10        # min points required in each sub-cluster after a split
+      dbscan_refine_split_eps: 0.07          # [m] DBSCAN epsilon used during the split pass
+      dbscan_refine_min_subcluster_pts: 12   # sub-clusters smaller than this are discarded after splitting
+      dbscan_refine_axis_slice_width: 0.6    # [m] slice width along dominant axis when splitting
+      dbscan_refine_max_depth: 2             # maximum recursion depth for splitting
+      dbscan_refine_recursive: true          # if false, only one split level is applied (no recursion)
+      dbscan_refine_min_box_volume: 0.0001   # [m³] bounding boxes smaller than this are discarded
 
       # -----------------------------------------------------------------------
       # LiDAR DBSCAN Parameters
       # -----------------------------------------------------------------------
-      lidar_DBSCAN_min_points: 10 # min points per LiDAR cluster
+      lidar_DBSCAN_min_points: 10  # min points per LiDAR cluster
       lidar_DBSCAN_epsilon: 0.04   # [m] DBSCAN neighbourhood radius for LiDAR
 
       # -----------------------------------------------------------------------
       # BBox Merging — Intra-group (same detection source)
       # -----------------------------------------------------------------------
       samegroupIOU_threshold: 0.4  # mutual IOU above this → merge as overlapping peers
-      samegroupIOV_threshold: 0.5   # IOV (intersection / volume of smaller box) above this → merge as nested
+      samegroupIOV_threshold: 0.5  # IOV (intersection / volume of smaller box) above this → merge as nested
 
       # -----------------------------------------------------------------------
       # BBox Merging — UV <-> DBSCAN (visual pipeline)
@@ -183,11 +183,16 @@ detector_node:
       # -----------------------------------------------------------------------
       # Tracking & Data Association
       # -----------------------------------------------------------------------
-      max_match_range: 2.0       # [m] max positional distance to match a detection to an existing track
-      track_max_zmin_above_ground: 1.5  # [m] bboxes with zmin > groundHeight + this are not tracked
-      history_size: 100           # number of past frames stored per track (history[0] = current)
+      max_match_range: 2.0                  # [m] max positional distance to match a detection to an existing track
+      track_max_zmin_above_ground: 1.5      # [m] bboxes with zmin > groundHeight + this are not tracked
+      history_size: 100                     # number of past frames stored per track (history[0] = current)
       # Kalman Filter V2 — position-only observation; velocity & acceleration estimated internally
       # Parameters: [eP, eQPos, eQVel, eQAcc, eRPos]
+      #   eP:    initial state covariance
+      #   eQPos: process noise on position
+      #   eQVel: process noise on velocity
+      #   eQAcc: process noise on acceleration
+      #   eRPos: measurement noise on position
       kalman_filter_v2_param: [0.25, 0.05, 0.15, 0.10, 0.02]
       # OLD Kalman V1 params (kept for reference, not used by active code):
       # kalman_filter_param:     [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
@@ -202,15 +207,14 @@ detector_node:
       min_match_score_confirmed: -1.20  # stricter threshold for already-confirmed tracks
       min_match_score_dynamic: -1.50    # stricter threshold for dynamic tracks
 
-      max_match_speed: 8.0              # [m/s] max expected object speed; used to gate association distance
-      match_pos_score_weight: 1.0             # weight on predicted-position distance term
-      match_size_score_weight: 0.35           # weight on relative size difference term
-      match_iou2d_score_weight: 0.15          # weight on 2D IOU term
-      match_velocity_direction_score_weight: 0.12  # weight on velocity direction consistency
-      match_yolo_class_consistency_weight: 0.50    # penalty when a YOLO/dynamic track is matched to a non-YOLO detection
-      match_prev_obs_pos_score_weight: 0.25   # weight on distance to previous observation position
-      match_prev_obs_iou2d_score_weight: 0.10 # weight on IOU with previous observation bbox
-      match_feat_score_weight: 0.15           # weight on point cloud feature similarity
+      max_match_speed: 8.0                          # [m/s] max expected object speed; used to gate association distance
+      match_pos_score_weight: 1.0                   # weight on predicted-position distance term
+      match_size_score_weight: 0.35                 # weight on relative size difference term
+      match_iou2d_score_weight: 0.15                # weight on 2D IOU term
+      match_velocity_direction_score_weight: 0.12   # weight on velocity direction consistency
+      match_yolo_class_consistency_weight: 0.50     # penalty when a YOLO/dynamic track is matched to a non-YOLO detection
+      match_prev_obs_pos_score_weight: 0.25         # weight on distance to previous observation position
+      match_prev_obs_iou2d_score_weight: 0.10       # weight on IOU with previous observation bbox
 
       max_relative_size_diff_match: 0.80  # max relative size ratio difference allowed in matching
 
@@ -221,7 +225,7 @@ detector_node:
       confirmed_track_assoc_bonus: 0.20  # score bonus when matching to a confirmed track
       yolo_track_assoc_bonus: 0.25       # score bonus when matching a YOLO-flagged detection
 
-      enable_tracking_debug_logs: true
+      enable_tracking_debug_logs: true   # if true, publish verbose per-track RCLCPP_DEBUG logs
 
       # -----------------------------------------------------------------------
       # Track Confirmation & Natural Motion
@@ -232,32 +236,39 @@ detector_node:
       max_natural_innovation: 0.60         # [m] max Kalman innovation for an unconfirmed track
       max_natural_innovation_confirmed: 1.00  # [m] same, for confirmed tracks
       max_natural_innovation_dynamic: 1.20    # [m] same, for dynamic tracks
-      max_velocity_direction_error_confirm: 1.20   # [rad] max heading error for confirming a track
-      max_velocity_direction_error_tracked: 2.50   # [rad] max heading error for a tracked (non-dynamic) track
+      max_velocity_direction_error_confirm: 1.20          # [rad] max heading error for confirming a track
+      max_velocity_direction_error_tracked: 2.50          # [rad] max heading error for a tracked (non-dynamic) track
       max_velocity_direction_error_confirm_dynamic: 2.20  # [rad] same, for confirming a dynamic track
       max_velocity_direction_error_tracked_dynamic: 4.00  # [rad] same, for a tracked dynamic track
       stationary_speed_thresh: 0.10  # [m/s] tracks below this speed are classified as stationary
+      track_steady_objects: false    # if true, also track non-YOLO stationary objects (relaxed direction gates)
 
       # -----------------------------------------------------------------------
       # YOLO Dynamic Classification
       # -----------------------------------------------------------------------
       yolo_dynamic_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
       yolo_point_fraction_threshold: 0.2   # min fraction of foreground YOLO points inside a 3D bbox to mark it dynamic
-      yolo_depth_tolerance: 1.0             # [m] depth window beyond the foreground percentile to keep (background rejection)
-      max_missed_frames_yolo: 10         # extended lifetime for YOLO-confirmed tracks (persons/vehicles)
-      max_non_yolo_in_fov_frames: 3      # consecutive non-YOLO frames inside FOV to clear sticky YOLO flag
-      max_yolo_base_mismatch_frames: 3
-      yolo_base_mismatch_thresh: 0.70
+      yolo_depth_tolerance: 0.5            # [m] depth window beyond the foreground percentile to keep (background rejection)
+      max_missed_frames_yolo: 10           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
+      max_non_yolo_in_fov_frames: 3        # inside FOV: consecutive frames without a YOLO hit before clearing the sticky flag
+      # Outside-FOV YOLO ID-swap guard: clears is_yolo_candidate only if the bbox *grows* vs. the YOLO baseline.
+      # Shrinkage is intentionally ignored — LiDAR-only (outside FOV) produces smaller bboxes than LiDAR+depth.
+      # Only growth signals an ID swap toward a larger object (wall, vehicle, noisy cluster).
+      # Tuning: a person bbox (~0.5m) swapping to a wall (>1.5m) causes >200% growth → well above threshold.
+      #         Natural LiDAR pose variation stays below 150% growth → not flagged.
+      max_yolo_base_mismatch_frames: 5     # consecutive growth frames before clearing is_yolo_candidate (~0.6s at 0.12s/frame)
+      yolo_base_mismatch_thresh: 1.5       # fractional growth threshold: 1.5 = bbox grew >150% vs. YOLO baseline
+
       # -----------------------------------------------------------------------
       # Dynamic Classification (point cloud motion voting)
       # -----------------------------------------------------------------------
-      frame_skip: 2                         # [frames] gap for point cloud displacement estimate
+      frame_skip: 2                         # [frames] gap for point cloud displacement estimate (2 × 0.12s = 0.24s)
       dynamic_velocity_threshold: 0.25      # [m/s] min speed to cast a vote (per-point) AND Kalman gate
-      dynamic_voting_threshold: 0.70        # fraction of consistent votes required
-      dynamic_kf_vel_std_ratio: 0.60        # max (std/mean) of Kalman speed over frame_skip frames
-      frames_force_dynamic: 7               # min dynamic frames in window to keep sticky label
-      frames_force_dynamic_check_range: 10  # [frames] sliding window for sticky label check
-      dynamic_consistency_threshold: 5      # consecutive candidate frames before confirming
+      dynamic_voting_threshold: 0.70        # fraction of consistent votes required (70% balances sensitivity vs. false positives)
+      dynamic_kf_vel_std_ratio: 0.60        # max (std/mean) of Kalman speed over frame_skip frames; lower = stricter confidence gate
+      frames_force_dynamic: 7               # min dynamic frames in window to keep sticky label (out of check_range below)
+      frames_force_dynamic_check_range: 10  # [frames] sliding window for sticky label check (~1.2s at 0.12s/frame)
+      dynamic_consistency_threshold: 5      # consecutive candidate frames before confirming dynamic (~0.6s at 0.12s/frame)
 
       # -----------------------------------------------------------------------
       # Object Size Constraints
@@ -286,23 +297,23 @@ calibration_icp_node:
     icp_fitness_threshold: 0.3             # min ICP fitness score to accept a result (0-1, higher = better fit)
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # [fx, fy, cx, cy]
-      depth_scale_factor: 1000.0
-      depth_min_value: 0.5  # [m]
-      depth_max_value: 5.0  # [m] slightly larger than detector to include edge points during calibration
-      depth_skip_pixel: 2
+      depth_scale_factor: 1000.0           # raw_value / scale = meters
+      depth_min_value: 0.5                 # [m]
+      depth_max_value: 5.0                 # [m] slightly larger than detector to include edge points during calibration
+      depth_skip_pixel: 2                  # subsample every N pixels
 
 yolov11_detector_node:
   ros__parameters:
     image_topic: /front_camera/camera/color/image_raw
-    detected_image_topic: yolo_detector/detected_image
-    detected_bboxes_topic: yolo_detector/detected_bounding_boxes
-    inference_time_topic: yolo_detector/yolo_time
-    weights_path: weights/yolo11n.pt
-    class_names_path: config/coco.names
+    detected_image_topic: yolo_detector/detected_image           # topic for the annotated output image
+    detected_bboxes_topic: yolo_detector/detected_bounding_boxes  # topic for 2D bbox detections (vision_msgs)
+    inference_time_topic: yolo_detector/yolo_time                # topic for per-frame inference timing
+    weights_path: weights/yolo11n.pt        # path to YOLO model weights (relative to package share)
+    class_names_path: config/coco.names     # path to class name list
     target_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
     timer_period_sec: 0.033  # [s] inference period (~30 Hz)
     inference_size: 352       # [px] YOLO input resolution (lower = faster, less accurate at distance)
-    queue_size: 10
+    queue_size: 10            # ROS subscriber queue depth
 
 # yolo_detector_node:  # legacy YOLOv4/v5 node, kept for reference
 #   ros__parameters:
