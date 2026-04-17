@@ -1833,6 +1833,25 @@ namespace onboardDetector{
         RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] (post) boxHist_ size: %zu, pcHist_ size: %zu, filters_ size: %zu, missedFrames_ size: %zu, trackedBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->filters_.size(), this->missedFrames_.size(), this->trackedBBoxes_.size());
     }
 
+    // =====================================================================================
+    // classificationCB() — Dynamic obstacle classification.
+    //
+    // Decides which tracked bounding boxes are dynamic obstacles. Runs periodically
+    // (same rate as tracking) and processes only confirmed, non-suppressed tracks
+    // that appear in the tracked output (trackedBBoxes_).
+    //
+    // A track can become is_dynamic = true through exactly 3 paths (evaluated in order):
+    //
+    //   PATH 1 — YOLO:  is_yolo_candidate → always dynamic, no motion analysis.
+    //   PATH 2 — Historical continuity:  already classified dynamic in recent frames
+    //            AND still moving → stays dynamic (avoids re-running point voting).
+    //   PATH 3 — Point-cloud motion voting:  per-point nearest-neighbor velocity
+    //            analysis + multi-frame consistency check.
+    //
+    // The is_dynamic flag is NOT sticky: it is reset to false each frame by
+    // kalmanFilterAndUpdateHist() and must be re-earned here every cycle.
+    // This means a track that stops moving will lose its dynamic label.
+    // =====================================================================================
     void dynamicDetector::classificationCB(){
 
         if(this->lidarToDepthCamOk_ == false){
@@ -1840,44 +1859,43 @@ namespace onboardDetector{
             return;
         }
 
-        // Debug: Print history sizes before classification
         RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] boxHist_ size: %zu, pcHist_ size: %zu, dynamicBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->dynamicBBoxes_.size());
 
-        // Build set of track IDs currently in the tracked output.
-        // Classification runs ONLY on tracks that appear in trackedBBoxes_
-        // (confirmed + not stationary-suppressed + not predicted-only).
-        // This ensures every blue (dynamic) bbox corresponds to a yellow (tracked) bbox.
+        // Only classify tracks that are currently in the tracked output
+        // (confirmed + not stationary-suppressed + not predict-only).
+        // This guarantees every dynamic (blue) bbox has a corresponding tracked (yellow) bbox.
         std::unordered_set<int> outputTrackIds;
         for (const auto& tb : this->trackedBBoxes_){
             outputTrackIds.insert(static_cast<int>(tb.id));
         }
 
-        // Identification thread
         std::vector<onboardDetector::box3D> dynamicBBoxesTemp;
 
-        // Iterate through all pointcloud/bounding boxes history (note that yolo's pointclouds are dummy pointcloud (empty))
-        // NOTE: There are 3 cases which we don't need to perform dynamic obstacle identification.
         for (size_t i=0; i<this->pcHist_.size() ; ++i){
-            // Skip tracks that are not in the tracked output.
+
+            // Skip tracks not present in the tracked output.
             if (this->boxHist_[i].empty() ||
                 outputTrackIds.find(static_cast<int>(this->boxHist_[i][0].id)) == outputTrackIds.end()){
                 continue;
             }
 
             // ===================================================================================
-            // CASE I: YOLO-certified object → always dynamic, maintained until track is lost.
-            // Explicitly set is_dynamic=true in boxHist_ so force_dynamic (CASE III) can count
-            // this frame when the object later exits the camera FOV and YOLO is unavailable.
+            // PATH 1 — YOLO: immediate dynamic classification.
+            // YOLO-certified tracks are always dynamic. We also write is_dynamic=true into
+            // boxHist_ so that PATH 2 can count this frame later (e.g. when the object exits
+            // the camera FOV and YOLO detections stop).
+            // ===================================================================================
             if (this->boxHist_[i][0].is_yolo_candidate){
                 this->boxHist_[i][0].is_dynamic = true;
                 dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
                 continue;
             }
-            // ===================================================================================
 
-
-            // ===================================================================================
-            // CASE II: history length is not enough to run classification
+            // -----------------------------------------------------------------------------------
+            // Determine the temporal baseline for motion analysis (curFrameGap).
+            // Ideally skipFrame_ frames back (e.g. 2 → 0.24s), but use whatever history is
+            // available if the track is still young.
+            // -----------------------------------------------------------------------------------
             int curFrameGap;
             if (int(this->pcHist_[i].size()) < this->skipFrame_+1){
                 curFrameGap = this->pcHist_[i].size() - 1;
@@ -1885,14 +1903,15 @@ namespace onboardDetector{
             else{
                 curFrameGap = this->skipFrame_;
             }
+
             // ===================================================================================
-
-
-            // ==================================================================================
-            // CASE III: Force Dynamic — if the obstacle was classified as dynamic for enough
-            // recent frames AND is currently moving. Since is_dynamic is not sticky, the
-            // history entries [1..N] reflect classificationCB decisions from previous frames.
-            // Velocity is required: a non-YOLO track that stops should lose the dynamic label.
+            // PATH 2 — Historical continuity (shortcut for already-dynamic tracks).
+            // If enough of the last forceDynaCheckRange_ frames were classified is_dynamic,
+            // re-confirm immediately — but ONLY if the track is still moving (KF speed ≥ thresh).
+            // A track that stops loses the label even if it was dynamic before.
+            // History entries [1..N] reflect classificationCB decisions from previous frames
+            // (is_dynamic is non-sticky, so each entry is an independent decision).
+            // ===================================================================================
             int dynaFrames = 0;
             if (int(this->boxHist_[i].size()) > this->forceDynaCheckRange_){
                 for (int j=1 ; j<this->forceDynaCheckRange_+1 ; ++j){
@@ -1911,29 +1930,38 @@ namespace onboardDetector{
                     continue;
                 }
             }
+
+            // ===================================================================================
+            // PATH 3 — Point-cloud motion voting.
+            // The full analysis path for tracks that are not YOLO and not already dynamic.
+            // Consists of 3 stages:
+            //   3a) Kalman velocity confidence (alternative to voting for sparse LiDAR clouds)
+            //   3b) Per-point nearest-neighbor voting
+            //   3c) Multi-frame consistency check (anti-flicker)
             // ===================================================================================
 
+            // --- Velocity setup ---
             std::vector<Eigen::Vector3d> currPc = this->pcHist_[i][0];
             std::vector<Eigen::Vector3d> prevPc = this->pcHist_[i][curFrameGap];
-            Eigen::Vector3d Vcur(0.,0.,0.); // single point velocity
-            Eigen::Vector3d Vbox(0.,0.,0.); // bounding box velocity
-            Eigen::Vector3d Vkf(0.,0.,0.);  // velocity estimated from kalman filter
-            int numPoints = currPc.size(); // it changes within loop
-            int votes = 0;
+            Eigen::Vector3d Vcur(0.,0.,0.);  // per-point velocity (reused in loop)
+            Eigen::Vector3d Vbox(0.,0.,0.);  // box centroid velocity (finite difference)
+            Eigen::Vector3d Vkf(0.,0.,0.);   // Kalman filter velocity estimate
+            int numPoints = currPc.size();    // effective point count (decremented for outliers)
+            int votes = 0;                    // points voting "dynamic"
 
+            // Box velocity: finite difference of centroid position over curFrameGap frames.
             Vbox(0) = (this->boxHist_[i][0].x - this->boxHist_[i][curFrameGap].x)/(this->dt_*curFrameGap);
             Vbox(1) = (this->boxHist_[i][0].y - this->boxHist_[i][curFrameGap].y)/(this->dt_*curFrameGap);
             Vbox(2) = (this->boxHist_[i][0].z - this->boxHist_[i][curFrameGap].z)/(this->dt_*curFrameGap);
             Vkf(0) = this->boxHist_[i][0].Vx;
             Vkf(1) = this->boxHist_[i][0].Vy;
 
-            // -----------------------------------------------------------------------
-            // Kalman velocity quality check.
-            // Outside the camera FOV the point cloud comes only from LiDAR (sparse),
-            // so point-voting may be unreliable. If the Kalman filter has been
-            // consistently estimating speed above threshold over the last curFrameGap
-            // frames (low relative std), treat it as a confident motion indicator and
-            // bypass the point-voting requirement.
+            // --- Stage 3a: Kalman velocity confidence ---
+            // Outside the camera FOV, the point cloud comes only from LiDAR (sparse),
+            // so per-point voting may be unreliable. As an alternative, check whether
+            // the Kalman filter has been consistently estimating high speed with low
+            // variance over recent frames. If so, treat it as confident motion evidence
+            // that can bypass the point-voting requirement.
             int kfSamples = std::min(curFrameGap + 1, (int)this->boxHist_[i].size());
             double kfVelMean = 0.0;
             for (int h = 0; h < kfSamples; ++h){
@@ -1951,16 +1979,20 @@ namespace onboardDetector{
             kfVelVar /= std::max(kfSamples, 1);
             const double kfVelStd = std::sqrt(kfVelVar);
 
-            // Confident if mean speed is above threshold and std is small relative to mean
+            // Confident = mean speed above threshold AND std small relative to mean.
             const bool kfVelConfident = (kfVelMean >= this->dynaVelThresh_) &&
                                         (kfVelStd <= this->dynaKfVelStdRatio_ * kfVelMean);
-            // -----------------------------------------------------------------------
 
-            // find nearest neighbor
+            // --- Stage 3b: Per-point nearest-neighbor voting ---
+            // For each point in the current cloud, find its nearest neighbor in the
+            // cloud from curFrameGap frames ago. Compute the per-point velocity and
+            // check its alignment (cosine similarity) with the box velocity:
+            //   - velSim < 0  → point moves opposite to the box → exclude from count
+            //   - velSim >= 0 AND |Vcur| > threshold → vote "dynamic"
             for (size_t j=0 ; j<currPc.size() ; ++j){
                 double minDist = 2;
                 Eigen::Vector3d nearestVect;
-                for (size_t k=0 ; k<prevPc.size() ; k++){ // find the nearest point in the previous pointcloud
+                for (size_t k=0 ; k<prevPc.size() ; k++){
                     double dist = (currPc[j]-prevPc[k]).norm();
                     if (abs(dist) < minDist){
                         minDist = dist;
@@ -1980,18 +2012,20 @@ namespace onboardDetector{
                 }
             }
 
-            // update dynamic boxes
+            // --- Stage 3c: Decision + multi-frame consistency check ---
             double voteRatio = (numPoints>0)?double(votes)/double(numPoints):0;
             double velNorm = Vkf.norm();
 
-            // Dynamic condition:
-            // - Kalman speed above threshold (always required as hard gate)
-            // - EITHER point-cloud votes above dynaVoteThresh_
-            //   OR Kalman velocity is consistently high with low variance (kfVelConfident),
-            //      which handles the outside-FOV case where LiDAR clouds are sparse.
+            // Dynamic candidate condition (single-frame):
+            //   Hard gate: KF speed must be above dynaVelThresh_ (always required).
+            //   Soft gate: EITHER enough points voted dynamic (voteRatio >= dynaVoteThresh_)
+            //              OR the KF velocity is confident (handles sparse outside-FOV clouds).
             if ((voteRatio >= this->dynaVoteThresh_ || kfVelConfident) && velNorm >= this->dynaVelThresh_){
                 this->boxHist_[i][0].is_dynamic_candidate = true;
-                // dynamic-consistency check
+
+                // Anti-flicker consistency check: require dynamicConsistThresh_ consecutive
+                // frames of dynamic evidence before actually classifying as dynamic.
+                // Evidence = any of: is_dynamic_candidate, is_yolo_candidate, or is_dynamic.
                 int dynaConsistCount = 0;
                 if (int(this->boxHist_[i].size()) >= this->dynamicConsistThresh_){
                     for (int j=0 ; j<this->dynamicConsistThresh_; ++j){
@@ -2000,6 +2034,7 @@ namespace onboardDetector{
                         }
                     }
                 }
+                // All N frames have evidence → classify as dynamic.
                 if (dynaConsistCount == this->dynamicConsistThresh_){
                     this->boxHist_[i][0].is_dynamic = true;
                     dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
@@ -2007,7 +2042,8 @@ namespace onboardDetector{
             }
         }
 
-        // filter the dynamic obstacles based on the target sizes
+        // Optional post-filter: discard dynamic bboxes whose dimensions are too far
+        // from the expected target object sizes (e.g. person ≈ 0.5×0.5×1.7 m).
         if (this->constrainSize_){
             std::vector<onboardDetector::box3D> dynamicBBoxesBeforeConstrain = dynamicBBoxesTemp;
             dynamicBBoxesTemp.clear();
@@ -2036,14 +2072,10 @@ namespace onboardDetector{
         this->publishUVImages();
         this->publishColorImages();
         
-        // Publish 3D visualization markers for all bounding box stages
         this->publish3dBox(this->uvBBoxes_, this->uvBBoxesPub_, 0, 1, 0);
-        //this->publish3dBox(this->uvBBoxesFiltered_, this->uvBBoxesFilteredPub_, 0, 1, 0.5);
         this->publish3dBox(this->dbBBoxes_, this->dbBBoxesPub_, 1, 0, 0);
-        //this->publish3dBox(this->dbBBoxesFiltered_, this->dbBBoxesFilteredPub_, 1, 0.5, 0);
         this->publish3dBox(this->visualBBoxes_, this->visualBBoxesPub_, 0.3, 0.8, 1.0);
         this->publish3dBox(this->lidarBBoxes_, this->lidarBBoxesPub_, 0.5, 0.5, 0.5);
-        //this->publish3dBox(this->lidarBBoxesFiltered_, this->lidarBBoxesFilteredPub_, 0.5, 0, 0.5);
         this->publish3dBox(this->filteredBBoxesBeforeYolo_, this->filteredBBoxesBeforeYoloPub_, 0, 1, 0.5);
         this->publish3dBox(this->filteredBBoxes_, this->filteredBBoxesPub_, 0, 1, 1);
         this->publish3dBox(this->trackedBBoxes_, this->trackedBBoxesPub_, 1, 1, 0);
