@@ -5576,7 +5576,7 @@ namespace onboardDetector{
             line.color.g = g;
             line.color.b = b;
             line.color.a = 1.0;
-            line.lifetime = rclcpp::Duration::from_seconds(0.05);
+            line.lifetime = rclcpp::Duration::from_seconds(this->dt_);
             line.pose.orientation.x = 0.0;
             line.pose.orientation.y = 0.0;
             line.pose.orientation.z = 0.0;
