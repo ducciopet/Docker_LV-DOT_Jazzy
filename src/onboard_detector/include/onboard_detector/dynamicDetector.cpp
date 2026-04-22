@@ -48,7 +48,7 @@ namespace onboardDetector{
         this->nh_->get_parameter(pname("use_tf_pose"), this->useTfPose_);
 
         if (!this->nh_->get_parameter(pname("tf_map_frame"), this->tfMapFrame_)) {
-            this->tfMapFrame_ = "map";
+            this->tfMapFrame_ = "odom";
             RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_map_frame not set, using default '%s'", this->tfMapFrame_.c_str());
         }
 
@@ -1174,9 +1174,13 @@ namespace onboardDetector{
         this->filteredBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
             this->ns_.empty() ? "/filtered_bboxes" : this->ns_ + "/filtered_bboxes", 10);
 
-        // tracked bounding box pub
+        // tracked bounding box pub (visualization only)
         this->trackedBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
             this->ns_.empty() ? "/tracked_bboxes" : this->ns_ + "/tracked_bboxes", 10);
+
+        // tracked obstacles pub (machine-to-machine interface for Nav2)
+        this->trackedObstaclesPub_ = this->nh_->create_publisher<onboard_detector::msg::DynamicObstacleArray>(
+            this->ns_.empty() ? "/tracked_dynamic_obstacles" : this->ns_ + "/tracked_dynamic_obstacles", 10);
 
         // dynamic bounding box pub
         this->dynamicBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -1522,7 +1526,7 @@ namespace onboardDetector{
         this->lidarCloud_ = downsampledCloud;
         sensor_msgs::msg::PointCloud2 outputCloud;
         pcl::toROSMsg(*this->lidarCloud_, outputCloud); // Convert to ROS message
-        outputCloud.header.frame_id = "map";    // Set appropriate frame ID
+        outputCloud.header.frame_id = "odom";    // Set appropriate frame ID
         this->downSamplePointsPub_->publish(outputCloud);
 
         // store current position and orientation
@@ -1647,7 +1651,7 @@ namespace onboardDetector{
         this->lidarCloud_ = downsampledCloud;
         sensor_msgs::msg::PointCloud2 outputCloud;
         pcl::toROSMsg(*this->lidarCloud_, outputCloud); // Convert to ROS message
-        outputCloud.header.frame_id = "map";    // Set appropriate frame ID
+        outputCloud.header.frame_id = "odom";    // Set appropriate frame ID
         this->downSamplePointsPub_->publish(outputCloud);
         
         // store current position and orientation
@@ -2083,7 +2087,7 @@ namespace onboardDetector{
         visualization_msgs::msg::MarkerArray trackIdMarkers;
         for (size_t i = 0; i < this->trackedBBoxes_.size(); ++i) {
             visualization_msgs::msg::Marker idMarker;
-            idMarker.header.frame_id = "map";
+            idMarker.header.frame_id = "odom";
             idMarker.header.stamp = this->nh_->now();
             idMarker.ns = "track_id";
             idMarker.id = i;
@@ -2127,6 +2131,44 @@ namespace onboardDetector{
 
         this->publishHistoryTraj();
         this->publishVelVis();
+        this->publishDynamicObstacleArray();
+    }
+
+    void dynamicDetector::publishDynamicObstacleArray(){
+        onboard_detector::msg::DynamicObstacleArray arr;
+        arr.header.frame_id = "odom";
+        arr.header.stamp = this->nh_->now();
+
+        for (const auto& box : this->trackedBBoxes_){
+            onboard_detector::msg::DynamicObstacle obs;
+            obs.header = arr.header;
+            obs.track_id = static_cast<uint32_t>(box.id);
+
+            obs.pose.position.x = box.x;
+            obs.pose.position.y = box.y;
+            obs.pose.position.z = box.z;
+            obs.pose.orientation.w = 1.0;
+
+            obs.size.x = box.x_width;
+            obs.size.y = box.y_width;
+            obs.size.z = box.z_width;
+
+            obs.twist.linear.x = box.Vx;
+            obs.twist.linear.y = box.Vy;
+            obs.twist.linear.z = box.Vz;
+
+            obs.accel.linear.x = box.Ax;
+            obs.accel.linear.y = box.Ay;
+            obs.accel.linear.z = box.Az;
+
+            obs.is_static = !box.is_dynamic;
+            obs.is_yolo   = box.is_yolo_candidate;
+            obs.confidence = box.is_dynamic ? 1.0f : 0.5f;
+
+            arr.obstacles.push_back(obs);
+        }
+
+        this->trackedObstaclesPub_->publish(arr);
     }
 
     void dynamicDetector::uvDetect(){
@@ -5550,7 +5592,7 @@ namespace onboardDetector{
         cloud.width = cloud.points.size();
         cloud.height = 1;
         cloud.is_dense = true;
-        cloud.header.frame_id = "map";
+        cloud.header.frame_id = "odom";
 
         sensor_msgs::msg::PointCloud2 cloudMsg;
         pcl::toROSMsg(cloud, cloudMsg);
@@ -5566,7 +5608,7 @@ namespace onboardDetector{
         for (size_t i = 0; i < boxes.size(); i++)
         {
             visualization_msgs::msg::Marker line;
-            line.header.frame_id = "map";
+            line.header.frame_id = "odom";
             line.ns = "box3D";
             line.id = i;
             line.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -5638,7 +5680,7 @@ namespace onboardDetector{
             if (activeIds.find(trackId) == activeIds.end()) continue;
 
             visualization_msgs::msg::Marker traj;
-            traj.header.frame_id = "map";
+            traj.header.frame_id = "odom";
             traj.header.stamp = this->nh_->now();
             traj.ns = "dynamic_detector";
             traj.id = countMarker;
@@ -5675,7 +5717,7 @@ namespace onboardDetector{
         int countMarker = 0;
         for (size_t i=0; i<this->trackedBBoxes_.size(); ++i){
             visualization_msgs::msg::Marker velMarker;
-            velMarker.header.frame_id = "map";
+            velMarker.header.frame_id = "odom";
             velMarker.header.stamp = this->nh_->now();
             velMarker.ns = "dynamic_detector";
             velMarker.id =  countMarker;
@@ -5731,7 +5773,7 @@ namespace onboardDetector{
             }
         }
         pcl::toROSMsg(*colored_cloud, lidarClustersMsg);
-        lidarClustersMsg.header.frame_id = "map";
+        lidarClustersMsg.header.frame_id = "odom";
         lidarClustersMsg.header.stamp = this->nh_->now();
         this->lidarClustersPub_->publish(lidarClustersMsg);
     }
@@ -5758,7 +5800,7 @@ namespace onboardDetector{
             }
         }
         pcl::toROSMsg(*colored_cloud, filteredPointsMsg);
-        filteredPointsMsg.header.frame_id = "map";
+        filteredPointsMsg.header.frame_id = "odom";
         filteredPointsMsg.header.stamp = this->nh_->now();
         this->filteredPointsPub_->publish(filteredPointsMsg);
     }
@@ -5780,7 +5822,7 @@ namespace onboardDetector{
                 pcl::transformPointCloud(*tempCloud, *globalCloud, transform);
                 sensor_msgs::msg::PointCloud2 cloudMsg;
                 pcl::toROSMsg(*globalCloud, cloudMsg);
-                cloudMsg.header.frame_id = "map";
+                cloudMsg.header.frame_id = "odom";
                 cloudMsg.header.stamp = this->nh_->now();
                 this->rawLidarPointsPub_->publish(cloudMsg);
             }

@@ -33,6 +33,8 @@
 #include <onboard_detector/kalmanFilter.h>
 #include <onboard_detector/utils.h>
 #include <onboard_detector/srv/get_dynamic_obstacles.hpp>
+#include <onboard_detector/msg/dynamic_obstacle.hpp>
+#include <onboard_detector/msg/dynamic_obstacle_array.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <random>
 #include <mutex>
@@ -91,6 +93,7 @@ namespace onboardDetector{
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr filteredBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr trackedBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamicBBoxesPub_;
+        rclcpp::Publisher<onboard_detector::msg::DynamicObstacleArray>::SharedPtr trackedObstaclesPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredDepthPointsPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr lidarClustersPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredPointsPub_;
@@ -424,6 +427,7 @@ namespace onboardDetector{
         void publishLidarClusters();
         void publishFilteredPoints();
         void publishRawDynamicPoints();
+        void publishDynamicObstacleArray();
 
         // helper function
         void transformBBox(const Eigen::Vector3d& center, const Eigen::Vector3d& size, const Eigen::Vector3d& position, const Eigen::Matrix3d& orientation, Eigen::Vector3d& newCenter, Eigen::Vector3d& newSize);
