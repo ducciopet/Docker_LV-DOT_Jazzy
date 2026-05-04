@@ -1,10 +1,10 @@
 services:
-  ros2_jazzy_sim:
+  obstacle_detection:
     build:
       context: .
-      dockerfile: DockerFiles/Dockerfile
+      dockerfile: docker/Dockerfile
 
-    container_name: ros2_jazzy_simulator
+    container_name: obstacle_detection
 
     stdin_open: true
     tty: true
@@ -23,9 +23,8 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ./bags:/home/ros/ros2_ws/bags
       - ./entrypoint.sh:/home/ros/entrypoint.sh
+      - ./utils.sh:/home/ros/utils.sh
       - /dev/dri:/dev/dri
-
     runtime: nvidia
 
-    entrypoint: /home/ros/entrypoint.sh
     command: bash

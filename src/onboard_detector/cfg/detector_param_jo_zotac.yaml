@@ -225,7 +225,7 @@ detector_node:
       confirmed_track_assoc_bonus: 0.20  # score bonus when matching to a confirmed track
       yolo_track_assoc_bonus: 0.25       # score bonus when matching a YOLO-flagged detection
 
-      enable_tracking_debug_logs: true   # if true, publish verbose per-track RCLCPP_DEBUG logs
+      enable_tracking_debug_logs: false   # if true, publish verbose per-track RCLCPP_DEBUG logs
 
       # -----------------------------------------------------------------------
       # Track Confirmation & Natural Motion
@@ -293,7 +293,7 @@ calibration_icp_node:
     icp_normal_max_nn: 30                  # max neighbours used for normal estimation
     min_overlap_points: 100                # min LiDAR points in camera FOV; if fewer, full cloud is used as target
     overlap_fov_margin_px: 120             # [px] margin added around image boundary when computing FOV overlap
-    icp_max_runs: 10                       # number of independent ICP scenes to collect before averaging
+    icp_max_runs: 5                       # number of independent ICP scenes to collect before averaging
     icp_fitness_threshold: 0.3             # min ICP fitness score to accept a result (0-1, higher = better fit)
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # [fx, fy, cx, cy]

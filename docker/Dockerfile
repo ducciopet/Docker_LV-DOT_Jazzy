@@ -162,7 +162,7 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-insta
     --trusted-host pypi.org \
     --trusted-host files.pythonhosted.org \
     --trusted-host pypi.python.org \
-    "numpy<2" \
+    "numpy>=2.0" \
     ultralytics
 
 # ============================================================
@@ -183,7 +183,22 @@ RUN groupadd -g $USER_GID $USERNAME 2>/dev/null || groupadd $USERNAME && \
 RUN mkdir -p /home/$USERNAME/ros2_ws/src && \
     chown -R $USERNAME:$USERNAME /home/$USERNAME && \
     echo "source /opt/ros/jazzy/setup.bash" >> /home/$USERNAME/.bashrc && \
-    echo "if [ -f install/setup.bash ]; then source install/setup.bash; fi" >> /home/$USERNAME/.bashrc
+    echo "if [ -f /home/ros/ros2_ws/install/setup.bash ]; then source /home/ros/ros2_ws/install/setup.bash; fi" >> /home/$USERNAME/.bashrc && \
+    echo "[ -f /home/ros/utils.sh ] && . /home/ros/utils.sh" >> /home/$USERNAME/.bashrc
 
 USER $USERNAME
 WORKDIR /home/$USERNAME/ros2_ws
+
+# ============================================================
+# BUILD WORKSPACE
+# ============================================================
+COPY --chown=$USERNAME:$USERNAME src/ /home/$USERNAME/ros2_ws/src/
+RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && colcon build --symlink-install"
+
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN sudo chmod +x /entrypoint.sh
+
+COPY docker/utils.sh /etc/utils.sh
+RUN echo 'source /etc/utils.sh' >> ~/.bashrc
+
+ENTRYPOINT ["/entrypoint.sh"]

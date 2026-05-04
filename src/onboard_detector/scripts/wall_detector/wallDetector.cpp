@@ -465,12 +465,12 @@ void WallDetector::pointCloudCallback(
     header.frame_id = working_frame;
     publishMarkers(header);
 
-    RCLCPP_INFO_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
-        "[WallDetector] %zu centroids, %zu wall planes, %zu registry bboxes, "
-        "ground=%.2f roof=%.2f",
-        centroids.size(), wall_planes.size(),
-        bbox_registry_->bboxes().size(),
-        ground_height_, roof_height_);
+    // RCLCPP_INFO_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
+    //     "[WallDetector] %zu centroids, %zu wall planes, %zu registry bboxes, "
+    //     "ground=%.2f roof=%.2f",
+    //     centroids.size(), wall_planes.size(),
+    //     bbox_registry_->bboxes().size(),
+    //     ground_height_, roof_height_);
 }
 
 // =====================================================================
@@ -877,9 +877,9 @@ void WallDetector::checkCalibrationReady() {
             lidar_frame_, calibration_child_frame_,
             tf2::TimePointZero, tf2::durationFromSec(0.0));
         calibration_ready_ = true;
-        RCLCPP_INFO(nh_->get_logger(),
-            "[WallDetector] Calibration TF '%s' -> '%s' available – detection enabled",
-            lidar_frame_.c_str(), calibration_child_frame_.c_str());
+        // RCLCPP_INFO(nh_->get_logger(),
+        //     "[WallDetector] Calibration TF '%s' -> '%s' available – detection enabled",
+        //     lidar_frame_.c_str(), calibration_child_frame_.c_str());
     } catch (const tf2::TransformException& ex) {
         RCLCPP_WARN_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 3000,
             "[WallDetector] Waiting for calibration TF '%s' -> '%s': %s",
@@ -910,9 +910,9 @@ void WallDetector::depthImageCallback(
     }
     imgPtr->image.copyTo(depth_image_);
 
-    RCLCPP_INFO_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 3000,
-        "[WallDetector] depthImageCB: got depth %dx%d, encoding='%s'",
-        depth_image_.cols, depth_image_.rows, msg->encoding.c_str());
+    // RCLCPP_INFO_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 3000,
+    //     "[WallDetector] depthImageCB: got depth %dx%d, encoding='%s'",
+    //     depth_image_.cols, depth_image_.rows, msg->encoding.c_str());
 
     // Get camera pose in map frame via TF
     try {
@@ -931,9 +931,9 @@ void WallDetector::depthImageCallback(
             tf.transform.translation.y,
             tf.transform.translation.z);
         depth_pose_valid_ = true;
-        RCLCPP_INFO_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 3000,
-            "[WallDetector] depthImageCB: TF ok, cam pos=(%.2f,%.2f,%.2f)",
-            position_depth_.x(), position_depth_.y(), position_depth_.z());
+        // RCLCPP_INFO_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 3000,
+        //     "[WallDetector] depthImageCB: TF ok, cam pos=(%.2f,%.2f,%.2f)",
+        //     position_depth_.x(), position_depth_.y(), position_depth_.z());
     } catch (const tf2::TransformException& ex) {
         RCLCPP_WARN_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
             "[WallDetector] Depth TF lookup failed: %s", ex.what());
@@ -1068,9 +1068,9 @@ void WallDetector::estimateGroundHeight() {
     gh_msg.data[1] = roof_height_;
     ground_height_pub_->publish(gh_msg);
 
-    RCLCPP_INFO_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
-        "[WallDetector] Ground=%.3f  Roof=%.3f  (RANSAC inliers=%d, zValues=%zu)",
-        ground_height_, roof_height_, bestInliers, zValues.size());
+    // RCLCPP_INFO_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
+    //     "[WallDetector] Ground=%.3f  Roof=%.3f  (RANSAC inliers=%d, zValues=%zu)",
+    //     ground_height_, roof_height_, bestInliers, zValues.size());
 }
 
 } // namespace onboardDetector

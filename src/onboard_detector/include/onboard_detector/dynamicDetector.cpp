@@ -1692,8 +1692,8 @@ namespace onboardDetector{
         if (msg->data.size() >= 2) {
             this->groundHeight_ = msg->data[0];
             this->roofHeight_   = msg->data[1];
-            std::cout << "[dynamicDetector] groundHeightCB: ground=" << this->groundHeight_
-                      << "  roof=" << this->roofHeight_ << std::endl;
+            // std::cout << "[dynamicDetector] groundHeightCB: ground=" << this->groundHeight_
+            //           << "  roof=" << this->roofHeight_ << std::endl;
             if (!this->groundEstimated_) {
                 this->groundEstimated_ = true;
                 RCLCPP_INFO(this->nh_->get_logger(),
@@ -1701,8 +1701,8 @@ namespace onboardDetector{
                     this->groundHeight_, this->roofHeight_);
             }
         } else {
-            std::cout << "[dynamicDetector] groundHeightCB: received msg with "
-                      << msg->data.size() << " elements (expected >=2)" << std::endl;
+            // std::cout << "[dynamicDetector] groundHeightCB: received msg with "
+            //           << msg->data.size() << " elements (expected >=2)" << std::endl;
         }
     }
 
@@ -1736,15 +1736,15 @@ namespace onboardDetector{
 
         std::lock_guard<std::mutex> lock(this->wallBBoxesMutex_);
         this->wallBBoxes_ = std::move(new_walls);
-        std::cout << "[dynamicDetector] wallMarkersCB: received " << this->wallBBoxes_.size()
-                  << " wall bounding boxes" << std::endl;
-        for (size_t i = 0; i < this->wallBBoxes_.size(); ++i) {
-            const auto& w = this->wallBBoxes_[i];
-            std::cout << "  wall[" << i << "] center=(" << w.center.x() << ", "
-                      << w.center.y() << ", " << w.center.z() << ") half_size=("
-                      << w.half_size.x() << ", " << w.half_size.y() << ", "
-                      << w.half_size.z() << ")" << std::endl;
-        }
+        // std::cout << "[dynamicDetector] wallMarkersCB: received " << this->wallBBoxes_.size()
+        //           << " wall bounding boxes" << std::endl;
+        // for (size_t i = 0; i < this->wallBBoxes_.size(); ++i) {
+        //     const auto& w = this->wallBBoxes_[i];
+        //     std::cout << "  wall[" << i << "] center=(" << w.center.x() << ", "
+        //               << w.center.y() << ", " << w.center.z() << ") half_size=("
+        //               << w.half_size.x() << ", " << w.half_size.y() << ", "
+        //               << w.half_size.z() << ")" << std::endl;
+        // }
     }
    
     void dynamicDetector::lidarDetectionCB(){
@@ -1764,16 +1764,16 @@ namespace onboardDetector{
             return;
         }
         // Debug: Print vector sizes before detection
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] projPoints_ size: %zu, pointsDepth_ size: %zu", this->projPoints_.size(), this->pointsDepth_.size());
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] imgCols_: %d, imgRows_: %d, skipPixel_: %d", this->imgCols_, this->imgRows_, this->skipPixel_);
-        size_t expected_size = (this->imgCols_ * this->imgRows_) / (this->skipPixel_ * this->skipPixel_);
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Expected projPoints_/pointsDepth_ size: %zu", expected_size);
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] projPoints_ size: %zu, pointsDepth_ size: %zu", this->projPoints_.size(), this->pointsDepth_.size());
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] imgCols_: %d, imgRows_: %d, skipPixel_: %d", this->imgCols_, this->imgRows_, this->skipPixel_);
+        // size_t expected_size = (this->imgCols_ * this->imgRows_) / (this->skipPixel_ * this->skipPixel_);
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Expected projPoints_/pointsDepth_ size: %zu", expected_size);
         // detection thread
         this->dbscanDetect();
         this->uvDetect();
         this->filterLVBBoxes();
         // Debug: Print bounding box vector sizes after detection
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] dbBBoxes_ size: %zu, uvBBoxes_ size: %zu, filteredBBoxes_ size: %zu", this->dbBBoxes_.size(), this->uvBBoxes_.size(), this->filteredBBoxes_.size());
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] dbBBoxes_ size: %zu, uvBBoxes_ size: %zu, filteredBBoxes_ size: %zu", this->dbBBoxes_.size(), this->uvBBoxes_.size(), this->filteredBBoxes_.size());
         this->newDetectFlag_ = true; // get a new detection
     }
 
@@ -1815,7 +1815,7 @@ namespace onboardDetector{
         }
 
         // Debug: Print history and filter sizes before tracking
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] boxHist_ size: %zu, pcHist_ size: %zu, filters_ size: %zu, missedFrames_ size: %zu, trackedBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->filters_.size(), this->missedFrames_.size(), this->trackedBBoxes_.size());
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] boxHist_ size: %zu, pcHist_ size: %zu, filters_ size: %zu, missedFrames_ size: %zu, trackedBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->filters_.size(), this->missedFrames_.size(), this->trackedBBoxes_.size());
 
         std::vector<int> bestMatch;
 
@@ -1834,7 +1834,7 @@ namespace onboardDetector{
         }
 
         // Debug: Print history and filter sizes after tracking
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] (post) boxHist_ size: %zu, pcHist_ size: %zu, filters_ size: %zu, missedFrames_ size: %zu, trackedBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->filters_.size(), this->missedFrames_.size(), this->trackedBBoxes_.size());
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] (post) boxHist_ size: %zu, pcHist_ size: %zu, filters_ size: %zu, missedFrames_ size: %zu, trackedBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->filters_.size(), this->missedFrames_.size(), this->trackedBBoxes_.size());
     }
 
     // =====================================================================================
@@ -1863,7 +1863,7 @@ namespace onboardDetector{
             return;
         }
 
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] boxHist_ size: %zu, pcHist_ size: %zu, dynamicBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->dynamicBBoxes_.size());
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] boxHist_ size: %zu, pcHist_ size: %zu, dynamicBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->dynamicBBoxes_.size());
 
         // Only classify tracks that are currently in the tracked output
         // (confirmed + not stationary-suppressed + not predict-only).
@@ -2174,7 +2174,7 @@ namespace onboardDetector{
     void dynamicDetector::uvDetect(){
         // initialization
         if (this->uvDetector_ == NULL){
-            RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Allocating UVdetector with fx: %f, fy: %f, px: %f, py: %f, depthScale_: %f, max_dist: %f", this->fx_, this->fy_, this->cx_, this->cy_, this->depthScale_, this->raycastMaxLength_ * 1000);
+            // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Allocating UVdetector with fx: %f, fy: %f, px: %f, py: %f, depthScale_: %f, max_dist: %f", this->fx_, this->fy_, this->cx_, this->cy_, this->depthScale_, this->raycastMaxLength_ * 1000);
             this->uvDetector_.reset(new UVdetector ());
             this->uvDetector_->fx = this->fx_;
             this->uvDetector_->fy = this->fy_;
@@ -2189,17 +2189,17 @@ namespace onboardDetector{
             this->uvDetector_->depth = this->depthImage_;
             this->uvDetector_->detect();
             this->uvDetector_->extract_3Dbox();
-            std::cout << "[DEBUG] After extract_3Dbox: bounding_box_U size = " << this->uvDetector_->bounding_box_U.size() << ", bounding_box_D size = " << this->uvDetector_->bounding_box_D.size() << ", box3Ds size = " << this->uvDetector_->box3Ds.size() << std::endl;
+            // std::cout << "[DEBUG] After extract_3Dbox: bounding_box_U size = " << this->uvDetector_->bounding_box_U.size() << ", bounding_box_D size = " << this->uvDetector_->bounding_box_D.size() << ", box3Ds size = " << this->uvDetector_->box3Ds.size() << std::endl;
 
             this->uvDetector_->display_U_map();
             this->uvDetector_->display_bird_view();
             this->uvDetector_->display_depth();
 
             // transform to the world frame (recalculate the bounding boxes)
-            std::cout << "[DEBUG] Before transformUVBBoxes, uvBBoxes_ size = " << this->uvBBoxes_.size() << std::endl;
+            // std::cout << "[DEBUG] Before transformUVBBoxes, uvBBoxes_ size = " << this->uvBBoxes_.size() << std::endl;
             std::vector<onboardDetector::box3D> uvBBoxes;
             this->transformUVBBoxes(uvBBoxes);
-            std::cout << "[DEBUG] After transformUVBBoxes, uvBBoxes size = " << uvBBoxes.size() << std::endl;
+            // std::cout << "[DEBUG] After transformUVBBoxes, uvBBoxes size = " << uvBBoxes.size() << std::endl;
             this->uvBBoxes_ = uvBBoxes;
 
             // Filter UV bboxes by XY diagonal — must happen here, after uvBBoxes_ is assigned,
@@ -2217,15 +2217,15 @@ namespace onboardDetector{
 
     void dynamicDetector::dbscanDetect(){
         // 1. get pointcloud
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Calling projectDepthImage()");
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Calling projectDepthImage()");
         this->projectDepthImage();
 
         // 2. filter points
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Filtering projPoints_ (size: %zu) to filteredDepthPoints_", this->projPoints_.size());
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Filtering projPoints_ (size: %zu) to filteredDepthPoints_", this->projPoints_.size());
         this->filterPoints(this->projPoints_, this->filteredDepthPoints_);
 
         // 3. cluster points and get bounding boxes
-        RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Clustering filteredDepthPoints_ (size: %zu)", this->filteredDepthPoints_.size());
+        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Clustering filteredDepthPoints_ (size: %zu)", this->filteredDepthPoints_.size());
         this->clusterPointsAndBBoxes(this->filteredDepthPoints_, this->dbBBoxes_, this->pcClustersVisual_,
                                      this->pcClusterCentersVisual_, this->pcClusterStdsVisual_);
     }
@@ -2790,10 +2790,10 @@ namespace onboardDetector{
         std::vector<Eigen::Vector3d>& outStds)
     {
         size_t N = inBoxes.size();
-        std::cout << "[DEBUG] mergeNestedGroup: N=" << N
-                  << ", inClusters.size()=" << inClusters.size()
-                  << ", inCenters.size()=" << inCenters.size()
-                  << ", inStds.size()=" << inStds.size() << std::endl;
+        // std::cout << "[DEBUG] mergeNestedGroup: N=" << N
+        //           << ", inClusters.size()=" << inClusters.size()
+        //           << ", inCenters.size()=" << inCenters.size()
+        //           << ", inStds.size()=" << inStds.size() << std::endl;
         if (N == 0) return;
 
         // Guard: if cluster arrays don't match box count, pad with empties
@@ -3071,13 +3071,13 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::filterLVBBoxes(){
-        std::cout << "[DEBUG] filterLVBBoxes: START" << std::endl;
-        std::cout << "[DEBUG] filterLVBBoxes: uvBBoxes_ size = " << this->uvBBoxes_.size()
-                  << ", dbBBoxes_ size = " << this->dbBBoxes_.size()
-                  << ", pcClustersVisual_ size = " << this->pcClustersVisual_.size()
-                  << ", pcClusterCentersVisual_ size = " << this->pcClusterCentersVisual_.size()
-                  << ", pcClusterStdsVisual_ size = " << this->pcClusterStdsVisual_.size()
-                  << ", lidarBBoxes_ size = " << this->lidarBBoxes_.size() << std::endl;
+        // std::cout << "[DEBUG] filterLVBBoxes: START" << std::endl;
+        // std::cout << "[DEBUG] filterLVBBoxes: uvBBoxes_ size = " << this->uvBBoxes_.size()
+        //           << ", dbBBoxes_ size = " << this->dbBBoxes_.size()
+        //           << ", pcClustersVisual_ size = " << this->pcClustersVisual_.size()
+        //           << ", pcClusterCentersVisual_ size = " << this->pcClusterCentersVisual_.size()
+        //           << ", pcClusterStdsVisual_ size = " << this->pcClusterStdsVisual_.size()
+        //           << ", lidarBBoxes_ size = " << this->lidarBBoxes_.size() << std::endl;
 
         std::vector<onboardDetector::box3D> filteredBBoxesTemp;
         std::vector<std::vector<Eigen::Vector3d>> filteredPcClustersTemp;
@@ -3138,7 +3138,7 @@ namespace onboardDetector{
             }
         }
 
-        std::cout << "[DEBUG] filterLVBBoxes: calling mergeNestedGroup for UV" << std::endl;
+        // std::cout << "[DEBUG] filterLVBBoxes: calling mergeNestedGroup for UV" << std::endl;
         this->mergeNestedGroup(
             this->uvBBoxes_,
             uvPcClusters,
@@ -3150,10 +3150,10 @@ namespace onboardDetector{
             uvPcClusterCentersFiltered,
             uvPcClusterStdsFiltered
         );
-        std::cout << "[DEBUG] filterLVBBoxes: after UV mergeNestedGroup, uvBBoxesFiltered size = " << uvBBoxesFiltered.size() << std::endl;
+        // std::cout << "[DEBUG] filterLVBBoxes: after UV mergeNestedGroup, uvBBoxesFiltered size = " << uvBBoxesFiltered.size() << std::endl;
 
         // DBSCAN
-        std::cout << "[DEBUG] filterLVBBoxes: calling mergeNestedGroup for DBSCAN" << std::endl;
+        // std::cout << "[DEBUG] filterLVBBoxes: calling mergeNestedGroup for DBSCAN" << std::endl;
         this->mergeNestedGroup(
             this->dbBBoxes_,
             this->pcClustersVisual_,
@@ -3165,7 +3165,7 @@ namespace onboardDetector{
             dbPcClusterCentersFiltered,
             dbPcClusterStdsFiltered
         );
-        std::cout << "[DEBUG] filterLVBBoxes: after DBSCAN mergeNestedGroup, dbBBoxesFiltered size = " << dbBBoxesFiltered.size() << std::endl;
+        // std::cout << "[DEBUG] filterLVBBoxes: after DBSCAN mergeNestedGroup, dbBBoxesFiltered size = " << dbBBoxesFiltered.size() << std::endl;
 
         this->publish3dBox(uvBBoxesFiltered, this->uvBBoxesFilteredPub_, 0, 1, 0.5);
         this->publish3dBox(dbBBoxesFiltered, this->dbBBoxesFilteredPub_, 1, 0.5, 0);
@@ -3559,7 +3559,7 @@ namespace onboardDetector{
 
     void dynamicDetector::projectDepthImage(){
                 // Debug: Print image size and skipPixel_
-                RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] projectDepthImage: imgCols_=%d, imgRows_=%d, skipPixel_=%d", this->imgCols_, this->imgRows_, this->skipPixel_);
+                // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] projectDepthImage: imgCols_=%d, imgRows_=%d, skipPixel_=%d", this->imgCols_, this->imgRows_, this->skipPixel_);
                 if (this->imgCols_ <= 0 || this->imgRows_ <= 0 || this->skipPixel_ <= 0) {
                     RCLCPP_ERROR(this->nh_->get_logger(), "[ERROR] Invalid image size or skipPixel_: imgCols_=%d, imgRows_=%d, skipPixel_=%d", this->imgCols_, this->imgRows_, this->skipPixel_);
                 }
@@ -3612,7 +3612,7 @@ namespace onboardDetector{
         this->voxelFilter(points, voxelFilteredPoints);
 
         filteredPoints.clear();
-        std::cout<<"Ground Height is: "<<this->groundHeight_<<", Roof Height is: "<<this->roofHeight_<<std::endl;
+        // std::cout<<"Ground Height is: "<<this->groundHeight_<<", Roof Height is: "<<this->roofHeight_<<std::endl;
         for (const auto& point : voxelFilteredPoints){
             if (point.z() <= this->roofHeight_ && point.z() >= this->groundHeight_ && !this->isInsideAnyWall(point)){
                 filteredPoints.push_back(point);
