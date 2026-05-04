@@ -22,8 +22,8 @@ services:
       - ./src:/home/ros/ros2_ws/src
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ./bags:/home/ros/ros2_ws/bags
-      - ./entrypoint.sh:/home/ros/entrypoint.sh
-      - ./utils.sh:/home/ros/utils.sh
+      - ./docker/entrypoint.sh:/home/ros/entrypoint.sh
+      - ./docker/utils.sh:/home/ros/utils.sh
       - /dev/dri:/dev/dri
     runtime: nvidia
 
