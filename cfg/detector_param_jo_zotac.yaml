@@ -8,7 +8,7 @@ wall_detector_node:
       lidar_topic: /velodyne_points
       odom_frame: odom
       lidar_frame: velodyne
-      use_tf_pose: false  # odom frame is not in TF (GLIM publishes it as odometry topic only)
+      use_tf_pose: true   # odometry_tf_publisher broadcasts odom→base_link; full chain odom→velodyne→camera_refined is available
 
       # Calibration gate
       calibration_child_frame: camera_refined  # detection starts only after this TF frame is published by ICP
@@ -30,9 +30,10 @@ wall_detector_node:
       ground_estim_min_inliers: 50          # min RANSAC inliers to accept a ground plane fit
 
       # Ground / Roof estimation
-      ground_height: -0.7          # [m] initial ground height (overwritten by RANSAC estimation)
-      ground_roof_offset: 5.0      # [m] roof = ground + offset
-      ground_ema_alpha: 0.05       # EMA smoothing factor for ground height updates (lower = slower response)
+      ground_height: -0.3                # [m] initial ground height (overwritten by RANSAC estimation)
+      ground_roof_offset: 5.0            # [m] roof = ground + offset
+      ground_conservative_offset: 0.10   # [m] margin added above RANSAC bestZ before updating ground_height
+      ground_ema_alpha: 0.05             # EMA smoothing factor for ground height updates (lower = slower response)
 
       # -----------------------------------------------------------------------
       # Wall Filter (RANSAC plane detection on LiDAR)
@@ -61,7 +62,7 @@ detector_node:
   ros__parameters:
     onboard_detector:
 
-      localization_mode: 0 # 0: use pose topic (default); 1: use odometry topic
+      localization_mode: 1  # 0: use pose topic (default); 1: use odometry topic
 
       # -----------------------------------------------------------------------
       # ROS Topics
@@ -69,10 +70,11 @@ detector_node:
       depth_image_topic: /front_camera/camera/depth/image_rect_raw
       color_image_topic: /front_camera/camera/color/image_raw
       lidar_pointcloud_topic: /velodyne_points
-      pose_topic: /glim_ros/pose_corrected  # used when localization_mode=0
-      odom_topic: /glim_ros/odom_corrected  # used when localization_mode=1
+      pose_topic: /glim_ros/odom_corrected            # used when localization_mode=0
+      odom_topic: /glim_ros/odom_corrected            # used when localization_mode=1
       use_tf_pose: false          # if true, read robot pose from TF instead of pose/odom topic
       tf_odom_frame: odom         # name of the fixed world frame in TF
+      tf_base_link_frame: base_link  # TF frame of the base link
       tf_lidar_frame: velodyne   # TF frame of the LiDAR sensor
       tf_depth_frame: camera_refined  # TF frame of the depth camera (after ICP calibration)
       tf_color_frame: camera_refined  # TF frame of the color camera (same as depth if co-located)
@@ -105,9 +107,10 @@ detector_node:
       # Ground & Roof Initial Values
       # (estimation now runs in wall_detector_node; these are initial fallbacks)
       # -----------------------------------------------------------------------
-      ground_height: -0.7      # [m] initial ground Z in world frame
+      ground_height: -0.4      # [m] initial ground Z in world frame
       roof_height: 4.0         # [m] initial roof height
       ground_roof_offset: 5.0  # [m] roofHeight = groundHeight + this value
+      ground_conservative_offset: 0.1  # [m] conservative offset for ground height estimation
 
       # -----------------------------------------------------------------------
       # Voxel Filter (depth pipeline only)
@@ -293,7 +296,7 @@ calibration_icp_node:
     icp_normal_max_nn: 30                  # max neighbours used for normal estimation
     min_overlap_points: 100                # min LiDAR points in camera FOV; if fewer, full cloud is used as target
     overlap_fov_margin_px: 120             # [px] margin added around image boundary when computing FOV overlap
-    icp_max_runs: 5                       # number of independent ICP scenes to collect before averaging
+    icp_max_runs: 8                        # number of independent ICP scenes to collect before averaging
     icp_fitness_threshold: 0.3             # min ICP fitness score to accept a result (0-1, higher = better fit)
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # [fx, fy, cx, cy]
