@@ -283,10 +283,11 @@ WallDetector::WallDetector(rclcpp::Node::SharedPtr nh)
     // Ground estimation params
     ground_estim_bottom_fraction_ = p("ground_estim_bottom_fraction", 4);
     ground_estim_min_inliers_     = p("ground_estim_min_inliers",     50);
-    ground_height_      = p("ground_height",      -0.7);
-    ground_roof_offset_ = p("ground_roof_offset", 5.0);
-    ground_ema_alpha_   = p("ground_ema_alpha",   0.05);
-    roof_height_        = ground_height_ + ground_roof_offset_;
+    ground_height_       = p("ground_height",        -0.7);
+    ground_roof_offset_  = p("ground_roof_offset",  5.0);
+    Conservativeoffset_  = p("ground_conservative_offset", 0.1);
+    ground_ema_alpha_    = p("ground_ema_alpha",    0.05);
+    roof_height_         = ground_height_ + ground_roof_offset_;
 
     // LiDAR wall filter params
     voxel_resolution_          = p("voxel_resolution",          0.25);
@@ -1053,11 +1054,11 @@ void WallDetector::estimateGroundHeight() {
     }
 
     if (!ground_estimated_) {
-        ground_height_    = bestZ + 0.1;
+        ground_height_    = bestZ + Conservativeoffset_;
         ground_estimated_ = true;
     } else {
         const double alpha = ground_ema_alpha_;
-        ground_height_ = (1.0 - alpha) * ground_height_ + alpha * (bestZ + 0.1);
+        ground_height_ = (1.0 - alpha) * ground_height_ + alpha * (bestZ + Conservativeoffset_);
     }
 
     roof_height_ = ground_height_ + ground_roof_offset_;

@@ -164,6 +164,7 @@ private:
     double ground_height_;
     double roof_height_;
     double ground_roof_offset_;
+    double Conservativeoffset_;
     bool   ground_estimated_ = false;
     double ground_ema_alpha_;
 
