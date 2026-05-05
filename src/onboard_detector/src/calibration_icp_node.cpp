@@ -401,7 +401,15 @@ private:
 
         if (scene_count_ >= icp_max_runs_) {
             finalizeCalibration();
-            processed_ = true;
+            if (valid_count_ > 0) {
+                processed_ = true;
+            } else {
+                scene_count_ = 0;
+                valid_count_ = 0;
+                all_valid_transforms_.clear();
+                all_translations_.clear();
+                all_rpy_angles_.clear();
+            }
         }
     }
 
@@ -432,7 +440,8 @@ private:
         }
         auto depth_cloud_camera = depthToPointCloud(depth_image);
         last_depth_cloud_camera_ = depth_cloud_camera;
-        RCLCPP_INFO(this->get_logger(), "Depth cloud frame_id: %s", depth_msg->header.frame_id.c_str());
+        RCLCPP_INFO(this->get_logger(), "Depth cloud frame_id: %s  (%zu points)",
+                    depth_msg->header.frame_id.c_str(), depth_cloud_camera->points_.size());
         RCLCPP_INFO(this->get_logger(), "Using T_lidar_camera_init_ for transform:");
         RCLCPP_INFO(this->get_logger(), "[ %.6f, %.6f, %.6f, %.6f ]", T_lidar_camera_init_(0,0), T_lidar_camera_init_(0,1), T_lidar_camera_init_(0,2), T_lidar_camera_init_(0,3));
         RCLCPP_INFO(this->get_logger(), "[ %.6f, %.6f, %.6f, %.6f ]", T_lidar_camera_init_(1,0), T_lidar_camera_init_(1,1), T_lidar_camera_init_(1,2), T_lidar_camera_init_(1,3));

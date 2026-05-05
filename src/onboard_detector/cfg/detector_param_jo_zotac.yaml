@@ -6,9 +6,9 @@ wall_detector_node:
     wall_detector:
       # ROS Topics & Frames
       lidar_topic: /velodyne_points
-      map_frame: map
+      odom_frame: odom
       lidar_frame: velodyne
-      use_tf_pose: true  # if true, read robot pose from TF instead of pose/odom topic
+      use_tf_pose: false  # odom frame is not in TF (GLIM publishes it as odometry topic only)
 
       # Calibration gate
       calibration_child_frame: camera_refined  # detection starts only after this TF frame is published by ICP
@@ -69,10 +69,10 @@ detector_node:
       depth_image_topic: /front_camera/camera/depth/image_rect_raw
       color_image_topic: /front_camera/camera/color/image_raw
       lidar_pointcloud_topic: /velodyne_points
-      pose_topic: /glim_ros/lidar_pose  # used when localization_mode=0
-      odom_topic: /odom                 # used when localization_mode=1
-      use_tf_pose: true          # if true, read robot pose from TF instead of pose/odom topic
-      tf_map_frame: map          # name of the fixed world frame in TF
+      pose_topic: /glim_ros/pose_corrected  # used when localization_mode=0
+      odom_topic: /glim_ros/odom_corrected  # used when localization_mode=1
+      use_tf_pose: false          # if true, read robot pose from TF instead of pose/odom topic
+      tf_odom_frame: odom         # name of the fixed world frame in TF
       tf_lidar_frame: velodyne   # TF frame of the LiDAR sensor
       tf_depth_frame: camera_refined  # TF frame of the depth camera (after ICP calibration)
       tf_color_frame: camera_refined  # TF frame of the color camera (same as depth if co-located)

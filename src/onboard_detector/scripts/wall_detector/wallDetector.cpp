@@ -254,7 +254,7 @@ WallDetector::WallDetector(rclcpp::Node::SharedPtr nh)
     };
 
     lidar_topic_     = p("lidar_topic",     std::string("/velodyne_points"));
-    map_frame_       = p("map_frame",       std::string("map"));
+    odomFrame_       = p("odom_frame",      std::string("odom"));
     lidar_frame_     = p("lidar_frame",     std::string("velodyne"));
     use_tf_pose_     = p("use_tf_pose",     true);
 
@@ -367,7 +367,7 @@ void WallDetector::pointCloudCallback(
     if (use_tf_pose_) {
         try {
             auto tf = tf_buffer_->lookupTransform(
-                map_frame_, msg->header.frame_id,
+                odomFrame_, msg->header.frame_id,
                 tf2::TimePointZero, tf2::durationFromSec(0.1));
 
             Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
@@ -391,7 +391,7 @@ void WallDetector::pointCloudCallback(
                 pt.z = static_cast<float>(p.z());
             }
 
-            working_frame = map_frame_;
+            working_frame = odomFrame_;
         } catch (const tf2::TransformException& ex) {
             RCLCPP_WARN_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
                 "[WallDetector] TF lookup failed: %s – working in sensor frame", ex.what());
@@ -492,7 +492,7 @@ std::vector<Eigen::Vector3d> WallDetector::voxelFilter(
     if (filtered_cloud_pub_->get_subscription_count() > 0) {
         sensor_msgs::msg::PointCloud2 out_msg;
         pcl::toROSMsg(*filtered, out_msg);
-        out_msg.header.frame_id = use_tf_pose_ ? map_frame_ : "velodyne";
+        out_msg.header.frame_id = use_tf_pose_ ? odomFrame_ : "velodyne";
         out_msg.header.stamp = nh_->now();
         filtered_cloud_pub_->publish(out_msg);
     }
@@ -914,10 +914,11 @@ void WallDetector::depthImageCallback(
     //     "[WallDetector] depthImageCB: got depth %dx%d, encoding='%s'",
     //     depth_image_.cols, depth_image_.rows, msg->encoding.c_str());
 
-    // Get camera pose in map frame via TF
+    // Get camera pose via TF (in odom frame if use_tf_pose_, otherwise in lidar/sensor frame)
+    const std::string& depth_target_frame = use_tf_pose_ ? odomFrame_ : lidar_frame_;
     try {
         auto tf = tf_buffer_->lookupTransform(
-            map_frame_, depth_frame_,
+            depth_target_frame, depth_frame_,
             tf2::TimePointZero, tf2::durationFromSec(0.1));
 
         Eigen::Quaterniond q(

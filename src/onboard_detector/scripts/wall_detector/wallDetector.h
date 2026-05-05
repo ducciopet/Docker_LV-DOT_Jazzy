@@ -187,7 +187,7 @@ private:
 
     // ---- LiDAR wall-detection parameters ----
     std::string lidar_topic_;
-    std::string map_frame_;
+    std::string odomFrame_;
     std::string lidar_frame_;
     bool use_tf_pose_;
 

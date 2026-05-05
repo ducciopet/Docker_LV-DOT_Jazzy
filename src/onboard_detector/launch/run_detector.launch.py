@@ -28,7 +28,6 @@ def generate_launch_description():
     calibration_params = _load_node_params(config_file, 'calibration_icp_node')
     detector_params = _load_node_params(config_file, 'detector_node')
     detector_onboard_params = detector_params.get('onboard_detector', {}) if isinstance(detector_params, dict) else {}
-    camera_frame = str(calibration_params.get('urdf_camera_frame', 'camera'))
     camera_frame_initial_guess = str(calibration_params.get('camera_frame_initial_guess', 'camera_initial_guess'))
 
     lidar_frame = str(detector_onboard_params.get('tf_lidar_frame', 'velodyne'))
@@ -38,6 +37,40 @@ def generate_launch_description():
     pythonpath_action = SetEnvironmentVariable(
         'PYTHONPATH',
         yolo_dir + os.pathsep + scripts_dir + os.pathsep + os.environ.get('PYTHONPATH', '')
+    )
+
+    static_tf_base_link_to_imu_link = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_tf_base_link_to_imu_link',
+        parameters=[{'use_sim_time': True}],
+        arguments=[
+            '--x', '0.222',
+            '--y', '0.026',
+            '--z', '0.282',
+            '--roll', '0.0',
+            '--pitch', '0.0',
+            '--yaw', '0.0',
+            '--frame-id', 'base_link',
+            '--child-frame-id', 'imu_link',
+        ]
+    )
+
+    static_tf_base_link_to_velodyne = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_tf_base_link_to_velodyne',
+        parameters=[{'use_sim_time': True}],
+        arguments=[
+            '--x', '0.030',
+            '--y', '0.029',
+            '--z', '0.600',
+            '--roll', '0.0',
+            '--pitch', '0.0',
+            '--yaw', '0.0',
+            '--frame-id', 'base_link',
+            '--child-frame-id', 'velodyne',
+        ]
     )
 
     static_tf_velodyne_to_camera_link_initial_guess = Node(
@@ -55,23 +88,6 @@ def generate_launch_description():
                 '--frame-id', lidar_frame,
                 '--child-frame-id', camera_frame_initial_guess
             ]
-    )
-
-    static_tf_velodyne_to_camera_link = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='detector_tf_velodyne_to_camera_link',
-        parameters=[{'use_sim_time': True}],
-        arguments=[
-            '--x', '0.27639',
-            '--y', '-0.01446',
-            '--z', '-0.35199',
-            '--roll', '-1.5707963267948966',
-            '--pitch', '0.0',
-            '--yaw', '-1.5707963267948966',
-            '--frame-id', lidar_frame,
-            '--child-frame-id', camera_frame
-        ]
     )
 
     calibration_node = Node(
@@ -129,7 +145,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         pythonpath_action,
-        static_tf_velodyne_to_camera_link,
+        static_tf_base_link_to_imu_link,
+        static_tf_base_link_to_velodyne,
         static_tf_velodyne_to_camera_link_initial_guess,
         calibration_node,
         detector_node,

@@ -47,9 +47,9 @@ namespace onboardDetector{
         this->useTfPose_ = true;
         this->nh_->get_parameter(pname("use_tf_pose"), this->useTfPose_);
 
-        if (!this->nh_->get_parameter(pname("tf_map_frame"), this->tfMapFrame_)) {
-            this->tfMapFrame_ = "odom";
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_map_frame not set, using default '%s'", this->tfMapFrame_.c_str());
+        if (!this->nh_->get_parameter(pname("tf_odom_frame"), this->tfOdomFrame_)) {
+            this->tfOdomFrame_ = "odom";
+            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: tf_odom_frame not set, using default '%s'", this->tfOdomFrame_.c_str());
         }
 
         if (!this->nh_->get_parameter(pname("tf_lidar_frame"), this->tfLidarFrame_)) {
@@ -68,9 +68,9 @@ namespace onboardDetector{
         }
 
         RCLCPP_INFO(this->nh_->get_logger(),
-                    "[dynamicDetector]: TF pose mode: %s (map=%s, lidar=%s, depth=%s, color=%s)",
+                    "[dynamicDetector]: TF pose mode: %s (odom=%s, lidar=%s, depth=%s, color=%s)",
                     this->useTfPose_ ? "enabled" : "disabled",
-                    this->tfMapFrame_.c_str(),
+                    this->tfOdomFrame_.c_str(),
                     this->tfLidarFrame_.c_str(),
                     this->tfDepthFrame_.c_str(),
                     this->tfColorFrame_.c_str());
