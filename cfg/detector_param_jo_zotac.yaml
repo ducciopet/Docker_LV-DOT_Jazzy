@@ -8,7 +8,7 @@ wall_detector_node:
       lidar_topic: /velodyne_points
       odom_frame: odom
       lidar_frame: velodyne
-      use_tf_pose: true   # odometry_tf_publisher broadcasts odom→base_link; full chain odom→velodyne→camera_refined is available
+      use_tf_pose: true   # EKF node broadcasts odom→base_link; full chain odom→velodyne→camera_refined is available
 
       # Calibration gate
       calibration_child_frame: camera_refined  # detection starts only after this TF frame is published by ICP
@@ -71,7 +71,7 @@ detector_node:
       color_image_topic: /front_camera/camera/color/image_raw
       lidar_pointcloud_topic: /velodyne_points
       pose_topic: /glim_ros/odom_corrected            # used when localization_mode=0
-      odom_topic: /glim_ros/odom_corrected            # used when localization_mode=1
+      odom_topic: /odometry/filtered                   # used when localization_mode=1
       use_tf_pose: false          # if true, read robot pose from TF instead of pose/odom topic
       tf_odom_frame: odom         # name of the fixed world frame in TF
       tf_base_link_frame: base_link  # TF frame of the base link

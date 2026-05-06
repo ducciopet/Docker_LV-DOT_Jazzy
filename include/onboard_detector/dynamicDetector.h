@@ -551,7 +551,7 @@ namespace onboardDetector{
             camPoseColorMatrix.setIdentity();
             return;
         }
-        // odom is odom → base_link (from odometry_tf_publisher)
+        // odom is odom → base_link (from EKF on /odometry/filtered)
         Eigen::Quaterniond quat(odom->pose.pose.orientation.w, odom->pose.pose.orientation.x,
                                 odom->pose.pose.orientation.y, odom->pose.pose.orientation.z);
         Eigen::Matrix4d T_odom_base;
@@ -600,17 +600,17 @@ namespace onboardDetector{
             lidarPoseMatrix.setIdentity();
             return;
         }
-        // odom is odom → imu_link (from GLIM)
+        // odom is odom → base_link (from EKF on /odometry/filtered)
         Eigen::Quaterniond quat(odom->pose.pose.orientation.w, odom->pose.pose.orientation.x,
                                 odom->pose.pose.orientation.y, odom->pose.pose.orientation.z);
-        Eigen::Matrix4d T_odom_imu;
-        T_odom_imu.setIdentity();
-        T_odom_imu.block<3,3>(0,0) = quat.toRotationMatrix();
-        T_odom_imu(0,3) = odom->pose.pose.position.x;
-        T_odom_imu(1,3) = odom->pose.pose.position.y;
-        T_odom_imu(2,3) = odom->pose.pose.position.z;
-        // chain: odom ← imu_link ← base_link ← velodyne
-        lidarPoseMatrix = T_odom_imu * T_imu_base_ * T_base_velodyne_;
+        Eigen::Matrix4d T_odom_base;
+        T_odom_base.setIdentity();
+        T_odom_base.block<3,3>(0,0) = quat.toRotationMatrix();
+        T_odom_base(0,3) = odom->pose.pose.position.x;
+        T_odom_base(1,3) = odom->pose.pose.position.y;
+        T_odom_base(2,3) = odom->pose.pose.position.z;
+        // chain: odom ← base_link ← velodyne
+        lidarPoseMatrix = T_odom_base * T_base_velodyne_;
     }
     
     inline bool dynamicDetector::ensureStaticTfs() {

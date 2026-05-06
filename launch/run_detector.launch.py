@@ -31,8 +31,6 @@ def generate_launch_description():
     camera_frame_initial_guess = str(calibration_params.get('camera_frame_initial_guess', 'camera_initial_guess'))
 
     odom_topic = str(detector_onboard_params.get('odom_topic', '/glim_ros/odom_corrected'))
-    odom_frame = str(detector_onboard_params.get('tf_odom_frame', 'odom'))
-    odom_base_link_topic = '/glim_ros/odom_corrected_to_base_link'
     lidar_frame = str(detector_onboard_params.get('tf_lidar_frame', 'velodyne'))
     scripts_dir = os.path.join(pkg_dir, 'scripts')
     yolo_dir = os.path.join(scripts_dir, 'yolo_detector')
@@ -40,40 +38,6 @@ def generate_launch_description():
     pythonpath_action = SetEnvironmentVariable(
         'PYTHONPATH',
         yolo_dir + os.pathsep + scripts_dir + os.pathsep + os.environ.get('PYTHONPATH', '')
-    )
-
-    static_tf_base_link_to_imu_link = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_tf_base_link_to_imu_link',
-        parameters=[{'use_sim_time': True}],
-        arguments=[
-            '--x', '0.222',
-            '--y', '0.026',
-            '--z', '0.282',
-            '--roll', '0.0',
-            '--pitch', '0.0',
-            '--yaw', '0.0',
-            '--frame-id', 'base_link',
-            '--child-frame-id', 'imu_link',
-        ]
-    )
-
-    static_tf_base_link_to_velodyne = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_tf_base_link_to_velodyne',
-        parameters=[{'use_sim_time': True}],
-        arguments=[
-            '--x', '0.030',
-            '--y', '0.029',
-            '--z', '0.600',
-            '--roll', '0.0',
-            '--pitch', '0.0',
-            '--yaw', '0.0',
-            '--frame-id', 'base_link',
-            '--child-frame-id', 'velodyne',
-        ]
     )
 
     static_tf_velodyne_to_camera_link_initial_guess = Node(
@@ -112,7 +76,7 @@ def generate_launch_description():
         parameters=[
             ParameterFile(config_file, allow_substs=True),
             {'use_sim_time': True},
-            {'onboard_detector.odom_topic': odom_base_link_topic},
+            {'onboard_detector.odom_topic': odom_topic},
         ],
     )
 
@@ -147,30 +111,12 @@ def generate_launch_description():
         ],
     )
 
-    odometry_tf_publisher_node = Node(
-        package='onboard_detector',
-        executable='odometry_tf_publisher',
-        name='odometry_tf_publisher',
-        output='screen',
-        parameters=[
-            {'use_sim_time': True},
-            {'odom_topic': odom_topic},
-            {'odom_output_topic': odom_base_link_topic},
-            {'odom_frame': odom_frame},
-            {'imu_frame': 'imu_link'},
-            {'base_link_frame': 'base_link'},
-        ],
-    )
-
     return LaunchDescription([
         pythonpath_action,
-        static_tf_base_link_to_imu_link,
-        static_tf_base_link_to_velodyne,
         static_tf_velodyne_to_camera_link_initial_guess,
         calibration_node,
         detector_node,
         wall_detector_node,
-        odometry_tf_publisher_node,
         yolo_node,
         rviz_node,
     ])

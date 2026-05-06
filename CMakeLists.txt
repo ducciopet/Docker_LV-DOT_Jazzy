@@ -200,17 +200,6 @@ ament_target_dependencies(wall_detector_node
   tf2_geometry_msgs
 )
 
-# Odometry TF publisher node
-add_executable(odometry_tf_publisher
-  src/odometry_tf_publisher.cpp
-)
-ament_target_dependencies(odometry_tf_publisher
-  rclcpp
-  geometry_msgs
-  nav_msgs
-  tf2_ros
-  tf2_geometry_msgs
-)
 
 # --------------------------------------------------
 # Install
@@ -221,7 +210,6 @@ install(TARGETS
   calibration_node
   calibration_icp_node
   wall_detector_node
-  odometry_tf_publisher
   DESTINATION lib/${PROJECT_NAME}
 )
 
