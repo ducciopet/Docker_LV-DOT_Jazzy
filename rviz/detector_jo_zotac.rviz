@@ -457,7 +457,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /glim_ros/odom_corrected
+        Value: /odometry/filtered
       Value: true
   Enabled: true
   Global Options:
