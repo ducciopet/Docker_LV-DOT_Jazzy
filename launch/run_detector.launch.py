@@ -4,7 +4,9 @@ import os
 import yaml
 
 from launch import LaunchDescription
-from launch.actions import SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from ament_index_python.packages import get_package_share_directory
@@ -20,6 +22,11 @@ def _load_node_params(config_path, node_name):
 
 
 def generate_launch_description():
+
+    odom_pub_arg = DeclareLaunchArgument(
+        'odom_pub', default_value='false',
+        description='Launch odometry TF publisher (odom->base_link) from /odometry/filtered')
+    odom_pub = LaunchConfiguration('odom_pub')
 
     pkg_dir = get_package_share_directory('onboard_detector')
     config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac.yaml')
@@ -111,7 +118,20 @@ def generate_launch_description():
         ],
     )
 
+    odometry_tf_publisher_node = Node(
+        package='onboard_detector',
+        executable='odometry_tf_publisher_node',
+        name='odometry_tf_publisher',
+        output='screen',
+        parameters=[
+            {'use_sim_time': True},
+            {'odom_topic': '/odometry/filtered'},
+        ],
+        condition=IfCondition(odom_pub),
+    )
+
     return LaunchDescription([
+        odom_pub_arg,
         pythonpath_action,
         static_tf_velodyne_to_camera_link_initial_guess,
         calibration_node,
@@ -119,4 +139,5 @@ def generate_launch_description():
         wall_detector_node,
         yolo_node,
         rviz_node,
+        odometry_tf_publisher_node,
     ])
