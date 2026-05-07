@@ -1175,6 +1175,9 @@ namespace onboardDetector{
             this->ns_.empty() ? "/filtered_bboxes" : this->ns_ + "/filtered_bboxes", 10);
 
         // tracked bounding box pub (visualization only)
+        this->predictedBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/predicted_bboxes" : this->ns_ + "/predicted_bboxes", 10);
+
         this->trackedBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
             this->ns_.empty() ? "/tracked_bboxes" : this->ns_ + "/tracked_bboxes", 10);
 
@@ -2083,6 +2086,7 @@ namespace onboardDetector{
         this->publish3dBox(this->filteredBBoxesBeforeYolo_, this->filteredBBoxesBeforeYoloPub_, 0, 1, 0.5);
         this->publish3dBox(this->filteredBBoxes_, this->filteredBBoxesPub_, 0, 1, 1);
         this->publish3dBox(this->trackedBBoxes_, this->trackedBBoxesPub_, 1, 1, 0);
+        this->publish3dBox(this->predictedBBoxes_, this->predictedBBoxesPub_, 1.0, 0.5, 0.0, 0.4);
         // Publish track IDs as text markers above each tracked bbox
         visualization_msgs::msg::MarkerArray trackIdMarkers;
         for (size_t i = 0; i < this->trackedBBoxes_.size(); ++i) {
@@ -4363,6 +4367,7 @@ namespace onboardDetector{
         std::vector<onboardDetector::box3D> previousObservedBBoxes;
 
         this->getPredictedBBoxesFromFilters(predictedBBoxes, predictedPcCenters);
+        this->predictedBBoxes_ = predictedBBoxes;
         this->getPreviousObservedBBoxes(previousObservedBBoxes);
 
         this->findBestMatch(predictedBBoxes, previousObservedBBoxes, bestMatch);
@@ -5602,7 +5607,7 @@ namespace onboardDetector{
 
     void dynamicDetector::publish3dBox(const std::vector<box3D>& boxes,
                                 const rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr& publisher,
-                                double r, double g, double b){
+                                double r, double g, double b, double a){
         visualization_msgs::msg::MarkerArray markers;
 
         for (size_t i = 0; i < boxes.size(); i++)
@@ -5617,7 +5622,7 @@ namespace onboardDetector{
             line.color.r = r;
             line.color.g = g;
             line.color.b = b;
-            line.color.a = 1.0;
+            line.color.a = a;
             line.lifetime = rclcpp::Duration::from_seconds(this->dt_);
             line.pose.orientation.x = 0.0;
             line.pose.orientation.y = 0.0;

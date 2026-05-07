@@ -92,6 +92,7 @@ namespace onboardDetector{
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr filteredBBoxesBeforeYoloPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr filteredBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr trackedBBoxesPub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr predictedBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamicBBoxesPub_;
         rclcpp::Publisher<onboard_detector::msg::DynamicObstacleArray>::SharedPtr trackedObstaclesPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredDepthPointsPub_;
@@ -325,6 +326,7 @@ namespace onboardDetector{
         std::vector<onboardDetector::box3D> visualBBoxes_; // visual bobxes detected by camera
         std::vector<onboardDetector::box3D> lidarBBoxes_; // bboxes detected by lidar (have static and dynamic)
         std::vector<onboardDetector::box3D> trackedBBoxes_; // bboxes tracked from kalman filtering
+        std::vector<onboardDetector::box3D> predictedBBoxes_; // KF predicted positions (pre-update, used for association)
         std::vector<onboardDetector::box3D> dynamicBBoxes_; // boxes classified as dynamic
 
         // TRACKING AND ASSOCIATION DATA
@@ -426,7 +428,7 @@ namespace onboardDetector{
         void publishUVImages(); 
         void publishColorImages();
         void publishPoints(const std::vector<Eigen::Vector3d>& points, const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr& publisher);
-        void publish3dBox(const std::vector<onboardDetector::box3D>& bboxes, const rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr& publisher, double r, double g, double b);
+        void publish3dBox(const std::vector<onboardDetector::box3D>& bboxes, const rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr& publisher, double r, double g, double b, double a = 1.0);
         void publishHistoryTraj();
         void publishVelVis();
         void publishLidarClusters();
