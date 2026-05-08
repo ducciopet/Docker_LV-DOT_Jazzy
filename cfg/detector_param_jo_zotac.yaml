@@ -95,7 +95,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # System Timing
       # -----------------------------------------------------------------------
-      time_step: 0.12  # [s] expected period between detection frames (used in Kalman prediction step)
+      time_step: 0.05  # [s] expected period between detection frames (used in Kalman prediction step)
 
       # -----------------------------------------------------------------------
       # Detection Ranges
@@ -196,7 +196,7 @@ detector_node:
       #   eQVel: process noise on velocity
       #   eQAcc: process noise on acceleration
       #   eRPos: measurement noise on position
-      kalman_filter_v2_param: [0.25, 0.05, 0.15, 0.10, 0.02]
+      kalman_filter_v2_param: [0.25, 0.1, 0.2, 0.2, 0.1]
       # OLD Kalman V1 params (kept for reference, not used by active code):
       # kalman_filter_param:     [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
       # kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05]

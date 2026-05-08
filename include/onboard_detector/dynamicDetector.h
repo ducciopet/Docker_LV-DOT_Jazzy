@@ -92,7 +92,9 @@ namespace onboardDetector{
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr filteredBBoxesBeforeYoloPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr filteredBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr trackedBBoxesPub_;
-        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr predictedBBoxesPub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr predictedBBoxesActivePub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr predictedBBoxesMissedPub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr predictedBBoxesUnconfirmedPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamicBBoxesPub_;
         rclcpp::Publisher<onboard_detector::msg::DynamicObstacleArray>::SharedPtr trackedObstaclesPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredDepthPointsPub_;
@@ -274,6 +276,19 @@ namespace onboardDetector{
         double maxVelocityDirectionErrorTrackedDynamic_;
         double minMatchScoreConfirmed_;
         double minMatchScoreDynamic_;
+        int minConfirmHitsOutsideFov_ = 3;
+        double minOutsideFovObsSpeed_ = 0.10;          // m/s
+        double maxOutsideFovObsSpeed_ = 3.00;          // m/s
+        double maxNaturalInnovationOutsideFov_ = 1.00; // m
+        double maxVelocityDirectionErrorConfirmOutsideFov_ = 3.00;
+        int outsideFovObsVelWindow_ = 3;
+        double minOutsideFovAvgObsSpeed_ = 0.10;
+        double maxOutsideFovAvgObsSpeed_ = 30.00;
+        double maxMatchRangeOutsideFov_ = 1.20;
+        double maxMatchSpeedOutsideFov_ = 4.00;
+        double maxRelativeSizeDiffOutsideFov_ = 0.85;
+        double outsideFovConfirmedAssocBonus_ = 0.75;
+        double outsideFovTentativeAssocBonus_ = 0.35;
     
         // Classification
         int skipFrame_;
@@ -326,7 +341,9 @@ namespace onboardDetector{
         std::vector<onboardDetector::box3D> visualBBoxes_; // visual bobxes detected by camera
         std::vector<onboardDetector::box3D> lidarBBoxes_; // bboxes detected by lidar (have static and dynamic)
         std::vector<onboardDetector::box3D> trackedBBoxes_; // bboxes tracked from kalman filtering
-        std::vector<onboardDetector::box3D> predictedBBoxes_; // KF predicted positions (pre-update, used for association)
+        std::vector<onboardDetector::box3D> predictedBBoxesActive_;       // confirmed + matched last frame
+        std::vector<onboardDetector::box3D> predictedBBoxesMissed_;       // confirmed + coasting (no match)
+        std::vector<onboardDetector::box3D> predictedBBoxesUnconfirmed_;  // not yet confirmed
         std::vector<onboardDetector::box3D> dynamicBBoxes_; // boxes classified as dynamic
 
         // TRACKING AND ASSOCIATION DATA
@@ -422,7 +439,8 @@ namespace onboardDetector{
         bool isTrackConfirmedByIdx(int trackIdx) const;
         double getAdaptiveMaxInnovation(int trackIdx, const onboardDetector::box3D& currDetectedBBox) const;
         double getAdaptiveMinMatchScore(int trackIdx, const onboardDetector::box3D& currentBox) const;
-
+        double computeObservedSpeedOverWindow(int trackIdx, const onboardDetector::box3D& currDetectedBBox, int window) const;
+        bool isLidarOnlyOutsideFovAssociation(const onboardDetector::box3D& predictedBox, const onboardDetector::box3D& currentBox) const;
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);
         void publishUVImages(); 

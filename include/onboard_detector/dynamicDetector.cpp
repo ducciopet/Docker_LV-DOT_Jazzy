@@ -1175,8 +1175,12 @@ namespace onboardDetector{
             this->ns_.empty() ? "/filtered_bboxes" : this->ns_ + "/filtered_bboxes", 10);
 
         // tracked bounding box pub (visualization only)
-        this->predictedBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
-            this->ns_.empty() ? "/predicted_bboxes" : this->ns_ + "/predicted_bboxes", 10);
+        this->predictedBBoxesActivePub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/predicted_bboxes_active" : this->ns_ + "/predicted_bboxes_active", 10);
+        this->predictedBBoxesMissedPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/predicted_bboxes_missed" : this->ns_ + "/predicted_bboxes_missed", 10);
+        this->predictedBBoxesUnconfirmedPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/predicted_bboxes_unconfirmed" : this->ns_ + "/predicted_bboxes_unconfirmed", 10);
 
         this->trackedBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
             this->ns_.empty() ? "/tracked_bboxes" : this->ns_ + "/tracked_bboxes", 10);
@@ -2086,7 +2090,9 @@ namespace onboardDetector{
         this->publish3dBox(this->filteredBBoxesBeforeYolo_, this->filteredBBoxesBeforeYoloPub_, 0, 1, 0.5);
         this->publish3dBox(this->filteredBBoxes_, this->filteredBBoxesPub_, 0, 1, 1);
         this->publish3dBox(this->trackedBBoxes_, this->trackedBBoxesPub_, 1, 1, 0);
-        this->publish3dBox(this->predictedBBoxes_, this->predictedBBoxesPub_, 1.0, 0.5, 0.0, 0.4);
+        this->publish3dBox(this->predictedBBoxesActive_,       this->predictedBBoxesActivePub_,       1.0, 0.5, 0.0, 0.5);
+        this->publish3dBox(this->predictedBBoxesMissed_,       this->predictedBBoxesMissedPub_,       1.0, 0.15, 0.15, 0.6);
+        this->publish3dBox(this->predictedBBoxesUnconfirmed_,  this->predictedBBoxesUnconfirmedPub_,  0.6, 0.6, 0.6, 0.35);
         // Publish track IDs as text markers above each tracked bbox
         visualization_msgs::msg::MarkerArray trackIdMarkers;
         for (size_t i = 0; i < this->trackedBBoxes_.size(); ++i) {
@@ -4038,15 +4044,20 @@ namespace onboardDetector{
 
         const onboardDetector::box3D& prevBBox = this->boxHist_[trackIdx].front();
 
+        const Eigen::Vector3d bboxPos(currDetectedBBox.x, currDetectedBBox.y, currDetectedBBox.z);
+        const bool outsideFov = !this->isInCameraFOV(bboxPos);
+
         const double dx = currDetectedBBox.x - prevBBox.x;
         const double dy = currDetectedBBox.y - prevBBox.y;
         const double obsDist = std::sqrt(dx * dx + dy * dy);
 
-        // Reject stationary non-YOLO objects: they should not accumulate tracking hits.
-        // (YOLO and confirmed tracks already skip isNaturalMotion entirely.)
-        // When trackSteadyObjects_ is true, allow stationary objects through.
-        if (!this->trackSteadyObjects_ && obsDist < this->minNaturalMotionDist_){
-            return false;
+        // Dentro FOV: comportamento originale.
+        // Fuori FOV: non rifiutare subito piccoli spostamenti, perché a 20 Hz
+        // anche 0.5 m/s produce solo 2.5 cm/frame.
+        if (!outsideFov){
+            if (!this->trackSteadyObjects_ && obsDist < this->minNaturalMotionDist_){
+                return false;
+            }
         }
 
         if (obsDist > this->maxNaturalMotionDist_){
@@ -4064,12 +4075,10 @@ namespace onboardDetector{
                     (currDetectedBBox.y - predY) * (currDetectedBBox.y - predY));
 
         const double maxInnovation = this->getAdaptiveMaxInnovation(trackIdx, currDetectedBBox);
+
         if (innovation > maxInnovation){
             return false;
         }
-
-        // Direction check is NOT done here — passesVelocityDirectionGate() is the
-        // sole hard gate for velocity direction, avoiding redundant checks.
 
         return true;
     }
@@ -4156,8 +4165,10 @@ namespace onboardDetector{
         const double predVy = predictedFilter.output(3);
         const double predSpeed = std::sqrt(predVx * predVx + predVy * predVy);
 
-        // Confirmed track and nearly stationary → always pass.
-        // When trackSteadyObjects_, also pass for non-confirmed tracks.
+        const Eigen::Vector3d bboxPos(currDetectedBBox.x, currDetectedBBox.y, currDetectedBBox.z);
+        const bool outsideFov = !this->isInCameraFOV(bboxPos);
+
+        // Dentro FOV e YOLO: comportamento originale.
         if ((alreadyConfirmed || this->trackSteadyObjects_) &&
             obsSpeed < this->stationarySpeedThresh_ &&
             predSpeed < this->stationarySpeedThresh_)
@@ -4167,8 +4178,6 @@ namespace onboardDetector{
 
         const double err = this->computeVelocityDirectionError(trackIdx, currDetectedBBox);
 
-        // YOLO-exempt: current detection is YOLO OR track has YOLO history.
-        // Use the most permissive thresholds (person may change direction freely).
         if (yoloExempt){
             if (alreadyConfirmed){
                 return err <= this->maxVelocityDirectionErrorTrackedDynamic_;
@@ -4176,12 +4185,17 @@ namespace onboardDetector{
             return err <= this->maxVelocityDirectionErrorConfirmDynamic_;
         }
 
-        // Confirmed non-YOLO track: permissive
         if (alreadyConfirmed){
             return err <= this->maxVelocityDirectionErrorTracked_;
         }
 
-        // Unconfirmed: strict
+        // Nuovo comportamento SOLO per tentative LiDAR-only fuori FOV:
+        // il KF giovane spesso predice velocità quasi nulla, quindi il gate
+        // direzionale standard può essere troppo severo.
+        if (outsideFov){
+            return err <= this->maxVelocityDirectionErrorConfirmOutsideFov_;
+        }
+
         return err <= this->maxVelocityDirectionErrorConfirm_;
     }
 
@@ -4204,6 +4218,11 @@ namespace onboardDetector{
             return this->maxNaturalInnovationConfirmed_;
         }
 
+        const Eigen::Vector3d bboxPos(currDetectedBBox.x, currDetectedBBox.y, currDetectedBBox.z);
+        if (!this->isInCameraFOV(bboxPos)){
+            return this->maxNaturalInnovationOutsideFov_;
+        }
+
         return this->maxNaturalInnovation_;
     }
 
@@ -4221,93 +4240,131 @@ namespace onboardDetector{
         return this->minMatchScore_;
     }
 
+    double dynamicDetector::computeObservedSpeedOverWindow(int trackIdx,
+                                                        const onboardDetector::box3D& currDetectedBBox,
+                                                        int window) const
+    {
+        if (trackIdx < 0 ||
+            trackIdx >= static_cast<int>(this->boxHist_.size()) ||
+            this->boxHist_[trackIdx].empty())
+        {
+            return 0.0;
+        }
+
+        const int histSize = static_cast<int>(this->boxHist_[trackIdx].size());
+        const int k = std::max(1, std::min(window, histSize));
+
+        const onboardDetector::box3D& pastBBox = this->boxHist_[trackIdx][k - 1];
+
+        const double dx = currDetectedBBox.x - pastBBox.x;
+        const double dy = currDetectedBBox.y - pastBBox.y;
+        const double dt = this->clampPositive(this->dt_ * static_cast<double>(k), 1e-3);
+
+        return std::sqrt(dx * dx + dy * dy) / dt;
+    }
+
+    bool dynamicDetector::isLidarOnlyOutsideFovAssociation(
+        const onboardDetector::box3D& predictedBox,
+        const onboardDetector::box3D& currentBox) const
+    {
+        const Eigen::Vector3d predPos(predictedBox.x, predictedBox.y, predictedBox.z);
+        const Eigen::Vector3d currPos(currentBox.x, currentBox.y, currentBox.z);
+
+        const bool predOutsideFov = !this->isInCameraFOV(predPos);
+        const bool currOutsideFov = !this->isInCameraFOV(currPos);
+
+        // Solo caso LiDAR-only fuori camera.
+        // Se YOLO è presente o la track ha storia YOLO, lasciamo invariato il comportamento.
+        if (!predOutsideFov || !currOutsideFov){
+            return false;
+        }
+
+        if (predictedBox.is_yolo_candidate || currentBox.is_yolo_candidate){
+            return false;
+        }
+
+        return true;
+    }
+
     bool dynamicDetector::shouldConfirmTrack(int trackIdx,
                                             const onboardDetector::box3D& currDetectedBBox,
                                             int newHitStreak) const
     {
-        // YOLO-certified objects: confirm immediately, no minConfirmHits required.
-        // Two sources are checked:
-        //   1. Current frame: YOLO is actively seeing the object right now.
-        //   2. Track history (sticky): boxHist_[0].is_yolo_candidate propagates forward
-        //      each frame via `newEstimatedBBox.is_yolo_candidate = curr || prev`.
-        //      If the history contains YOLO evidence it means this track has represented
-        //      a dynamic object (person/vehicle) at some point. We keep tracking it even
-        //      when it is stationary and/or outside the camera FOV, because the object
-        //      may have simply stopped moving temporarily.
-        // NOTE: is_dynamic is intentionally NOT used here — classification is separate.
-        const bool historyHasYolo = (trackIdx >= 0 &&
-                                     trackIdx < static_cast<int>(this->boxHist_.size()) &&
-                                     !this->boxHist_[trackIdx].empty() &&
-                                     this->boxHist_[trackIdx][0].is_yolo_candidate);
+        const bool historyHasYolo =
+            (trackIdx >= 0 &&
+            trackIdx < static_cast<int>(this->boxHist_.size()) &&
+            !this->boxHist_[trackIdx].empty() &&
+            this->boxHist_[trackIdx][0].is_yolo_candidate);
+
+        // Lascia invariato comportamento YOLO/storia YOLO.
         if (currDetectedBBox.is_yolo_candidate || historyHasYolo){
             return true;
         }
 
-        // Non-YOLO detections: require minimum consecutive hits.
-        if (newHitStreak < this->minConfirmHits_){
+        if (trackIdx < 0 ||
+            trackIdx >= static_cast<int>(this->boxHist_.size()) ||
+            this->boxHist_[trackIdx].empty())
+        {
             return false;
         }
 
-        // NOTE: is_dynamic is intentionally NOT checked here.
-        // Classification (is_dynamic) is determined by classificationCB and must remain
-        // decoupled from the tracking confirmation logic. Confirmed tracks stay confirmed
-        // via the `oldConfirmed || shouldConfirmTrack(...)` pattern at the call site.
-
-        // For all other detections, require observed motion to avoid confirming static
-        // clutter (walls, furniture, sensor noise).
-        if (trackIdx < 0 || trackIdx >= static_cast<int>(this->boxHist_.size()) || this->boxHist_[trackIdx].empty()){
-            return false;
-        }
+        const Eigen::Vector3d bboxPos(currDetectedBBox.x, currDetectedBBox.y, currDetectedBBox.z);
+        const bool outsideFov = !this->isInCameraFOV(bboxPos);
 
         const auto& prevBBox = this->boxHist_[trackIdx].front();
         const double dt = this->clampPositive(this->dt_, 1e-3);
+
         const double dx = currDetectedBBox.x - prevBBox.x;
         const double dy = currDetectedBBox.y - prevBBox.y;
         const double obsSpeed = std::sqrt(dx * dx + dy * dy) / dt;
+
+        // ============================================================
+        // NUOVO BOOTSTRAP SOLO FUORI FOV, SOLO NON-YOLO
+        // ============================================================
+        if (outsideFov && !this->trackSteadyObjects_){
+
+            if (newHitStreak < this->minConfirmHitsOutsideFov_){
+                return false;
+            }
+
+            const double avgObsSpeed =
+                this->computeObservedSpeedOverWindow(trackIdx,
+                                                    currDetectedBBox,
+                                                    this->outsideFovObsVelWindow_);
+
+            if (avgObsSpeed < this->minOutsideFovAvgObsSpeed_){
+                return false;
+            }
+
+            if (avgObsSpeed > this->maxOutsideFovAvgObsSpeed_){
+                return false;
+            }
+
+            if (!this->isNaturalMotion(trackIdx, currDetectedBBox)){
+                return false;
+            }
+
+            if (!this->passesVelocityDirectionGate(trackIdx, currDetectedBBox, false, false)){
+                return false;
+            }
+
+            return true;
+        }
+
+        // ============================================================
+        // COMPORTAMENTO ORIGINALE DENTRO FOV / CASI NON BOOTSTRAP
+        // ============================================================
+
+        if (newHitStreak < this->minConfirmHits_){
+            return false;
+        }
 
         if (!this->trackSteadyObjects_ && obsSpeed < this->stationarySpeedThresh_){
             return false;
         }
 
-        if (!this->passesVelocityDirectionGate(trackIdx, currDetectedBBox, false)){
+        if (!this->passesVelocityDirectionGate(trackIdx, currDetectedBBox, false, false)){
             return false;
-        }
-
-        // Outside camera FOV: require Kalman velocity to be consistently above threshold
-        // across history to filter out LiDAR jitter that produces apparent single-frame motion.
-        // Skip this gate when trackSteadyObjects_ is true (we want to confirm stationary tracks).
-        const Eigen::Vector3d bboxPos(currDetectedBBox.x, currDetectedBBox.y, currDetectedBBox.z);
-        if (!this->trackSteadyObjects_ && !this->isInCameraFOV(bboxPos)){
-            const int nSamples = static_cast<int>(this->boxHist_[trackIdx].size());
-            if (nSamples < 2){
-                return false; // not enough history to assess consistency outside FOV
-            }
-
-            double kfVelMean = 0.0;
-            for (int k = 0; k < nSamples; ++k){
-                const double vx = this->boxHist_[trackIdx][k].Vx;
-                const double vy = this->boxHist_[trackIdx][k].Vy;
-                kfVelMean += std::sqrt(vx*vx + vy*vy);
-            }
-            kfVelMean /= static_cast<double>(nSamples);
-
-            if (kfVelMean < this->dynaVelThresh_){
-                return false;
-            }
-
-            double kfVelVar = 0.0;
-            for (int k = 0; k < nSamples; ++k){
-                const double vx = this->boxHist_[trackIdx][k].Vx;
-                const double vy = this->boxHist_[trackIdx][k].Vy;
-                const double v = std::sqrt(vx*vx + vy*vy);
-                kfVelVar += (v - kfVelMean) * (v - kfVelMean);
-            }
-            kfVelVar /= static_cast<double>(nSamples);
-            const double kfVelStd = std::sqrt(kfVelVar);
-
-            if (kfVelStd > this->dynaKfVelStdRatio_ * kfVelMean){
-                return false; // velocity too erratic — likely jitter
-            }
         }
 
         return true;
@@ -4367,7 +4424,23 @@ namespace onboardDetector{
         std::vector<onboardDetector::box3D> previousObservedBBoxes;
 
         this->getPredictedBBoxesFromFilters(predictedBBoxes, predictedPcCenters);
-        this->predictedBBoxes_ = predictedBBoxes;
+
+        this->predictedBBoxesActive_.clear();
+        this->predictedBBoxesMissed_.clear();
+        this->predictedBBoxesUnconfirmed_.clear();
+        {
+            size_t predIdx = 0;
+            for (size_t i = 0; i < this->boxHist_.size(); ++i) {
+                if (this->boxHist_[i].empty()) continue;
+                const onboardDetector::box3D& pred = predictedBBoxes[predIdx++];
+                const bool confirmed = (i < this->confirmedTracks_.size()) && this->confirmedTracks_[i];
+                const int  missed    = (i < this->missedFrames_.size())    ? this->missedFrames_[i] : 0;
+                if (!confirmed)      this->predictedBBoxesUnconfirmed_.push_back(pred);
+                else if (missed > 0) this->predictedBBoxesMissed_.push_back(pred);
+                else                 this->predictedBBoxesActive_.push_back(pred);
+            }
+        }
+
         this->getPreviousObservedBBoxes(previousObservedBBoxes);
 
         this->findBestMatch(predictedBBoxes, previousObservedBBoxes, bestMatch);
@@ -5320,24 +5393,33 @@ namespace onboardDetector{
     }
 
     double dynamicDetector::computeAssociationScore(const onboardDetector::box3D& predictedBox,
-                                                const onboardDetector::box3D& previousObservedBox,
-                                                const onboardDetector::box3D& currentBox,
-                                                double dt,
-                                                double& predPosDist,
-                                                double& requiredSpeed,
-                                                double& relSizeDiff,
-                                                double& predIou2d,
-                                                double& prevObsPosDist,
-                                                double& prevObsIou2d,
-                                                std::string& rejectReason) const
+                                                    const onboardDetector::box3D& previousObservedBox,
+                                                    const onboardDetector::box3D& currentBox,
+                                                    double dt,
+                                                    double& predPosDist,
+                                                    double& requiredSpeed,
+                                                    double& relSizeDiff,
+                                                    double& predIou2d,
+                                                    double& prevObsPosDist,
+                                                    double& prevObsIou2d,
+                                                    std::string& rejectReason) const
     {
         rejectReason.clear();
+
+        const bool lidarOnlyOutsideFov =
+            this->isLidarOnlyOutsideFovAssociation(predictedBox, currentBox);
+
+        const double effectiveMaxMatchRange =
+            lidarOnlyOutsideFov ? this->maxMatchRangeOutsideFov_ : this->maxMatchRange_;
+
+        const double effectiveMaxMatchSpeed =
+            lidarOnlyOutsideFov ? this->maxMatchSpeedOutsideFov_ : this->maxMatchSpeed_;
 
         const double dxPred = predictedBox.x - currentBox.x;
         const double dyPred = predictedBox.y - currentBox.y;
         predPosDist = std::sqrt(dxPred * dxPred + dyPred * dyPred);
 
-        if (predPosDist >= this->maxMatchRange_){
+        if (predPosDist >= effectiveMaxMatchRange){
             rejectReason = "REJECT_POS";
             return -1e9;
         }
@@ -5345,13 +5427,12 @@ namespace onboardDetector{
         dt = this->clampPositive(dt, 1e-3);
         requiredSpeed = predPosDist / dt;
 
-        if (requiredSpeed >= this->maxMatchSpeed_){
+        if (requiredSpeed >= effectiveMaxMatchSpeed){
             rejectReason = "REJECT_SPEED";
             return -1e9;
         }
 
         relSizeDiff = this->computeRelativeSizeDiff(predictedBox, currentBox);
-
         predIou2d = this->computeBoxIoU2D(predictedBox, currentBox);
 
         const double dxPrev = previousObservedBox.x - currentBox.x;
@@ -5359,8 +5440,11 @@ namespace onboardDetector{
         prevObsPosDist = std::sqrt(dxPrev * dxPrev + dyPrev * dyPrev);
         prevObsIou2d = this->computeBoxIoU2D(previousObservedBox, currentBox);
 
-        const double normPredPosDist = predPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
-        const double normPrevObsPosDist = prevObsPosDist / this->clampPositive(this->maxMatchRange_, 1e-6);
+        const double normPredPosDist =
+            predPosDist / this->clampPositive(effectiveMaxMatchRange, 1e-6);
+
+        const double normPrevObsPosDist =
+            prevObsPosDist / this->clampPositive(effectiveMaxMatchRange, 1e-6);
 
         double velDirPenalty = 0.0;
         bool foundTrackIdx = false;
@@ -5375,58 +5459,72 @@ namespace onboardDetector{
             if (this->boxHist_[j][0].id == predictedBox.id){
                 matchedTrackIdx = static_cast<int>(j);
                 foundTrackIdx = true;
+
                 if (j < this->confirmedTracks_.size()){
                     alreadyConfirmed = this->confirmedTracks_[j];
                 }
+
                 break;
             }
         }
 
-        // For confirmed tracks, allow larger size differences (merge flicker tolerance)
-        const double effectiveSizeLimit = (foundTrackIdx && alreadyConfirmed)
-                                            ? this->maxRelativeSizeDiffMatch_ * 1.5
-                                            : this->maxRelativeSizeDiffMatch_;
+        double effectiveSizeLimit = this->maxRelativeSizeDiffMatch_;
+
+        if (foundTrackIdx && alreadyConfirmed){
+            effectiveSizeLimit *= 1.5;
+        }
+
+        // Fuori FOV LiDAR-only: DBSCAN può variare parecchio la box.
+        // Rilassiamo la size, ma solo in questo caso.
+        if (lidarOnlyOutsideFov){
+            effectiveSizeLimit = std::max(effectiveSizeLimit,
+                                        this->maxRelativeSizeDiffOutsideFov_);
+        }
+
         if (relSizeDiff >= effectiveSizeLimit){
             rejectReason = "REJECT_SIZE";
             return -1e9;
         }
 
         if (foundTrackIdx){
-            // Check if the track itself has YOLO history (sticky flag)
-            const bool trackHasYolo = (matchedTrackIdx >= 0 &&
-                                       matchedTrackIdx < static_cast<int>(this->boxHist_.size()) &&
-                                       !this->boxHist_[matchedTrackIdx].empty() &&
-                                       this->boxHist_[matchedTrackIdx][0].is_yolo_candidate);
+            const bool trackHasYolo =
+                matchedTrackIdx >= 0 &&
+                matchedTrackIdx < static_cast<int>(this->boxHist_.size()) &&
+                !this->boxHist_[matchedTrackIdx].empty() &&
+                this->boxHist_[matchedTrackIdx][0].is_yolo_candidate;
+
             const bool yoloExempt = currentBox.is_yolo_candidate || trackHasYolo;
 
-            if (!this->passesVelocityDirectionGate(matchedTrackIdx, currentBox, alreadyConfirmed, yoloExempt)){
-                rejectReason = alreadyConfirmed ? "REJECT_VELDIR_TRACKED" : "REJECT_VELDIR_CONFIRM";
+            if (!this->passesVelocityDirectionGate(matchedTrackIdx,
+                                                currentBox,
+                                                alreadyConfirmed,
+                                                yoloExempt))
+            {
+                rejectReason = alreadyConfirmed ?
+                            "REJECT_VELDIR_TRACKED" :
+                            "REJECT_VELDIR_CONFIRM";
                 return -1e9;
             }
 
-            // Natural motion gate: checks innovation + direction + distance range.
-            // YOLO tracks (current detection or track history) are exempt.
-            // Confirmed tracks are also exempt — they have proven themselves already.
             if (!yoloExempt && !alreadyConfirmed &&
-                !this->isNaturalMotion(matchedTrackIdx, currentBox)){
+                !this->isNaturalMotion(matchedTrackIdx, currentBox))
+            {
                 rejectReason = "REJECT_NATURAL_MOTION";
                 return -1e9;
             }
 
-            velDirPenalty = this->computeVelocityDirectionError(matchedTrackIdx, currentBox);
+            velDirPenalty = this->computeVelocityDirectionError(matchedTrackIdx,
+                                                                currentBox);
         }
 
-        // Penalise matching a YOLO track to a non-YOLO detection, but ONLY when
-        // the track's predicted position is still within the depth camera range.
-        // Outside the camera FOV all detections come from LiDAR DBSCAN and will not have
-        // is_yolo_candidate=true — applying the penalty there would break correct
-        // associations between the person's LiDAR cluster and her own track.
-        // Only is_yolo_candidate is used here: is_dynamic is a classification label and
-        // must not influence tracking/association decisions.
         double yoloClassConsistencyPenalty = 0.0;
+
         if (foundTrackIdx && predictedBox.is_yolo_candidate){
             if (!currentBox.is_yolo_candidate){
-                const Eigen::Vector3d predPos(predictedBox.x, predictedBox.y, predictedBox.z);
+                const Eigen::Vector3d predPos(predictedBox.x,
+                                            predictedBox.y,
+                                            predictedBox.z);
+
                 if (this->isInCameraFOV(predPos)){
                     yoloClassConsistencyPenalty = 1.0;
                 }
@@ -5446,8 +5544,17 @@ namespace onboardDetector{
             if (alreadyConfirmed){
                 score += this->confirmedTrackAssocBonus_;
             }
+
             if (currentBox.is_yolo_candidate){
                 score += this->yoloTrackAssocBonus_;
+            }
+
+            // Bonus solo LiDAR-only fuori FOV.
+            // Serve a evitare ID switch / track restart quando la box oscilla leggermente.
+            if (lidarOnlyOutsideFov){
+                score += alreadyConfirmed ?
+                        this->outsideFovConfirmedAssocBonus_ :
+                        this->outsideFovTentativeAssocBonus_;
             }
         }
 

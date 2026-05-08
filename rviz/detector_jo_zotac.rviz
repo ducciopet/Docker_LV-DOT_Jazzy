@@ -159,6 +159,42 @@ Visualization Manager:
         Value: /onboard_detector/tracked_bboxes
       Value: true
     - Class: rviz_default_plugins/MarkerArray
+      Enabled: false
+      Name: KF Predicted - Active (orange)
+      Namespaces:
+        box3D: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /onboard_detector/predicted_bboxes_active
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: false
+      Name: KF Predicted - Missed/Coasting (red)
+      Namespaces:
+        box3D: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /onboard_detector/predicted_bboxes_missed
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: false
+      Name: KF Predicted - Unconfirmed (gray)
+      Namespaces:
+        box3D: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /onboard_detector/predicted_bboxes_unconfirmed
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: Dynamic Obstacles BBoxes
       Namespaces:
