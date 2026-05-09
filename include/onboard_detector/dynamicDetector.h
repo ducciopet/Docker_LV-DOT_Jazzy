@@ -253,11 +253,15 @@ namespace onboardDetector{
         double matchPrevObsPosScoreWeight_;
         double matchPrevObsIou2DScoreWeight_;
 
+        // Environment
+        bool isIndoor_;
+
         // YOLO Dynamic Classification
         std::vector<std::string> yoloDynamicClasses_;
         double yoloPointFractionThresh_;
         double yoloDepthTolerance_;
         double yoloHeightCorrectionThreshold_; // [m] min height diff to override 3D box height with YOLO-derived height
+        double yolo2dIouThreshold_;            // min 2D IoU between projected 3D bbox and YOLO rect to assign candidate (no-depth fallback)
 
         // Track confirmation / natural motion
         int minConfirmHits_;

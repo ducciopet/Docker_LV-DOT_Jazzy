@@ -113,6 +113,13 @@ detector_node:
       ground_conservative_offset: 0.1  # [m] conservative offset for ground height estimation
 
       # -----------------------------------------------------------------------
+      # LiDAR Filter
+      # -----------------------------------------------------------------------
+      downsample_threshold: 7000    # if projected points exceed this count, apply Gaussian downsampling
+      gaussian_downsample_rate: 10  # keep 1 in N points after Gaussian downsampling
+
+
+      # -----------------------------------------------------------------------
       # Voxel Filter (depth pipeline only)
       # -----------------------------------------------------------------------
       voxel_size: 0.1          # [m] voxel cell size for down-sampling the depth point cloud
@@ -128,9 +135,6 @@ detector_node:
       # -----------------------------------------------------------------------
       dbscan_min_points_cluster: 15     # min points per cluster (higher = less noise, misses more distant objects)
       dbscan_search_range_epsilon: 0.08 # [m] neighbourhood radius for DBSCAN core-point test
-
-      downsample_threshold: 7000    # if projected points exceed this count, apply Gaussian downsampling
-      gaussian_downsample_rate: 10  # keep 1 in N points after Gaussian downsampling
 
       # -----------------------------------------------------------------------
       # DBSCAN Refinement (recursive cluster splitting)
@@ -254,6 +258,8 @@ detector_node:
       yolo_depth_tolerance: 0.5            # [m] depth window beyond the foreground percentile to keep (background rejection)
       max_missed_frames_yolo: 10           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
       yolo_height_correction_threshold: 1.0 # [m] if |z_width_3D - z_width_yolo| >= this, override 3D box height with YOLO-derived height
+      yolo_2d_iou_threshold: 0.30          # min 2D IoU between projected 3D bbox and YOLO rect when no depth points available (LiDAR-only fallback)
+      is_indoor: true                      # outdoor: ellipse filter only; indoor: also applies 10th-percentile depth filter
       max_non_yolo_in_fov_frames: 3        # inside FOV: consecutive frames without a YOLO hit before clearing the sticky flag
       # Outside-FOV YOLO ID-swap guard: clears is_yolo_candidate only if the bbox *grows* vs. the YOLO baseline.
       # Shrinkage is intentionally ignored — LiDAR-only (outside FOV) produces smaller bboxes than LiDAR+depth.

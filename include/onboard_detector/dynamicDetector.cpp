@@ -858,6 +858,15 @@ namespace onboardDetector{
         if (!this->nh_->get_parameter(pname("yolo_height_correction_threshold"), this->yoloHeightCorrectionThreshold_)){
             this->yoloHeightCorrectionThreshold_ = 1.0;
         }
+        if (!this->nh_->get_parameter(pname("yolo_2d_iou_threshold"), this->yolo2dIouThreshold_)){
+            this->yolo2dIouThreshold_ = 0.30;
+        }
+        if (!this->nh_->get_parameter(pname("is_indoor"), this->isIndoor_)){
+            this->isIndoor_ = false;
+            std::cout << this->hint_ << ": No is_indoor parameter. Use default: false (outdoor)." << std::endl;
+        } else {
+            std::cout << this->hint_ << ": Environment mode: " << (this->isIndoor_ ? "indoor" : "outdoor") << std::endl;
+        }
 
         // =========================
         // Sensor and LiDAR Range Parameters
@@ -3532,15 +3541,27 @@ namespace onboardDetector{
 
                 if (dBrU <= dTlU || dBrV <= dTlV) continue;
 
-                // Collect 3D points + their camera-frame depths
+                // Ellipse mask: inscribed in the depth ROI; corners are excluded
+                // because they almost always contain background from adjacent objects.
+                const double ellCu = (dTlU + dBrU) * 0.5;
+                const double ellCv = (dTlV + dBrV) * 0.5;
+                const double ellRu = (dBrU - dTlU) * 0.5; // always >= 0.5 (ROI is non-empty)
+                const double ellRv = (dBrV - dTlV) * 0.5;
+
+                // Collect 3D points inside the inscribed ellipse of the depth ROI.
                 std::vector<Eigen::Vector3d> yoloPoints;
-                std::vector<double> yoloDepths;
+                std::vector<double> yoloDepths; // kept for indoor percentile filter
                 yoloPoints.reserve((dBrU - dTlU) * (dBrV - dTlV));
                 yoloDepths.reserve(yoloPoints.capacity());
 
                 for (int vv = dTlV; vv < dBrV; ++vv){
                     const uint16_t* rowPtr = this->depthImage_.ptr<uint16_t>(vv);
                     for (int uu = dTlU; uu < dBrU; ++uu){
+                        // Skip pixels outside the inscribed ellipse (corners = background)
+                        const double du = (uu - ellCu) / ellRu;
+                        const double dv = (vv - ellCv) / ellRv;
+                        if (du*du + dv*dv > 1.0) continue;
+
                         if (rowPtr[uu] == 0) continue;
                         const double d = rowPtr[uu] * inv_factor;
                         if (d < this->depthMinValue_ || d > this->depthMaxValue_) continue;
@@ -3559,29 +3580,100 @@ namespace onboardDetector{
                     }
                 }
 
-                if (yoloPoints.empty()) continue;
+                // Case 2 fallback: when the depth sensor has no coverage of the YOLO rect
+                // (object is LiDAR-only, or beyond depth range), project each 3D bbox's
+                // 8 corners onto the color image and accept the bbox if IoU >= threshold.
+                // Multiple 3D bboxes can match the same YOLO detection (large object split
+                // into several clusters by DBSCAN).
+                auto tryIouFallback = [&](){
+                    for (size_t j2 = 0; j2 < filteredBBoxesTemp.size(); ++j2){
+                        const auto& bb3d = filteredBBoxesTemp[j2];
+                        const double hx3 = bb3d.x_width * 0.5;
+                        const double hy3 = bb3d.y_width * 0.5;
+                        const double hz3 = bb3d.z_width * 0.5;
+
+                        const double cxArr[2] = {bb3d.x - hx3, bb3d.x + hx3};
+                        const double cyArr[2] = {bb3d.y - hy3, bb3d.y + hy3};
+                        const double czArr[2] = {bb3d.z - hz3, bb3d.z + hz3};
+
+                        double projMinU = std::numeric_limits<double>::max();
+                        double projMinV = std::numeric_limits<double>::max();
+                        double projMaxU = std::numeric_limits<double>::lowest();
+                        double projMaxV = std::numeric_limits<double>::lowest();
+                        bool anyValid = false;
+
+                        for (int ia = 0; ia < 2; ++ia)
+                        for (int ib = 0; ib < 2; ++ib)
+                        for (int ic = 0; ic < 2; ++ic){
+                            Eigen::Vector3d corner(cxArr[ia], cyArr[ib], czArr[ic]);
+                            Eigen::Vector3d camPt = this->orientationColor_.transpose() * (corner - this->positionColor_);
+                            if (camPt(2) <= 0.0) continue;
+                            const double u = this->fxC_ * camPt(0) / camPt(2) + this->cxC_;
+                            const double v = this->fyC_ * camPt(1) / camPt(2) + this->cyC_;
+                            if (u < projMinU) projMinU = u;
+                            if (u > projMaxU) projMaxU = u;
+                            if (v < projMinV) projMinV = v;
+                            if (v > projMaxV) projMaxV = v;
+                            anyValid = true;
+                        }
+
+                        if (!anyValid || projMaxU <= projMinU || projMaxV <= projMinV) continue;
+
+                        const double interMinU = std::max(projMinU, static_cast<double>(tlX));
+                        const double interMaxU = std::min(projMaxU, static_cast<double>(brX));
+                        const double interMinV = std::max(projMinV, static_cast<double>(tlY));
+                        const double interMaxV = std::min(projMaxV, static_cast<double>(brY));
+
+                        if (interMaxU <= interMinU || interMaxV <= interMinV) continue;
+
+                        const double interArea = (interMaxU - interMinU) * (interMaxV - interMinV);
+                        const double projArea  = (projMaxU - projMinU) * (projMaxV - projMinV);
+                        const double yoloArea  = static_cast<double>((brX - tlX) * (brY - tlY));
+                        const double unionArea = projArea + yoloArea - interArea;
+                        if (unionArea <= 0.0) continue;
+
+                        if (interArea / unionArea >= this->yolo2dIouThreshold_)
+                            filteredBBoxesTemp[j2].is_yolo_candidate = true;
+                    }
+                };
+
+                if (yoloPoints.empty()){
+                    tryIouFallback();
+                    continue;
+                }
 
                 // --------------------------------------------------
-                // STEP 2: Filter background points
+                // STEP 2: Background filtering
                 // --------------------------------------------------
-                // Find 10th-percentile depth as robust foreground estimate,
-                // keep only points within yoloDepthTolerance_ of it.
-                std::vector<double> sortedDepths = yoloDepths;
-                std::sort(sortedDepths.begin(), sortedDepths.end());
-                const double foregroundDepth = sortedDepths[sortedDepths.size() / 10]; // ~10th percentile
-                const double maxAllowedDepth = foregroundDepth + this->yoloDepthTolerance_;
-
+                // Indoor: ellipse + 10th-percentile depth filter to strip background
+                // (walls/ceiling close behind the object are the dominant noise source).
+                // Outdoor: ellipse alone is sufficient; depth-percentile would cut too
+                // many valid returns from objects at varying distances.
                 std::vector<Eigen::Vector3d> filteredYoloPoints;
                 filteredYoloPoints.reserve(yoloPoints.size());
-                for (size_t k = 0; k < yoloPoints.size(); ++k){
-                    if (yoloDepths[k] <= maxAllowedDepth &&
-                        yoloPoints[k].z() >= this->groundHeight_ &&
-                        yoloPoints[k].z() <= this->roofHeight_){
-                        filteredYoloPoints.push_back(yoloPoints[k]);
+
+                if (this->isIndoor_){
+                    std::vector<double> sortedDepths = yoloDepths;
+                    std::sort(sortedDepths.begin(), sortedDepths.end());
+                    const double foregroundDepth = sortedDepths[sortedDepths.size() / 10];
+                    const double maxAllowedDepth = foregroundDepth + this->yoloDepthTolerance_;
+                    for (size_t k = 0; k < yoloPoints.size(); ++k){
+                        if (yoloDepths[k] <= maxAllowedDepth &&
+                            yoloPoints[k].z() >= this->groundHeight_ &&
+                            yoloPoints[k].z() <= this->roofHeight_)
+                            filteredYoloPoints.push_back(yoloPoints[k]);
+                    }
+                } else {
+                    for (const auto& pt : yoloPoints){
+                        if (pt.z() >= this->groundHeight_ && pt.z() <= this->roofHeight_)
+                            filteredYoloPoints.push_back(pt);
                     }
                 }
 
-                if (filteredYoloPoints.empty()) continue;
+                if (filteredYoloPoints.empty()){
+                    tryIouFallback();
+                    continue;
+                }
 
                 // Accumulate for visualization
                 allYoloPoints.insert(allYoloPoints.end(), filteredYoloPoints.begin(), filteredYoloPoints.end());
@@ -3612,23 +3704,7 @@ namespace onboardDetector{
                     if (fraction >= this->yoloPointFractionThresh_){
                         filteredBBoxesTemp[j].is_yolo_candidate = true;
 
-                        // Resize box base (x, y) to tightly fit the YOLO foreground
-                        // points; keep z (height) and z_width unchanged.
-                        double minX = std::numeric_limits<double>::max(), maxX = std::numeric_limits<double>::lowest();
-                        double minY = std::numeric_limits<double>::max(), maxY = std::numeric_limits<double>::lowest();
-                        for (const auto& pt : yoloInsidePoints){
-                            if (pt(0) < minX) minX = pt(0);
-                            if (pt(0) > maxX) maxX = pt(0);
-                            if (pt(1) < minY) minY = pt(1);
-                            if (pt(1) > maxY) maxY = pt(1);
-                        }
-
-                        const double newXWidth = maxX - minX;
-                        const double newYWidth = maxY - minY;
-                        const double newCenterX = (minX + maxX) * 0.5;
-                        const double newCenterY = (minY + maxY) * 0.5;
-
-                        // Compute YOLO-derived height from the Z range of inside points
+                        // Correct box height using the Z range of YOLO inside points
                         double minZ = std::numeric_limits<double>::max();
                         double maxZ = std::numeric_limits<double>::lowest();
                         for (const auto& pt : yoloInsidePoints){
@@ -3639,44 +3715,9 @@ namespace onboardDetector{
                         const double yoloZCenter = (minZ + maxZ) * 0.5;
                         const double heightDiff = std::abs(filteredBBoxesTemp[j].z_width - yoloZWidth);
 
-                        filteredBBoxesTemp[j].x = newCenterX;
-                        filteredBBoxesTemp[j].y = newCenterY;
-                        filteredBBoxesTemp[j].x_width = newXWidth;
-                        filteredBBoxesTemp[j].y_width = newYWidth;
-
-                        // If YOLO height differs too much from the 3D box, trust YOLO
                         if (yoloZWidth > 0.0 && heightDiff >= this->yoloHeightCorrectionThreshold_){
                             filteredBBoxesTemp[j].z_width = yoloZWidth;
                             filteredBBoxesTemp[j].z = yoloZCenter;
-                        }
-
-                        // Re-filter the associated point cloud to stay within the new box
-                        const double nhx = newXWidth * 0.5;
-                        const double nhy = newYWidth * 0.5;
-                        const double nhz = filteredBBoxesTemp[j].z_width * 0.5;
-                        const double ncz = filteredBBoxesTemp[j].z;
-
-                        std::vector<Eigen::Vector3d> newCluster;
-                        for (const auto& pt : filteredPcClustersTemp[j]){
-                            if (std::abs(pt(0) - newCenterX) <= nhx &&
-                                std::abs(pt(1) - newCenterY) <= nhy &&
-                                std::abs(pt(2) - ncz) <= nhz){
-                                newCluster.push_back(pt);
-                            }
-                        }
-                        filteredPcClustersTemp[j] = newCluster;
-
-                        // Recompute cluster center and std for the trimmed cloud
-                        if (!newCluster.empty()){
-                            Eigen::Vector3d center = Eigen::Vector3d::Zero();
-                            for (const auto& pt : newCluster) center += pt;
-                            center /= static_cast<double>(newCluster.size());
-                            filteredPcClusterCentersTemp[j] = center;
-
-                            Eigen::Vector3d stddev = Eigen::Vector3d::Zero();
-                            for (const auto& pt : newCluster)
-                                stddev += (pt - center).cwiseAbs2();
-                            filteredPcClusterStdsTemp[j] = (stddev / static_cast<double>(newCluster.size())).cwiseSqrt();
                         }
                     }
                 }
