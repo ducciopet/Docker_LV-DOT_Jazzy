@@ -95,7 +95,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # System Timing
       # -----------------------------------------------------------------------
-      time_step: 0.05  # [s] expected period between detection frames (used in Kalman prediction step)
+      time_step: 0.1  # [s] expected period between detection frames (used in Kalman prediction step)
 
       # -----------------------------------------------------------------------
       # Detection Ranges
@@ -233,7 +233,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # Track Confirmation & Natural Motion
       # -----------------------------------------------------------------------
-      min_confirm_hits: 3                  # a track needs this many consecutive hits before being confirmed
+      min_confirm_hits: 4                  # a track needs this many consecutive hits before being confirmed
       min_natural_motion_dist: 0.08        # [m] minimum displacement per frame to be considered moving
       max_natural_motion_dist: 1.50        # [m] displacements larger than this are flagged as unnatural jumps
       max_natural_innovation: 0.60         # [m] max Kalman innovation for an unconfirmed track
@@ -253,6 +253,7 @@ detector_node:
       yolo_point_fraction_threshold: 0.2   # min fraction of foreground YOLO points inside a 3D bbox to mark it dynamic
       yolo_depth_tolerance: 0.5            # [m] depth window beyond the foreground percentile to keep (background rejection)
       max_missed_frames_yolo: 10           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
+      yolo_height_correction_threshold: 1.0 # [m] if |z_width_3D - z_width_yolo| >= this, override 3D box height with YOLO-derived height
       max_non_yolo_in_fov_frames: 3        # inside FOV: consecutive frames without a YOLO hit before clearing the sticky flag
       # Outside-FOV YOLO ID-swap guard: clears is_yolo_candidate only if the bbox *grows* vs. the YOLO baseline.
       # Shrinkage is intentionally ignored — LiDAR-only (outside FOV) produces smaller bboxes than LiDAR+depth.
@@ -266,7 +267,7 @@ detector_node:
       # Dynamic Classification (point cloud motion voting)
       # -----------------------------------------------------------------------
       frame_skip: 2                         # [frames] gap for point cloud displacement estimate (2 × 0.12s = 0.24s)
-      dynamic_velocity_threshold: 0.25      # [m/s] min speed to cast a vote (per-point) AND Kalman gate
+      dynamic_velocity_threshold: 0.2      # [m/s] min speed to cast a vote (per-point) AND Kalman gate
       dynamic_voting_threshold: 0.70        # fraction of consistent votes required (70% balances sensitivity vs. false positives)
       dynamic_kf_vel_std_ratio: 0.60        # max (std/mean) of Kalman speed over frame_skip frames; lower = stricter confidence gate
       frames_force_dynamic: 7               # min dynamic frames in window to keep sticky label (out of check_range below)
@@ -279,6 +280,39 @@ detector_node:
       target_constrain_size: false           # if true, fix detected bbox to target_object_size
       target_object_size: [0.5, 0.5, 1.8]   # [m] expected object size [x, y, z] when constrain is active
       max_object_size: [10.0, 10.0, 10.0]   # [m] bboxes larger than this in any axis are discarded
+
+      # -----------------------------------------------------------------------
+      # Outside-FOV Association Parameters
+      # -----------------------------------------------------------------------
+      min_confirm_hits_outside_fov: 5           # minimum hit streak to confirm a track seen only outside camera FOV
+      min_outside_fov_obs_speed: 0.2           # [m/s] minimum observed speed to start confirming an outside-FOV track
+      max_outside_fov_obs_speed: 20.00           # [m/s] maximum observed speed allowed for outside-FOV confirmation
+      max_natural_innovation_outside_fov: 1.00  # [m] maximum Kalman innovation (position residual) to accept outside-FOV match
+      max_velocity_direction_error_confirm_outside_fov: 3.00  # [rad] max heading error for confirming an outside-FOV track
+      outside_fov_obs_vel_window: 3             # [frames] window for computing average observed speed outside FOV
+      min_outside_fov_avg_obs_speed: 0.25       # [m/s] minimum average observed speed in window
+      max_outside_fov_avg_obs_speed: 20.00      # [m/s] maximum average observed speed in window
+      max_match_range_outside_fov: 1.20         # [m] maximum positional distance for bbox association outside FOV
+      max_match_speed_outside_fov: 20.00         # [m/s] maximum speed difference for association outside FOV
+      max_relative_size_diff_outside_fov: 0.35  # fractional size difference allowed for outside-FOV match (0.85 = 85%)
+      outside_fov_confirmed_assoc_bonus: 0.40   # score bonus added for confirmed tracks in outside-FOV association
+      outside_fov_tentative_assoc_bonus: 0.10   # score bonus added for tentative tracks in outside-FOV association
+      outside_fov_turn_max_pos_dist: 0.50       # [m] max positional distance to allow abrupt-turn association outside FOV
+      outside_fov_turn_max_speed: 5.00          # [m/s] max track speed to consider abrupt-turn match outside FOV
+      outside_fov_turn_max_size_diff: 0.35      # fractional size difference allowed for abrupt-turn match (0.90 = 90%)
+      outside_fov_turn_min_obs_speed: 0.40      # [m/s] minimum observed speed to allow abrupt-turn association
+      outside_fov_turn_assoc_bonus: 0.10        # score bonus for abrupt-turn association outside FOV
+      outside_fov_turn_min_track_age: 10       # [frames] minimum track age before allowing abrupt-turn association outside FOV
+      
+      # -----------------------------------------------------------------------
+      # Outside-FOV Dynamic Classification Parameters
+      # -----------------------------------------------------------------------
+      outside_fov_class_window: 7
+      outside_fov_class_min_track_age: 7
+      outside_fov_class_min_net_disp: 0.18
+      outside_fov_class_min_net_speed: 0.25
+      outside_fov_class_min_straightness: 0.55
+      outside_fov_class_max_step_speed: 15.00
 
 calibration_icp_node:
   ros__parameters:

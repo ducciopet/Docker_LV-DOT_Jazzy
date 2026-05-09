@@ -96,6 +96,7 @@ namespace onboardDetector{
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr predictedBBoxesMissedPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr predictedBBoxesUnconfirmedPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamicBBoxesPub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr potentiallyDynamicBBoxesPub_;
         rclcpp::Publisher<onboard_detector::msg::DynamicObstacleArray>::SharedPtr trackedObstaclesPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredDepthPointsPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr lidarClustersPub_;
@@ -207,8 +208,6 @@ namespace onboardDetector{
         int nextTrackId_ = 0;
         double maxMatchRange_;
         int histSize_;
-        // eP_, eQPos_, eQVel_, eQAcc_, eRPos_, eRVel_, eRAcc_ — KF V1 params, kept for reference inside commented-out functions
-        double eP_; double eQPos_; double eQVel_; double eQAcc_; double eRPos_; double eRVel_; double eRAcc_;
         int kfAvgFrames_;
 
         // Kalman Filter V2 parameters (position-only observation)
@@ -258,6 +257,7 @@ namespace onboardDetector{
         std::vector<std::string> yoloDynamicClasses_;
         double yoloPointFractionThresh_;
         double yoloDepthTolerance_;
+        double yoloHeightCorrectionThreshold_; // [m] min height diff to override 3D box height with YOLO-derived height
 
         // Track confirmation / natural motion
         int minConfirmHits_;
@@ -276,19 +276,31 @@ namespace onboardDetector{
         double maxVelocityDirectionErrorTrackedDynamic_;
         double minMatchScoreConfirmed_;
         double minMatchScoreDynamic_;
-        int minConfirmHitsOutsideFov_ = 3;
-        double minOutsideFovObsSpeed_ = 0.10;          // m/s
-        double maxOutsideFovObsSpeed_ = 3.00;          // m/s
-        double maxNaturalInnovationOutsideFov_ = 1.00; // m
-        double maxVelocityDirectionErrorConfirmOutsideFov_ = 3.00;
-        int outsideFovObsVelWindow_ = 3;
-        double minOutsideFovAvgObsSpeed_ = 0.10;
-        double maxOutsideFovAvgObsSpeed_ = 30.00;
-        double maxMatchRangeOutsideFov_ = 1.20;
-        double maxMatchSpeedOutsideFov_ = 4.00;
-        double maxRelativeSizeDiffOutsideFov_ = 0.85;
-        double outsideFovConfirmedAssocBonus_ = 0.75;
-        double outsideFovTentativeAssocBonus_ = 0.35;
+        int minConfirmHitsOutsideFov_;
+        double minOutsideFovObsSpeed_;
+        double maxOutsideFovObsSpeed_;
+        double maxNaturalInnovationOutsideFov_;
+        double maxVelocityDirectionErrorConfirmOutsideFov_;
+        int outsideFovObsVelWindow_;
+        double minOutsideFovAvgObsSpeed_;
+        double maxOutsideFovAvgObsSpeed_;
+        double maxMatchRangeOutsideFov_;
+        double maxMatchSpeedOutsideFov_;
+        double maxRelativeSizeDiffOutsideFov_;
+        double outsideFovConfirmedAssocBonus_;
+        double outsideFovTentativeAssocBonus_;
+        double outsideFovTurnMaxPosDist_;
+        double outsideFovTurnMaxSpeed_;
+        double outsideFovTurnMaxSizeDiff_;
+        double outsideFovTurnMinObsSpeed_;
+        double outsideFovTurnAssocBonus_;
+        int outsideFovTurnMinTrackAge_;
+        int outsideFovClassWindow_;
+        int outsideFovClassMinTrackAge_;
+        double outsideFovClassMinNetDisp_;
+        double outsideFovClassMinNetSpeed_;
+        double outsideFovClassMinStraightness_;
+        double outsideFovClassMaxStepSpeed_;
     
         // Classification
         int skipFrame_;
@@ -344,7 +356,8 @@ namespace onboardDetector{
         std::vector<onboardDetector::box3D> predictedBBoxesActive_;       // confirmed + matched last frame
         std::vector<onboardDetector::box3D> predictedBBoxesMissed_;       // confirmed + coasting (no match)
         std::vector<onboardDetector::box3D> predictedBBoxesUnconfirmed_;  // not yet confirmed
-        std::vector<onboardDetector::box3D> dynamicBBoxes_; // boxes classified as dynamic
+        std::vector<onboardDetector::box3D> dynamicBBoxes_;            // boxes classified as dynamic
+        std::vector<onboardDetector::box3D> potentiallyDynamicBBoxes_; // YOLO-identified but KF speed ~ 0
 
         // TRACKING AND ASSOCIATION DATA
         bool newDetectFlag_;
@@ -412,12 +425,6 @@ namespace onboardDetector{
         void mergeBoxesSet(const std::vector<onboardDetector::box3D>& boxes, const std::vector<std::vector<Eigen::Vector3d>>& clusters, const std::vector<int>& indices, onboardDetector::box3D& outBox, std::vector<Eigen::Vector3d>& outCluster, Eigen::Vector3d& center, Eigen::Vector3d& stddev);
         void findBestMatch(const std::vector<onboardDetector::box3D>& predictedBBoxes, const std::vector<onboardDetector::box3D>& previousObservedBBoxes, std::vector<int>& bestMatch);
         void kalmanFilterAndUpdateHist(const std::vector<int>& bestMatch);
-        // KF V1 — definitions commented out in .cpp, kept for reference
-        // void kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
-        // void kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
-        // void getKalmanObservationPos(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z);
-        // void getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
-        // void getKalmanObservationAcc(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z);
         void kalmanFilterMatrixAccV2(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R);
         void getKalmanObservationAccV2(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z);
         double computeBoxIoU2D(const onboardDetector::box3D& boxA, const onboardDetector::box3D& boxB) const;
@@ -441,6 +448,9 @@ namespace onboardDetector{
         double getAdaptiveMinMatchScore(int trackIdx, const onboardDetector::box3D& currentBox) const;
         double computeObservedSpeedOverWindow(int trackIdx, const onboardDetector::box3D& currDetectedBBox, int window) const;
         bool isLidarOnlyOutsideFovAssociation(const onboardDetector::box3D& predictedBox, const onboardDetector::box3D& currentBox) const;
+        bool isAbruptTurnAllowedOutsideFov(int trackIdx, const onboardDetector::box3D& predictedBox, const onboardDetector::box3D& currentBox, double dt) const;
+        bool hasConsistentObservedMotionOutsideFov(int trackIdx, int window, double& netDisp, double& netSpeed, double& pathLen, double& straightness, double& maxStepSpeed) const;
+        
         // visualization
         void getDynamicPc(std::vector<Eigen::Vector3d>& dynamicPc);
         void publishUVImages(); 
@@ -459,8 +469,6 @@ namespace onboardDetector{
 
         // user functions
         void getDynamicObstacles(std::vector<onboardDetector::box3D>& incomeDynamicBBoxes, const Eigen::Vector3d &robotSize = Eigen::Vector3d(0.0,0.0,0.0));
-        void getDynamicObstaclesHist(std::vector<std::vector<Eigen::Vector3d>>& posHist, std::vector<std::vector<Eigen::Vector3d>>& velHist, std::vector<std::vector<Eigen::Vector3d>>& sizeHist, const Eigen::Vector3d &robotSize = Eigen::Vector3d(0.0,0.0,0.0));
-
         // inline helper functions
         bool isInFilterRange(const Eigen::Vector3d& pos);
         bool isInCameraFOV(const Eigen::Vector3d& worldPoint) const;

@@ -61,6 +61,7 @@ namespace onboardDetector{
         bool is_dynamic=false; // false: not detected as dynamic(either yolo or classificationCB), true: detected as dynamic
         bool fix_size=false; // flag to force future boxes to fix size
         bool is_dynamic_candidate=false;
+        bool is_potentially_dynamic=false; // true: YOLO-identified but KF speed ~ 0 (stationary recognized object)
         bool is_estimated=false;
     };
 

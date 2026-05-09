@@ -593,12 +593,6 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": History for tracking is set to: " << this->histSize_ << std::endl;
         }
 
-        // KF V1 parameter loading — kept for reference, members used only inside commented-out KF V1 functions.
-        // YAML key: kalman_filter_param (commented out in cfg).
-        // this->eP_ = ...; this->eQPos_ = ...; etc. — initialized to 0.5 as fallback if ever uncommented.
-        this->eP_ = 0.5; this->eQPos_ = 0.5; this->eQVel_ = 0.5;
-        this->eQAcc_ = 0.5; this->eRPos_ = 0.5; this->eRVel_ = 0.5; this->eRAcc_ = 0.5;
-
         // num of frames used in KF for observation
         if (!this->nh_->get_parameter(pname("kalman_filter_averaging_frames"), this->kfAvgFrames_)){
             this->kfAvgFrames_ = 10;
@@ -861,6 +855,10 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": YOLO depth tolerance: " << this->yoloDepthTolerance_ << " m" << std::endl;
         }
 
+        if (!this->nh_->get_parameter(pname("yolo_height_correction_threshold"), this->yoloHeightCorrectionThreshold_)){
+            this->yoloHeightCorrectionThreshold_ = 1.0;
+        }
+
         // =========================
         // Sensor and LiDAR Range Parameters
         // =========================
@@ -1090,6 +1088,85 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": Min match score dynamic: " << this->minMatchScoreDynamic_ << std::endl;
         }
 
+        // =========================
+        // Outside-FOV Association Parameters
+        // =========================
+        if (!this->nh_->get_parameter(pname("min_confirm_hits_outside_fov"), this->minConfirmHitsOutsideFov_)){
+            this->minConfirmHitsOutsideFov_ = 3;
+        }
+        if (!this->nh_->get_parameter(pname("min_outside_fov_obs_speed"), this->minOutsideFovObsSpeed_)){
+            this->minOutsideFovObsSpeed_ = 0.10;
+        }
+        if (!this->nh_->get_parameter(pname("max_outside_fov_obs_speed"), this->maxOutsideFovObsSpeed_)){
+            this->maxOutsideFovObsSpeed_ = 3.00;
+        }
+        if (!this->nh_->get_parameter(pname("max_natural_innovation_outside_fov"), this->maxNaturalInnovationOutsideFov_)){
+            this->maxNaturalInnovationOutsideFov_ = 1.00;
+        }
+        if (!this->nh_->get_parameter(pname("max_velocity_direction_error_confirm_outside_fov"), this->maxVelocityDirectionErrorConfirmOutsideFov_)){
+            this->maxVelocityDirectionErrorConfirmOutsideFov_ = 3.00;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_obs_vel_window"), this->outsideFovObsVelWindow_)){
+            this->outsideFovObsVelWindow_ = 3;
+        }
+        if (!this->nh_->get_parameter(pname("min_outside_fov_avg_obs_speed"), this->minOutsideFovAvgObsSpeed_)){
+            this->minOutsideFovAvgObsSpeed_ = 0.10;
+        }
+        if (!this->nh_->get_parameter(pname("max_outside_fov_avg_obs_speed"), this->maxOutsideFovAvgObsSpeed_)){
+            this->maxOutsideFovAvgObsSpeed_ = 30.00;
+        }
+        if (!this->nh_->get_parameter(pname("max_match_range_outside_fov"), this->maxMatchRangeOutsideFov_)){
+            this->maxMatchRangeOutsideFov_ = 1.20;
+        }
+        if (!this->nh_->get_parameter(pname("max_match_speed_outside_fov"), this->maxMatchSpeedOutsideFov_)){
+            this->maxMatchSpeedOutsideFov_ = 4.00;
+        }
+        if (!this->nh_->get_parameter(pname("max_relative_size_diff_outside_fov"), this->maxRelativeSizeDiffOutsideFov_)){
+            this->maxRelativeSizeDiffOutsideFov_ = 0.85;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_confirmed_assoc_bonus"), this->outsideFovConfirmedAssocBonus_)){
+            this->outsideFovConfirmedAssocBonus_ = 0.75;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_tentative_assoc_bonus"), this->outsideFovTentativeAssocBonus_)){
+            this->outsideFovTentativeAssocBonus_ = 0.35;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_turn_max_pos_dist"), this->outsideFovTurnMaxPosDist_)){
+            this->outsideFovTurnMaxPosDist_ = 0.80;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_turn_max_speed"), this->outsideFovTurnMaxSpeed_)){
+            this->outsideFovTurnMaxSpeed_ = 3.50;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_turn_max_size_diff"), this->outsideFovTurnMaxSizeDiff_)){
+            this->outsideFovTurnMaxSizeDiff_ = 0.90;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_turn_min_obs_speed"), this->outsideFovTurnMinObsSpeed_)){
+            this->outsideFovTurnMinObsSpeed_ = 0.15;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_turn_assoc_bonus"), this->outsideFovTurnAssocBonus_)){
+            this->outsideFovTurnAssocBonus_ = 0.60;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_turn_min_track_age"), this->outsideFovTurnMinTrackAge_)){
+            this->outsideFovTurnMinTrackAge_ = 5;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_class_window"), this->outsideFovClassWindow_)){
+            this->outsideFovClassWindow_ = 5;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_class_min_track_age"), this->outsideFovClassMinTrackAge_)){
+            this->outsideFovClassMinTrackAge_ = 5;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_class_min_net_disp"), this->outsideFovClassMinNetDisp_)){
+            this->outsideFovClassMinNetDisp_ = 0.08;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_class_min_net_speed"), this->outsideFovClassMinNetSpeed_)){
+            this->outsideFovClassMinNetSpeed_ = 0.12;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_class_min_straightness"), this->outsideFovClassMinStraightness_)){
+            this->outsideFovClassMinStraightness_ = 0.45;
+        }
+        if (!this->nh_->get_parameter(pname("outside_fov_class_max_step_speed"), this->outsideFovClassMaxStepSpeed_)){
+            this->outsideFovClassMaxStepSpeed_ = 20.00;
+        }
+
     }
 
     bool dynamicDetector::lookupTfMatrix(const std::string& targetFrame, const std::string& sourceFrame, Eigen::Matrix4d& transformMatrix){
@@ -1192,6 +1269,8 @@ namespace onboardDetector{
         // dynamic bounding box pub
         this->dynamicBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
             this->ns_.empty() ? "/dynamic_bboxes" : this->ns_ + "/dynamic_bboxes", 10);
+        this->potentiallyDynamicBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/potentially_dynamic_bboxes" : this->ns_ + "/potentially_dynamic_bboxes", 10);
 
         // filtered depth pointcloud pub
         this->filteredDepthPointsPub_ = this->nh_->create_publisher<sensor_msgs::msg::PointCloud2>(this->ns_.empty() ? "/filtered_depth_cloud" : this->ns_ + "/filtered_depth_cloud", 10);
@@ -1881,6 +1960,7 @@ namespace onboardDetector{
         }
 
         std::vector<onboardDetector::box3D> dynamicBBoxesTemp;
+        std::vector<onboardDetector::box3D> potentiallyDynamicBBoxesTemp;
 
         for (size_t i=0; i<this->pcHist_.size() ; ++i){
 
@@ -1891,17 +1971,57 @@ namespace onboardDetector{
             }
 
             // ===================================================================================
-            // PATH 1 — YOLO: immediate dynamic classification.
-            // YOLO-certified tracks are always dynamic. We also write is_dynamic=true into
-            // boxHist_ so that PATH 2 can count this frame later (e.g. when the object exits
-            // the camera FOV and YOLO detections stop).
+            // PATH 1 — YOLO: classification based on KF speed.
+            // YOLO-certified tracks with speed >= dynaVelThresh_ are dynamic.
+            // YOLO-certified tracks with speed ~ 0 are "potentially dynamic" (stationary
+            // recognized object — e.g. a person standing still). is_dynamic is written into
+            // boxHist_ only for moving YOLO tracks so PATH 2 can sustain them after they
+            // exit the camera FOV.
             // ===================================================================================
             if (this->boxHist_[i][0].is_yolo_candidate){
-                this->boxHist_[i][0].is_dynamic = true;
-                dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
+                const double kfSpeed = std::sqrt(this->boxHist_[i][0].Vx * this->boxHist_[i][0].Vx +
+                                                 this->boxHist_[i][0].Vy * this->boxHist_[i][0].Vy);
+                if (kfSpeed >= this->dynaVelThresh_){
+                    this->boxHist_[i][0].is_dynamic = true;
+                    dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
+                } else {
+                    this->boxHist_[i][0].is_potentially_dynamic = true;
+                    potentiallyDynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
+                }
                 continue;
             }
 
+            const Eigen::Vector3d currBoxPos(this->boxHist_[i][0].x,
+                                            this->boxHist_[i][0].y,
+                                            this->boxHist_[i][0].z);
+
+            const bool outsideFovNonYolo = !this->isInCameraFOV(currBoxPos) &&
+                                        !this->boxHist_[i][0].is_yolo_candidate;
+
+            bool outsideFovObservedMotionOk = true;
+
+            double outsideNetDisp = 0.0;
+            double outsideNetSpeed = 0.0;
+            double outsidePathLen = 0.0;
+            double outsideStraightness = 0.0;
+            double outsideMaxStepSpeed = 0.0;
+
+            if (outsideFovNonYolo){
+                if (static_cast<int>(this->boxHist_[i].size()) < this->outsideFovClassMinTrackAge_){
+                    outsideFovObservedMotionOk = false;
+                }
+                else{
+                    outsideFovObservedMotionOk =
+                        this->hasConsistentObservedMotionOutsideFov(
+                            static_cast<int>(i),
+                            this->outsideFovClassWindow_,
+                            outsideNetDisp,
+                            outsideNetSpeed,
+                            outsidePathLen,
+                            outsideStraightness,
+                            outsideMaxStepSpeed);
+                }
+            }
             // -----------------------------------------------------------------------------------
             // Determine the temporal baseline for motion analysis (curFrameGap).
             // Ideally skipFrame_ frames back (e.g. 2 → 0.24s), but use whatever history is
@@ -1934,8 +2054,17 @@ namespace onboardDetector{
 
             if (dynaFrames >= this->forceDynaFrames_){
                 const double kfSpeed = std::sqrt(this->boxHist_[i][0].Vx * this->boxHist_[i][0].Vx +
-                                                  this->boxHist_[i][0].Vy * this->boxHist_[i][0].Vy);
-                if (kfSpeed >= this->dynaVelThresh_){
+                                                this->boxHist_[i][0].Vy * this->boxHist_[i][0].Vy);
+
+                bool keepDynamic = (kfSpeed >= this->dynaVelThresh_);
+
+                // Fuori FOV non-YOLO: non basta che il KF dica "sto andando".
+                // Serve anche moto osservato coerente, per evitare statici rumorosi.
+                if (outsideFovNonYolo){
+                    keepDynamic = keepDynamic && outsideFovObservedMotionOk;
+                }
+
+                if (keepDynamic){
                     this->boxHist_[i][0].is_dynamic = true;
                     dynamicBBoxesTemp.push_back(this->boxHist_[i][0]);
                     continue;
@@ -2031,7 +2160,18 @@ namespace onboardDetector{
             //   Hard gate: KF speed must be above dynaVelThresh_ (always required).
             //   Soft gate: EITHER enough points voted dynamic (voteRatio >= dynaVoteThresh_)
             //              OR the KF velocity is confident (handles sparse outside-FOV clouds).
-            if ((voteRatio >= this->dynaVoteThresh_ || kfVelConfident) && velNorm >= this->dynaVelThresh_){
+            bool singleFrameDynamicEvidence =
+                (voteRatio >= this->dynaVoteThresh_ || kfVelConfident) &&
+                velNorm >= this->dynaVelThresh_;
+
+            // Fuori FOV non-YOLO: richiedi anche moto osservato multi-frame.
+            // Questo evita che jitter di cluster statici venga promosso a dinamico.
+            if (outsideFovNonYolo){
+                singleFrameDynamicEvidence =
+                    singleFrameDynamicEvidence && outsideFovObservedMotionOk;
+            }
+
+            if (singleFrameDynamicEvidence){
                 this->boxHist_[i][0].is_dynamic_candidate = true;
 
                 // Anti-flicker consistency check: require dynamicConsistThresh_ consecutive
@@ -2077,6 +2217,7 @@ namespace onboardDetector{
         }
 
         this->dynamicBBoxes_ = dynamicBBoxesTemp;
+        this->potentiallyDynamicBBoxes_ = potentiallyDynamicBBoxesTemp;
     }
 
     void dynamicDetector::visCB(){
@@ -2130,6 +2271,7 @@ namespace onboardDetector{
         }
         this->trackedBBoxesPub_->publish(trackIdMarkers);
         this->publish3dBox(this->dynamicBBoxes_, this->dynamicBBoxesPub_, 0, 0, 1);
+        this->publish3dBox(this->potentiallyDynamicBBoxes_, this->potentiallyDynamicBBoxesPub_, 0.0, 1.0, 0.0);
 
         this->publishLidarClusters(); // colored clusters
         this->publishFilteredPoints();
@@ -3486,10 +3628,27 @@ namespace onboardDetector{
                         const double newCenterX = (minX + maxX) * 0.5;
                         const double newCenterY = (minY + maxY) * 0.5;
 
+                        // Compute YOLO-derived height from the Z range of inside points
+                        double minZ = std::numeric_limits<double>::max();
+                        double maxZ = std::numeric_limits<double>::lowest();
+                        for (const auto& pt : yoloInsidePoints){
+                            if (pt(2) < minZ) minZ = pt(2);
+                            if (pt(2) > maxZ) maxZ = pt(2);
+                        }
+                        const double yoloZWidth = maxZ - minZ;
+                        const double yoloZCenter = (minZ + maxZ) * 0.5;
+                        const double heightDiff = std::abs(filteredBBoxesTemp[j].z_width - yoloZWidth);
+
                         filteredBBoxesTemp[j].x = newCenterX;
                         filteredBBoxesTemp[j].y = newCenterY;
                         filteredBBoxesTemp[j].x_width = newXWidth;
                         filteredBBoxesTemp[j].y_width = newYWidth;
+
+                        // If YOLO height differs too much from the 3D box, trust YOLO
+                        if (yoloZWidth > 0.0 && heightDiff >= this->yoloHeightCorrectionThreshold_){
+                            filteredBBoxesTemp[j].z_width = yoloZWidth;
+                            filteredBBoxesTemp[j].z = yoloZCenter;
+                        }
 
                         // Re-filter the associated point cloud to stay within the new box
                         const double nhx = newXWidth * 0.5;
@@ -4165,10 +4324,12 @@ namespace onboardDetector{
         const double predVy = predictedFilter.output(3);
         const double predSpeed = std::sqrt(predVx * predVx + predVy * predVy);
 
-        const Eigen::Vector3d bboxPos(currDetectedBBox.x, currDetectedBBox.y, currDetectedBBox.z);
+        const Eigen::Vector3d bboxPos(currDetectedBBox.x,
+                                    currDetectedBBox.y,
+                                    currDetectedBBox.z);
+
         const bool outsideFov = !this->isInCameraFOV(bboxPos);
 
-        // Dentro FOV e YOLO: comportamento originale.
         if ((alreadyConfirmed || this->trackSteadyObjects_) &&
             obsSpeed < this->stationarySpeedThresh_ &&
             predSpeed < this->stationarySpeedThresh_)
@@ -4176,7 +4337,8 @@ namespace onboardDetector{
             return true;
         }
 
-        const double err = this->computeVelocityDirectionError(trackIdx, currDetectedBBox);
+        const double err = this->computeVelocityDirectionError(trackIdx,
+                                                            currDetectedBBox);
 
         if (yoloExempt){
             if (alreadyConfirmed){
@@ -4186,12 +4348,33 @@ namespace onboardDetector{
         }
 
         if (alreadyConfirmed){
+            // Nuovo comportamento:
+            // per track confermate LiDAR-only fuori FOV, non perdiamo subito la track
+            // se la persona cambia direzione e la detection resta spazialmente plausibile.
+            if (outsideFov){
+                onboardDetector::kalman_filter predictedFilterTurn = this->filters_[trackIdx];
+                predictedFilterTurn.predict(MatrixXd::Zero(6,1));
+
+                onboardDetector::box3D predictedBox = this->boxHist_[trackIdx][0];
+                predictedBox.x  = predictedFilterTurn.output(0);
+                predictedBox.y  = predictedFilterTurn.output(1);
+                predictedBox.Vx = predictedFilterTurn.output(2);
+                predictedBox.Vy = predictedFilterTurn.output(3);
+                predictedBox.Ax = predictedFilterTurn.output(4);
+                predictedBox.Ay = predictedFilterTurn.output(5);
+
+                if (this->isAbruptTurnAllowedOutsideFov(trackIdx,
+                                                        predictedBox,
+                                                        currDetectedBBox,
+                                                        dt))
+                {
+                    return true;
+                }
+            }
+
             return err <= this->maxVelocityDirectionErrorTracked_;
         }
 
-        // Nuovo comportamento SOLO per tentative LiDAR-only fuori FOV:
-        // il KF giovane spesso predice velocità quasi nulla, quindi il gate
-        // direzionale standard può essere troppo severo.
         if (outsideFov){
             return err <= this->maxVelocityDirectionErrorConfirmOutsideFov_;
         }
@@ -4364,6 +4547,184 @@ namespace onboardDetector{
         }
 
         if (!this->passesVelocityDirectionGate(trackIdx, currDetectedBBox, false, false)){
+            return false;
+        }
+
+        return true;
+    }
+
+    bool dynamicDetector::isAbruptTurnAllowedOutsideFov(
+        int trackIdx,
+        const onboardDetector::box3D& predictedBox,
+        const onboardDetector::box3D& currentBox,
+        double dt) const
+    {
+        if (trackIdx < 0 ||
+            trackIdx >= static_cast<int>(this->boxHist_.size()) ||
+            this->boxHist_[trackIdx].empty())
+        {
+            return false;
+        }
+
+        // NEW: abrupt turn solo per track già abbastanza mature
+        const int trackAge =
+            (trackIdx < static_cast<int>(this->trackAge_.size()))
+                ? this->trackAge_[trackIdx]
+                : 0;
+
+        if (trackAge < this->outsideFovTurnMinTrackAge_){
+            return false;
+        }
+
+        const Eigen::Vector3d predPos(predictedBox.x, predictedBox.y, predictedBox.z);
+        const Eigen::Vector3d currPos(currentBox.x, currentBox.y, currentBox.z);
+
+        const bool predOutsideFov = !this->isInCameraFOV(predPos);
+        const bool currOutsideFov = !this->isInCameraFOV(currPos);
+
+        if (!predOutsideFov || !currOutsideFov){
+            return false;
+        }
+
+        // Non tocchiamo YOLO o track con storia YOLO
+        if (predictedBox.is_yolo_candidate || currentBox.is_yolo_candidate){
+            return false;
+        }
+
+        if (this->boxHist_[trackIdx][0].is_yolo_candidate){
+            return false;
+        }
+
+        dt = this->clampPositive(dt, 1e-3);
+
+        const onboardDetector::box3D& prevBox = this->boxHist_[trackIdx].front();
+
+        const double dxObs = currentBox.x - prevBox.x;
+        const double dyObs = currentBox.y - prevBox.y;
+        const double obsDist = std::sqrt(dxObs * dxObs + dyObs * dyObs);
+        const double obsSpeed = obsDist / dt;
+
+        if (obsSpeed < this->outsideFovTurnMinObsSpeed_){
+            return false;
+        }
+
+        if (obsSpeed > this->outsideFovTurnMaxSpeed_){
+            return false;
+        }
+
+        const double dxPred = currentBox.x - predictedBox.x;
+        const double dyPred = currentBox.y - predictedBox.y;
+        const double predDist = std::sqrt(dxPred * dxPred + dyPred * dyPred);
+
+        if (predDist > this->outsideFovTurnMaxPosDist_){
+            return false;
+        }
+
+        const double relSizeDiff =
+            this->computeRelativeSizeDiff(predictedBox, currentBox);
+
+        if (relSizeDiff > this->outsideFovTurnMaxSizeDiff_){
+            return false;
+        }
+
+        // NEW: non accettare abrupt turn se non c'è moto osservato coerente
+        double netDisp = 0.0;
+        double netSpeed = 0.0;
+        double pathLen = 0.0;
+        double straightness = 0.0;
+        double maxStepSpeed = 0.0;
+
+        const bool observedMotionOk =
+            this->hasConsistentObservedMotionOutsideFov(
+                trackIdx,
+                this->outsideFovClassWindow_,
+                netDisp,
+                netSpeed,
+                pathLen,
+                straightness,
+                maxStepSpeed);
+
+        if (!observedMotionOk){
+            return false;
+        }
+
+        return true;
+    } 
+
+    bool dynamicDetector::hasConsistentObservedMotionOutsideFov(
+        int trackIdx,
+        int window,
+        double& netDisp,
+        double& netSpeed,
+        double& pathLen,
+        double& straightness,
+        double& maxStepSpeed) const
+    {
+        netDisp = 0.0;
+        netSpeed = 0.0;
+        pathLen = 0.0;
+        straightness = 0.0;
+        maxStepSpeed = 0.0;
+
+        if (trackIdx < 0 ||
+            trackIdx >= static_cast<int>(this->boxHist_.size()) ||
+            this->boxHist_[trackIdx].empty())
+        {
+            return false;
+        }
+
+        const int histSize = static_cast<int>(this->boxHist_[trackIdx].size());
+
+        if (histSize < 2){
+            return false;
+        }
+
+        const int k = std::min(window, histSize - 1);
+
+        if (k < 1){
+            return false;
+        }
+
+        const double dt = this->clampPositive(this->dt_, 1e-3);
+
+        const auto& curr = this->boxHist_[trackIdx][0];
+        const auto& past = this->boxHist_[trackIdx][k];
+
+        const double dxNet = curr.x - past.x;
+        const double dyNet = curr.y - past.y;
+
+        netDisp = std::sqrt(dxNet * dxNet + dyNet * dyNet);
+        netSpeed = netDisp / this->clampPositive(dt * static_cast<double>(k), 1e-3);
+
+        for (int i = 0; i < k; ++i){
+            const auto& a = this->boxHist_[trackIdx][i];
+            const auto& b = this->boxHist_[trackIdx][i + 1];
+
+            const double dx = a.x - b.x;
+            const double dy = a.y - b.y;
+
+            const double stepDist = std::sqrt(dx * dx + dy * dy);
+            const double stepSpeed = stepDist / dt;
+
+            pathLen += stepDist;
+            maxStepSpeed = std::max(maxStepSpeed, stepSpeed);
+        }
+
+        straightness = netDisp / this->clampPositive(pathLen, 1e-6);
+
+        if (netDisp < this->outsideFovClassMinNetDisp_){
+            return false;
+        }
+
+        if (netSpeed < this->outsideFovClassMinNetSpeed_){
+            return false;
+        }
+
+        if (straightness < this->outsideFovClassMinStraightness_){
+            return false;
+        }
+
+        if (maxStepSpeed > this->outsideFovClassMaxStepSpeed_){
             return false;
         }
 
@@ -5008,156 +5369,6 @@ namespace onboardDetector{
     }
 
     // ============================================================================
-    // Kalman Filter V1 functions — kept for reference, not called by active code.
-    // Active code uses kalmanFilterMatrixAccV2 + getKalmanObservationAccV2 only.
-    // ============================================================================
-    /*
-    void dynamicDetector::kalmanFilterMatrixVel(const onboardDetector::box3D& currDetectedBBox, MatrixXd& states, MatrixXd& A, MatrixXd& B, MatrixXd& H, MatrixXd& P, MatrixXd& Q, MatrixXd& R){
-        states.resize(4,1);
-        states(0) = currDetectedBBox.x;
-        states(1) = currDetectedBBox.y;
-        // init vel and acc to zeros
-        states(2) = 0.;
-        states(3) = 0.;
-
-        MatrixXd ATemp;
-        ATemp.resize(4, 4);
-        ATemp <<  0, 0, 1, 0,
-                  0, 0, 0, 1,
-                  0, 0, 0, 0,
-                  0 ,0, 0, 0;
-        A = MatrixXd::Identity(4,4) + this->dt_*ATemp;
-        B = MatrixXd::Zero(4, 4);
-        H = MatrixXd::Identity(4, 4);
-        P = MatrixXd::Identity(4, 4) * this->eP_;
-        Q = MatrixXd::Identity(4, 4);
-        Q(0,0) *= this->eQPos_; Q(1,1) *= this->eQPos_; Q(2,2) *= this->eQVel_; Q(3,3) *= this->eQVel_; 
-        R = MatrixXd::Identity(4, 4);
-        R(0,0) *= this->eRPos_; R(1,1) *= this->eRPos_; R(2,2) *= this->eRVel_; R(3,3) *= this->eRVel_;
-
-    }
-
-    void dynamicDetector::kalmanFilterMatrixAcc(const onboardDetector::box3D& currDetectedBBox,
-                                                MatrixXd& states,
-                                                MatrixXd& A,
-                                                MatrixXd& B,
-                                                MatrixXd& H,
-                                                MatrixXd& P,
-                                                MatrixXd& Q,
-                                                MatrixXd& R)
-    {
-        const double dt = this->clampPositive(this->dt_, 1e-3);
-        const double dt2 = dt * dt;
-
-        states.resize(6,1);
-        states(0) = currDetectedBBox.x;
-        states(1) = currDetectedBBox.y;
-        states(2) = 0.0;
-        states(3) = 0.0;
-        states(4) = 0.0;
-        states(5) = 0.0;
-
-        A.resize(6, 6);
-        A << 1, 0, dt, 0, 0.5 * dt2, 0,
-            0, 1, 0, dt, 0, 0.5 * dt2,
-            0, 0, 1,  0, dt,         0,
-            0, 0, 0,  1, 0,          dt,
-            0, 0, 0,  0, 1,          0,
-            0, 0, 0,  0, 0,          1;
-
-        B = MatrixXd::Zero(6, 6);
-
-        // Misura completa: x, y, vx, vy, ax, ay
-        H = MatrixXd::Identity(6, 6);
-
-        P = MatrixXd::Identity(6, 6) * this->eP_;
-
-        Q = MatrixXd::Zero(6, 6);
-        Q(0,0) = this->eQPos_;
-        Q(1,1) = this->eQPos_;
-        Q(2,2) = this->eQVel_;
-        Q(3,3) = this->eQVel_;
-        Q(4,4) = this->eQAcc_;
-        Q(5,5) = this->eQAcc_;
-
-        R = MatrixXd::Zero(6, 6);
-        R(0,0) = this->eRPos_;
-        R(1,1) = this->eRPos_;
-        R(2,2) = this->eRVel_;
-        R(3,3) = this->eRVel_;
-        R(4,4) = this->eRAcc_;
-        R(5,5) = this->eRAcc_;
-    }
-
-    void dynamicDetector::getKalmanObservationPos(const onboardDetector::box3D& currDetectedBBox, MatrixXd& Z){
-        Z.resize(2, 1);
-        Z(0) = currDetectedBBox.x;
-        Z(1) = currDetectedBBox.y;
-    }
-
-    void dynamicDetector::getKalmanObservationVel(const onboardDetector::box3D& currDetectedBBox, int bestMatchIdx, MatrixXd& Z){
-        Z.resize(4,1);
-        Z(0) = currDetectedBBox.x; 
-        Z(1) = currDetectedBBox.y;
-
-        // use previous k frame for velocity estimation
-        int k = this->kfAvgFrames_;
-        int historySize = this->boxHist_[bestMatchIdx].size();
-        if (historySize < k){
-            k = historySize;
-        }
-        onboardDetector::box3D prevMatchBBox = this->boxHist_[bestMatchIdx][k-1];
-
-        Z(2) = (currDetectedBBox.x-prevMatchBBox.x)/(this->dt_*k);
-        Z(3) = (currDetectedBBox.y-prevMatchBBox.y)/(this->dt_*k);
-    }
-
-    void dynamicDetector::getKalmanObservationAcc(const onboardDetector::box3D& currDetectedBBox,
-                                                int bestMatchIdx,
-                                                MatrixXd& Z)
-    {
-        Z = MatrixXd::Zero(6, 1);
-
-        // posizione sempre disponibile
-        Z(0) = currDetectedBBox.x;
-        Z(1) = currDetectedBBox.y;
-
-        if (bestMatchIdx < 0 ||
-            bestMatchIdx >= static_cast<int>(this->boxHist_.size()) ||
-            this->boxHist_[bestMatchIdx].empty())
-        {
-            return;
-        }
-
-        const int historySize = static_cast<int>(this->boxHist_[bestMatchIdx].size());
-        const int k = std::max(1, std::min(this->kfAvgFrames_, historySize));
-        const double dtObs = this->clampPositive(this->dt_ * static_cast<double>(k), 1e-3);
-
-        const onboardDetector::box3D& prevMatchBBox = this->boxHist_[bestMatchIdx][k - 1];
-
-        // velocità osservata media su k frame
-        Z(2) = (currDetectedBBox.x - prevMatchBBox.x) / dtObs;
-        Z(3) = (currDetectedBBox.y - prevMatchBBox.y) / dtObs;
-
-        // accelerazione osservata: uso la velocità salvata nella track precedente
-        if (historySize >= 2){
-            Z(4) = (Z(2) - prevMatchBBox.Vx) / dtObs;
-            Z(5) = (Z(3) - prevMatchBBox.Vy) / dtObs;
-        }
-        else{
-            Z(4) = 0.0;
-            Z(5) = 0.0;
-        }
-
-        for (int i = 0; i < Z.rows(); ++i){
-            if (std::isnan(Z(i,0)) || std::isinf(Z(i,0))){
-                Z(i,0) = 0.0;
-            }
-        }
-    }
-    */ // end Kalman Filter V1
-
-    // ============================================================================
     // Kalman Filter V2: position-only observation model
     // The state vector is the same 6D [x, y, vx, vy, ax, ay] with the same
     // constant-acceleration transition matrix A.
@@ -5486,6 +5697,8 @@ namespace onboardDetector{
             return -1e9;
         }
 
+        bool abruptTurnAccepted = false;
+
         if (foundTrackIdx){
             const bool trackHasYolo =
                 matchedTrackIdx >= 0 &&
@@ -5495,11 +5708,20 @@ namespace onboardDetector{
 
             const bool yoloExempt = currentBox.is_yolo_candidate || trackHasYolo;
 
-            if (!this->passesVelocityDirectionGate(matchedTrackIdx,
-                                                currentBox,
-                                                alreadyConfirmed,
-                                                yoloExempt))
-            {
+            bool passVelDir = this->passesVelocityDirectionGate(matchedTrackIdx,
+                                                                currentBox,
+                                                                alreadyConfirmed,
+                                                                yoloExempt);
+
+            if (!passVelDir && alreadyConfirmed && !yoloExempt){
+                abruptTurnAccepted =
+                    this->isAbruptTurnAllowedOutsideFov(matchedTrackIdx,
+                                                        predictedBox,
+                                                        currentBox,
+                                                        dt);
+            }
+
+            if (!passVelDir && !abruptTurnAccepted){
                 rejectReason = alreadyConfirmed ?
                             "REJECT_VELDIR_TRACKED" :
                             "REJECT_VELDIR_CONFIRM";
@@ -5555,6 +5777,10 @@ namespace onboardDetector{
                 score += alreadyConfirmed ?
                         this->outsideFovConfirmedAssocBonus_ :
                         this->outsideFovTentativeAssocBonus_;
+            }
+
+            if (abruptTurnAccepted){
+                score += this->outsideFovTurnAssocBonus_;
             }
         }
 
@@ -6043,46 +6269,4 @@ namespace onboardDetector{
             incomeDynamicBBoxes.push_back(box);
         }
     }
-
-    void dynamicDetector::getDynamicObstaclesHist(std::vector<std::vector<Eigen::Vector3d>>& posHist, std::vector<std::vector<Eigen::Vector3d>>& velHist, std::vector<std::vector<Eigen::Vector3d>>& sizeHist, const Eigen::Vector3d &robotSize){
-		posHist.clear();
-        velHist.clear();
-        sizeHist.clear();
-
-        if (this->boxHist_.size()){
-            for (size_t i=0 ; i<this->boxHist_.size() ; ++i){
-                if (this->boxHist_[i][0].is_dynamic or this->boxHist_[i][0].is_yolo_candidate){   
-                    bool findMatch = false;     
-                    if (this->constrainSize_){
-                        for (Eigen::Vector3d targetSize : this->targetObjectSize_){
-                            double xdiff = std::abs(this->boxHist_[i][0].x_width - targetSize(0));
-                            double ydiff = std::abs(this->boxHist_[i][0].y_width - targetSize(1));
-                            double zdiff = std::abs(this->boxHist_[i][0].z_width - targetSize(2)); 
-                            if (xdiff < 0.8 and ydiff < 0.8 and zdiff < 1.0){
-                                findMatch = true;
-                            }
-                        }
-                    }
-                    else{
-                        findMatch = true;
-                    }
-                    if (findMatch){
-                        std::vector<Eigen::Vector3d> obPosHist, obVelHist, obSizeHist;
-                        for (size_t j=0; j<this->boxHist_[i].size() ; ++j){
-                            Eigen::Vector3d pos(this->boxHist_[i][j].x, this->boxHist_[i][j].y, this->boxHist_[i][j].z);
-                            Eigen::Vector3d vel(this->boxHist_[i][j].Vx, this->boxHist_[i][j].Vy, 0);
-                            Eigen::Vector3d size(this->boxHist_[i][j].x_width, this->boxHist_[i][j].y_width, this->boxHist_[i][j].z_width);
-                            size += robotSize;
-                            obPosHist.push_back(pos);
-                            obVelHist.push_back(vel);
-                            obSizeHist.push_back(size);
-                        }
-                        posHist.push_back(obPosHist);
-                        velHist.push_back(obVelHist);
-                        sizeHist.push_back(obSizeHist);
-                    }
-                }
-            }
-        }
-	}
 }
