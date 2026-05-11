@@ -101,7 +101,7 @@ detector_node:
       # Detection Ranges
       # -----------------------------------------------------------------------
       local_sensor_range: [5.0, 5.0, 5.0]   # [m] ±X, ±Y, ±Z around robot — depth/visual pipeline only
-      local_lidar_range: [25.0, 25.0, 5.0]  # [m] ±X, ±Y, ±Z around robot — LiDAR pipeline only
+      local_lidar_range: [15.0, 15.0, 5.0]  # [m] ±X, ±Y, ±Z around robot — LiDAR pipeline only
 
       # -----------------------------------------------------------------------
       # Ground & Roof Initial Values

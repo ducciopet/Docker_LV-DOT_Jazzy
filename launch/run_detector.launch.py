@@ -29,7 +29,7 @@ def generate_launch_description():
     odom_pub = LaunchConfiguration('odom_pub')
 
     pkg_dir = get_package_share_directory('onboard_detector')
-    config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac_indoor.yaml')
+    config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac_outdoor.yaml')
     rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_jo_zotac.rviz')
 
     calibration_params = _load_node_params(config_file, 'calibration_icp_node')
