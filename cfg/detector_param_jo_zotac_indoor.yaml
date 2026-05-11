@@ -239,7 +239,7 @@ detector_node:
       # -----------------------------------------------------------------------
       min_confirm_hits: 4                  # a track needs this many consecutive hits before being confirmed
       min_natural_motion_dist: 0.08        # [m] minimum displacement per frame to be considered moving
-      max_natural_motion_dist: 1.50        # [m] displacements larger than this are flagged as unnatural jumps
+      max_natural_motion_dist: 1.00        # [m] displacements larger than this are flagged as unnatural jumps
       max_natural_innovation: 0.60         # [m] max Kalman innovation for an unconfirmed track
       max_natural_innovation_confirmed: 1.00  # [m] same, for confirmed tracks
       max_natural_innovation_dynamic: 1.20    # [m] same, for dynamic tracks
@@ -293,14 +293,14 @@ detector_node:
       # -----------------------------------------------------------------------
       min_confirm_hits_outside_fov: 5           # minimum hit streak to confirm a track seen only outside camera FOV
       min_outside_fov_obs_speed: 0.2           # [m/s] minimum observed speed to start confirming an outside-FOV track
-      max_outside_fov_obs_speed: 20.00           # [m/s] maximum observed speed allowed for outside-FOV confirmation
+      max_outside_fov_obs_speed: 10.00           # [m/s] maximum observed speed allowed for outside-FOV confirmation
       max_natural_innovation_outside_fov: 1.00  # [m] maximum Kalman innovation (position residual) to accept outside-FOV match
       max_velocity_direction_error_confirm_outside_fov: 3.00  # [rad] max heading error for confirming an outside-FOV track
       outside_fov_obs_vel_window: 3             # [frames] window for computing average observed speed outside FOV
       min_outside_fov_avg_obs_speed: 0.25       # [m/s] minimum average observed speed in window
-      max_outside_fov_avg_obs_speed: 20.00      # [m/s] maximum average observed speed in window
+      max_outside_fov_avg_obs_speed: 10.00      # [m/s] maximum average observed speed in window
       max_match_range_outside_fov: 1.20         # [m] maximum positional distance for bbox association outside FOV
-      max_match_speed_outside_fov: 20.00         # [m/s] maximum speed difference for association outside FOV
+      max_match_speed_outside_fov: 10.00         # [m/s] maximum speed difference for association outside FOV
       max_relative_size_diff_outside_fov: 0.35  # fractional size difference allowed for outside-FOV match (0.85 = 85%)
       outside_fov_confirmed_assoc_bonus: 0.40   # score bonus added for confirmed tracks in outside-FOV association
       outside_fov_tentative_assoc_bonus: 0.10   # score bonus added for tentative tracks in outside-FOV association
@@ -319,7 +319,7 @@ detector_node:
       outside_fov_class_min_net_disp: 0.18
       outside_fov_class_min_net_speed: 0.25
       outside_fov_class_min_straightness: 0.55
-      outside_fov_class_max_step_speed: 15.00
+      outside_fov_class_max_step_speed: 10.00
 
 calibration_icp_node:
   ros__parameters:

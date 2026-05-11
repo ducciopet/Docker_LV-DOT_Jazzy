@@ -63,6 +63,7 @@ namespace onboardDetector{
         bool is_dynamic_candidate=false;
         bool is_potentially_dynamic=false; // true: YOLO-identified but KF speed ~ 0 (stationary recognized object)
         bool is_estimated=false;
+        uint32_t track_age=0; // frames this track has been alive
     };
 
     inline geometry_msgs::msg::Quaternion quaternion_from_rpy(double roll, double pitch, double yaw)

@@ -2267,20 +2267,22 @@ namespace onboardDetector{
             idMarker.scale.z = 0.15;
             idMarker.scale.x = 0.15;
             idMarker.scale.y = 0.15;
-            // ID and velocity norm together
-            // Only declare these variables once per marker
-            idMarker.text = "ID: " + std::to_string(static_cast<int>(this->trackedBBoxes_[i].id)) + " | |V|: " + std::to_string(std::sqrt(this->trackedBBoxes_[i].Vx * this->trackedBBoxes_[i].Vx + this->trackedBBoxes_[i].Vy * this->trackedBBoxes_[i].Vy));
             idMarker.color.a = 1.0;
             idMarker.color.r = 0.0;
             idMarker.color.g = 1.0;
             idMarker.color.b = 0.0;
-            // Show the track id (cast to int for display)
             int track_id = static_cast<int>(this->trackedBBoxes_[i].id);
             double vx = this->trackedBBoxes_[i].Vx;
             double vy = this->trackedBBoxes_[i].Vy;
             double vnorm = std::sqrt(vx*vx + vy*vy);
-            idMarker.text = "ID: " + std::to_string(track_id) + " | |V|: " + std::to_string(vnorm)
-                          + (this->trackedBBoxes_[i].is_yolo_candidate ? " | YOLO" : "");
+            const std::string statusStr =
+                this->trackedBBoxes_[i].is_dynamic            ? "dynamic" :
+                this->trackedBBoxes_[i].is_potentially_dynamic ? "potentially_dynamic" :
+                (vnorm >= this->dynaVelThresh_)                ? "tracked" : "static";
+            idMarker.text = "ID: " + std::to_string(track_id)
+                          + " | age: " + std::to_string(this->trackedBBoxes_[i].track_age)
+                          + " | |V|: " + std::to_string(vnorm).substr(0, 4)
+                          + " | " + statusStr;
             idMarker.lifetime = rclcpp::Duration::from_seconds(0.1);
             trackIdMarkers.markers.push_back(idMarker);
         }
@@ -2308,12 +2310,13 @@ namespace onboardDetector{
 
         for (const auto& box : this->trackedBBoxes_){
             onboard_detector::msg::DynamicObstacle obs;
-            obs.header = arr.header;
+            obs.header   = arr.header;
             obs.track_id = static_cast<uint32_t>(box.id);
+            obs.track_age = box.track_age;
 
-            obs.pose.position.x = box.x;
-            obs.pose.position.y = box.y;
-            obs.pose.position.z = box.z;
+            obs.pose.position.x  = box.x;
+            obs.pose.position.y  = box.y;
+            obs.pose.position.z  = box.z;
             obs.pose.orientation.w = 1.0;
 
             obs.size.x = box.x_width;
@@ -2328,9 +2331,17 @@ namespace onboardDetector{
             obs.accel.linear.y = box.Ay;
             obs.accel.linear.z = box.Az;
 
-            obs.is_static = !box.is_dynamic;
-            obs.is_yolo   = box.is_yolo_candidate;
-            obs.confidence = box.is_dynamic ? 1.0f : 0.5f;
+            // Determine classification status (priority order); skip purely static tracks
+            const double kfSpeed = std::sqrt(box.Vx * box.Vx + box.Vy * box.Vy);
+            if (box.is_dynamic){
+                obs.status = onboard_detector::msg::DynamicObstacle::STATUS_DYNAMIC;
+            } else if (box.is_potentially_dynamic){
+                obs.status = onboard_detector::msg::DynamicObstacle::STATUS_POTENTIALLY_DYNAMIC;
+            } else if (kfSpeed >= this->dynaVelThresh_){
+                obs.status = onboard_detector::msg::DynamicObstacle::STATUS_TRACKED;
+            } else {
+                continue; // static track — not published on this topic
+            }
 
             arr.obstacles.push_back(obs);
         }
@@ -5107,8 +5118,9 @@ namespace onboardDetector{
             // Sticky flags: is_yolo_candidate propagates forward so CASE I in
             // classificationCB keeps firing even outside the camera FOV.
             // is_dynamic is NOT propagated: classificationCB decides fresh each frame.
-            const bool prevYoloCand = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_yolo_candidate;
-            const bool prevDynamic  = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_dynamic;
+            const bool prevYoloCand          = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_yolo_candidate;
+            const bool prevDynamic           = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_dynamic;
+            const bool prevPotentiallyDynamic = !this->boxHist_[matchIdx].empty() && this->boxHist_[matchIdx][0].is_potentially_dynamic;
             // is_yolo_candidate: sticky from YOLO detector (sensor output, track-level).
             newEstimatedBBox.is_yolo_candidate = currDetectedBBox.is_yolo_candidate || prevYoloCand;
 
@@ -5234,8 +5246,10 @@ namespace onboardDetector{
                     outputBBox.Ax               = newEstimatedBBox.Ax;
                     outputBBox.Ay               = newEstimatedBBox.Ay;
                     outputBBox.id               = newEstimatedBBox.id;
-                    outputBBox.is_yolo_candidate = newEstimatedBBox.is_yolo_candidate;
-                    outputBBox.is_dynamic        = prevDynamic;
+                    outputBBox.is_yolo_candidate     = newEstimatedBBox.is_yolo_candidate;
+                    outputBBox.is_dynamic             = prevDynamic;
+                    outputBBox.is_potentially_dynamic = prevPotentiallyDynamic;
+                    outputBBox.track_age              = static_cast<uint32_t>(newTrackAge);
                     trackedBBoxesTemp.push_back(outputBBox);
                 }
             }
@@ -5429,7 +5443,8 @@ namespace onboardDetector{
 
             if (immediateConfirm){
                 onboardDetector::box3D outputBBox = currDetectedBBox;
-                outputBBox.id = newEstimatedBBox.id;
+                outputBBox.id        = newEstimatedBBox.id;
+                outputBBox.track_age = 1;
                 trackedBBoxesTemp.push_back(outputBBox);
             }
 
