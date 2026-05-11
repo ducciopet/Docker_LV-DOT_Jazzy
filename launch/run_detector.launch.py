@@ -29,7 +29,7 @@ def generate_launch_description():
     odom_pub = LaunchConfiguration('odom_pub')
 
     pkg_dir = get_package_share_directory('onboard_detector')
-    config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac_outdoor.yaml')
+    config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac_indoor.yaml')
     rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_jo_zotac.rviz')
 
     calibration_params = _load_node_params(config_file, 'calibration_icp_node')
@@ -52,16 +52,27 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='calib_icp_tf_velodyne_to_camera_link_initial_guess',
             parameters=[{'use_sim_time': True}],
-            arguments=[
-                '--x', '0.218304037',
-                '--y', '0.107423631',
-                '--z', '-0.020496928',
-                '--roll', '-1.576042033',
-                '--pitch', '-0.037013778',
-                '--yaw', '-1.578200049',
-                '--frame-id', lidar_frame,
-                '--child-frame-id', camera_frame_initial_guess
-            ]
+            # arguments=[
+            #     '--x', '0.218304037',
+            #     '--y', '0.107423631',
+            #     '--z', '-0.020496928',
+            #     '--roll', '-1.576042033',
+            #     '--pitch', '-0.037013778',
+            #     '--yaw', '-1.578200049',
+            #     '--frame-id', lidar_frame,
+            #     '--child-frame-id', camera_frame_initial_guess
+            # ]
+            # arguments=[
+            #     '--x', '0.167250',
+            #     '--y', '0.133722',
+            #     '--z', '-0.408870',
+            #     '--roll', '-1.476451',
+            #     '--pitch', '0.014814',
+            #     '--yaw', '-1.583296',
+            #     '--frame-id', lidar_frame,
+            #     '--child-frame-id', camera_frame_initial_guess
+            # ]
+            arguments=['--x', '0.169686', '--y', '0.137954', '--z', '-0.410085', '--roll', '-1.476806', '--pitch', '0.015591', '--yaw', '-1.584388', '--frame-id', lidar_frame, '--child-frame-id', camera_frame_initial_guess  ] 
     )
 
     calibration_node = Node(

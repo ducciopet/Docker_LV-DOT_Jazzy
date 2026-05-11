@@ -90,12 +90,44 @@ public:
             SyncPolicy(20), sub_lidar_, sub_depth_);
         sync_->registerCallback(&CalibrationICPNode::onData, this);
 
+        is_indoor_ = this->declare_parameter("is_indoor", false);
+
+        // Outdoor only: if ICP calibration does not complete within 3 seconds,
+        // fall back to publishing the initial-guess TF as camera_refined so the
+        // detector can start without waiting for a valid ICP result.
+        if (!is_indoor_) {
+            timeout_timer_ = this->create_wall_timer(
+                std::chrono::seconds(3),
+                [this]() {
+                    timeout_timer_->cancel();
+                    if (processed_) return;
+                    RCLCPP_WARN(this->get_logger(),
+                        "ICP calibration timeout (3 s) in outdoor mode. "
+                        "Falling back to initial-guess TF for '%s'.",
+                        refined_camera_frame_.c_str());
+                    builtin_interfaces::msg::Time now_stamp;
+                    const int64_t ns = this->now().nanoseconds();
+                    now_stamp.sec    = static_cast<int32_t>(ns / 1000000000LL);
+                    now_stamp.nanosec = static_cast<uint32_t>(ns % 1000000000LL);
+                    if (!fetchInitialGuessFromTF(now_stamp)) {
+                        RCLCPP_ERROR(this->get_logger(),
+                            "Timeout fallback failed: cannot read initial-guess TF '%s -> %s'.",
+                            lidar_frame_.c_str(), camera_frame_initial_guess_.c_str());
+                        return;
+                    }
+                    publishRefinedStaticTF(T_lidar_camera_init_, now_stamp);
+                    processed_ = true;
+                });
+        }
+
         RCLCPP_INFO(this->get_logger(), "Calibration ICP node ready (one-shot)");
         RCLCPP_INFO(this->get_logger(), "  depth topic: %s", depth_topic_.c_str());
         RCLCPP_INFO(this->get_logger(), "  lidar topic: %s", lidar_topic_.c_str());
         RCLCPP_INFO(this->get_logger(), "  initial TF from: %s -> %s", lidar_frame_.c_str(), camera_frame_.c_str());
         RCLCPP_INFO(this->get_logger(), "  refined TF target child: %s", refined_camera_frame_.c_str());
         RCLCPP_INFO(this->get_logger(), "  overlap FOV margin: %d px", overlap_fov_margin_px_);
+        RCLCPP_INFO(this->get_logger(), "  is_indoor: %s%s", is_indoor_ ? "true" : "false",
+            is_indoor_ ? "" : " (3 s fallback to initial guess enabled)");
     }
 
 private:
@@ -142,6 +174,9 @@ private:
 
     int icp_max_runs_{10};
     double icp_fitness_threshold_{0.5};
+
+    bool is_indoor_{false};
+    rclcpp::TimerBase::SharedPtr timeout_timer_;
 
     bool processed_{false};
     Eigen::Matrix4d T_lidar_camera_init_{Eigen::Matrix4d::Identity()};

@@ -259,6 +259,7 @@ detector_node:
       max_missed_frames_yolo: 10           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
       yolo_height_correction_threshold: 1.0 # [m] if |z_width_3D - z_width_yolo| >= this, override 3D box height with YOLO-derived height
       yolo_2d_iou_threshold: 0.30          # min 2D IoU between projected 3D bbox and YOLO rect when no depth points available (LiDAR-only fallback)
+      yolo_x_y_resize: false               # if true, resize x/y of 3D bbox to fit YOLO foreground points (also re-filters cluster)
       is_indoor: true                      # outdoor: ellipse filter only; indoor: also applies 10th-percentile depth filter
       max_non_yolo_in_fov_frames: 3        # inside FOV: consecutive frames without a YOLO hit before clearing the sticky flag
       # Outside-FOV YOLO ID-swap guard: clears is_yolo_candidate only if the bbox *grows* vs. the YOLO baseline.
@@ -336,8 +337,9 @@ calibration_icp_node:
     icp_normal_max_nn: 30                  # max neighbours used for normal estimation
     min_overlap_points: 100                # min LiDAR points in camera FOV; if fewer, full cloud is used as target
     overlap_fov_margin_px: 120             # [px] margin added around image boundary when computing FOV overlap
-    icp_max_runs: 8                        # number of independent ICP scenes to collect before averaging
+    icp_max_runs: 10                        # number of independent ICP scenes to collect before averaging
     icp_fitness_threshold: 0.3             # min ICP fitness score to accept a result (0-1, higher = better fit)
+    is_indoor: true                        # indoor: no timeout fallback, wait for full ICP calibration
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # [fx, fy, cx, cy]
       depth_scale_factor: 1000.0           # raw_value / scale = meters

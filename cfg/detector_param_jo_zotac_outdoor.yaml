@@ -101,7 +101,7 @@ detector_node:
       # Detection Ranges
       # -----------------------------------------------------------------------
       local_sensor_range: [5.0, 5.0, 5.0]   # [m] ±X, ±Y, ±Z around robot — depth/visual pipeline only
-      local_lidar_range: [10.0, 10.0, 5.0]  # [m] ±X, ±Y, ±Z around robot — LiDAR pipeline only
+      local_lidar_range: [25.0, 25.0, 5.0]  # [m] ±X, ±Y, ±Z around robot — LiDAR pipeline only
 
       # -----------------------------------------------------------------------
       # Ground & Roof Initial Values
@@ -127,7 +127,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # UV Detection Filtering
       # -----------------------------------------------------------------------
-      uv_box_max_diagonal: 1.5  # [m] max XY diagonal of a UV-map bbox; larger detections are discarded as spurious
+      uv_box_max_diagonal: 5.0  # [m] max XY diagonal of a UV-map bbox; larger detections are discarded as spurious (5.0 for cars)
 
       # -----------------------------------------------------------------------
       # Visual DBSCAN Parameters (depth point cloud)
@@ -154,7 +154,7 @@ detector_node:
       # LiDAR DBSCAN Parameters
       # -----------------------------------------------------------------------
       lidar_DBSCAN_min_points: 10  # min points per LiDAR cluster
-      lidar_DBSCAN_epsilon: 0.04   # [m] DBSCAN neighbourhood radius for LiDAR
+      lidar_DBSCAN_epsilon: 0.25   # [m] DBSCAN neighbourhood radius for LiDAR (0.25 allows car surface gaps at distance)
 
       # -----------------------------------------------------------------------
       # BBox Merging — Intra-group (same detection source)
@@ -189,7 +189,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # Tracking & Data Association
       # -----------------------------------------------------------------------
-      max_match_range: 2.0                  # [m] max positional distance to match a detection to an existing track
+      max_match_range: 4.0                  # [m] max positional distance to match a detection to an existing track (4.0 for fast cars)
       track_max_zmin_above_ground: 1.5      # [m] bboxes with zmin > groundHeight + this are not tracked
       history_size: 100                     # number of past frames stored per track (history[0] = current)
       # Kalman Filter V2 — position-only observation; velocity & acceleration estimated internally
@@ -199,12 +199,12 @@ detector_node:
       #   eQVel: process noise on velocity
       #   eQAcc: process noise on acceleration
       #   eRPos: measurement noise on position
-      kalman_filter_v2_param: [0.25, 0.1, 0.2, 0.2, 0.1]
+      kalman_filter_v2_param: [0.25, 0.1, 0.5, 0.5, 0.2]  # eQVel/eQAcc raised for cars (acceleration/braking/turns)
       # OLD Kalman V1 params (kept for reference, not used by active code):
       # kalman_filter_param:     [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
       # kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05]
       kalman_filter_averaging_frames: 3  # smooth velocity estimate over this many frames
-      max_missed_frames: 5               # delete a track after this many consecutive missed detections
+      max_missed_frames: 12              # delete a track after this many consecutive missed detections (12 for occlusion tolerance)
 
       # -----------------------------------------------------------------------
       # Association Scoring Weights
@@ -213,7 +213,7 @@ detector_node:
       min_match_score_confirmed: -1.20  # stricter threshold for already-confirmed tracks
       min_match_score_dynamic: -1.50    # stricter threshold for dynamic tracks
 
-      max_match_speed: 8.0                          # [m/s] max expected object speed; used to gate association distance
+      max_match_speed: 25.0                         # [m/s] max expected object speed; used to gate association distance (25 m/s = 90 km/h)
       match_pos_score_weight: 1.0                   # weight on predicted-position distance term
       match_size_score_weight: 0.35                 # weight on relative size difference term
       match_iou2d_score_weight: 0.15                # weight on 2D IOU term
@@ -241,7 +241,7 @@ detector_node:
       max_natural_motion_dist: 1.50        # [m] displacements larger than this are flagged as unnatural jumps
       max_natural_innovation: 0.60         # [m] max Kalman innovation for an unconfirmed track
       max_natural_innovation_confirmed: 1.00  # [m] same, for confirmed tracks
-      max_natural_innovation_dynamic: 1.20    # [m] same, for dynamic tracks
+      max_natural_innovation_dynamic: 2.50    # [m] same, for dynamic tracks (2.5 for fast cars with large prediction residuals)
       max_velocity_direction_error_confirm: 1.20          # [rad] max heading error for confirming a track
       max_velocity_direction_error_tracked: 2.50          # [rad] max heading error for a tracked (non-dynamic) track
       max_velocity_direction_error_confirm_dynamic: 2.20  # [rad] same, for confirming a dynamic track
@@ -258,6 +258,7 @@ detector_node:
       max_missed_frames_yolo: 10           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
       yolo_height_correction_threshold: 1.0 # [m] if |z_width_3D - z_width_yolo| >= this, override 3D box height with YOLO-derived height
       yolo_2d_iou_threshold: 0.30          # min 2D IoU between projected 3D bbox and YOLO rect when no depth points available (LiDAR-only fallback)
+      yolo_x_y_resize: false               # if true, resize x/y of 3D bbox to fit YOLO foreground points (also re-filters cluster)
       is_indoor: false                     # outdoor: ellipse filter only; indoor: also applies 10th-percentile depth filter
       max_non_yolo_in_fov_frames: 3        # inside FOV: consecutive frames without a YOLO hit before clearing the sticky flag
       # Outside-FOV YOLO ID-swap guard: clears is_yolo_candidate only if the bbox *grows* vs. the YOLO baseline.
@@ -303,7 +304,7 @@ detector_node:
       outside_fov_confirmed_assoc_bonus: 0.40   # score bonus added for confirmed tracks in outside-FOV association
       outside_fov_tentative_assoc_bonus: 0.10   # score bonus added for tentative tracks in outside-FOV association
       outside_fov_turn_max_pos_dist: 0.50       # [m] max positional distance to allow abrupt-turn association outside FOV
-      outside_fov_turn_max_speed: 5.00          # [m/s] max track speed to consider abrupt-turn match outside FOV
+      outside_fov_turn_max_speed: 15.00         # [m/s] max track speed to consider abrupt-turn match outside FOV (15 for cars turning)
       outside_fov_turn_max_size_diff: 0.35      # fractional size difference allowed for abrupt-turn match (0.90 = 90%)
       outside_fov_turn_min_obs_speed: 0.40      # [m/s] minimum observed speed to allow abrupt-turn association
       outside_fov_turn_assoc_bonus: 0.10        # score bonus for abrupt-turn association outside FOV
@@ -335,8 +336,9 @@ calibration_icp_node:
     icp_normal_max_nn: 30                  # max neighbours used for normal estimation
     min_overlap_points: 100                # min LiDAR points in camera FOV; if fewer, full cloud is used as target
     overlap_fov_margin_px: 120             # [px] margin added around image boundary when computing FOV overlap
-    icp_max_runs: 8                        # number of independent ICP scenes to collect before averaging
+    icp_max_runs: 3                        # number of independent ICP scenes to collect before averaging
     icp_fitness_threshold: 0.3             # min ICP fitness score to accept a result (0-1, higher = better fit)
+    is_indoor: false                       # outdoor: fall back to initial-guess TF after 3 s if ICP not done
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # [fx, fy, cx, cy]
       depth_scale_factor: 1000.0           # raw_value / scale = meters
@@ -354,7 +356,7 @@ yolov11_detector_node:
     class_names_path: config/coco.names     # path to class name list
     target_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
     timer_period_sec: 0.033  # [s] inference period (~30 Hz)
-    inference_size: 352       # [px] YOLO input resolution (lower = faster, less accurate at distance)
+    inference_size: 640       # [px] YOLO input resolution (640 for better car detection at distance)
     queue_size: 10            # ROS subscriber queue depth
 
 # yolo_detector_node:  # legacy YOLOv4/v5 node, kept for reference

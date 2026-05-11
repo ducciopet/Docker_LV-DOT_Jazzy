@@ -861,6 +861,12 @@ namespace onboardDetector{
         if (!this->nh_->get_parameter(pname("yolo_2d_iou_threshold"), this->yolo2dIouThreshold_)){
             this->yolo2dIouThreshold_ = 0.30;
         }
+        if (!this->nh_->get_parameter(pname("yolo_x_y_resize"), this->yoloXYResize_)){
+            this->yoloXYResize_ = false;
+            std::cout << this->hint_ << ": No yolo_x_y_resize. Use default: false." << std::endl;
+        } else {
+            std::cout << this->hint_ << ": yolo_x_y_resize: " << (this->yoloXYResize_ ? "true" : "false") << std::endl;
+        }
         if (!this->nh_->get_parameter(pname("is_indoor"), this->isIndoor_)){
             this->isIndoor_ = false;
             std::cout << this->hint_ << ": No is_indoor parameter. Use default: false (outdoor)." << std::endl;
@@ -3704,7 +3710,32 @@ namespace onboardDetector{
                     if (fraction >= this->yoloPointFractionThresh_){
                         filteredBBoxesTemp[j].is_yolo_candidate = true;
 
-                        // Correct box height using the Z range of YOLO inside points
+                        // --- X/Y resize (optional) ---
+                        double newCenterX = filteredBBoxesTemp[j].x;
+                        double newCenterY = filteredBBoxesTemp[j].y;
+                        double newXWidth   = filteredBBoxesTemp[j].x_width;
+                        double newYWidth   = filteredBBoxesTemp[j].y_width;
+
+                        if (this->yoloXYResize_){
+                            double minX = std::numeric_limits<double>::max(), maxX = std::numeric_limits<double>::lowest();
+                            double minY = std::numeric_limits<double>::max(), maxY = std::numeric_limits<double>::lowest();
+                            for (const auto& pt : yoloInsidePoints){
+                                if (pt(0) < minX) minX = pt(0);
+                                if (pt(0) > maxX) maxX = pt(0);
+                                if (pt(1) < minY) minY = pt(1);
+                                if (pt(1) > maxY) maxY = pt(1);
+                            }
+                            newXWidth   = maxX - minX;
+                            newYWidth   = maxY - minY;
+                            newCenterX  = (minX + maxX) * 0.5;
+                            newCenterY  = (minY + maxY) * 0.5;
+                            filteredBBoxesTemp[j].x       = newCenterX;
+                            filteredBBoxesTemp[j].y       = newCenterY;
+                            filteredBBoxesTemp[j].x_width = newXWidth;
+                            filteredBBoxesTemp[j].y_width = newYWidth;
+                        }
+
+                        // --- Height correction (always active) ---
                         double minZ = std::numeric_limits<double>::max();
                         double maxZ = std::numeric_limits<double>::lowest();
                         for (const auto& pt : yoloInsidePoints){
@@ -3718,6 +3749,35 @@ namespace onboardDetector{
                         if (yoloZWidth > 0.0 && heightDiff >= this->yoloHeightCorrectionThreshold_){
                             filteredBBoxesTemp[j].z_width = yoloZWidth;
                             filteredBBoxesTemp[j].z = yoloZCenter;
+                        }
+
+                        // --- Cluster re-filter (only when x/y was resized) ---
+                        if (this->yoloXYResize_){
+                            const double nhx = newXWidth * 0.5;
+                            const double nhy = newYWidth * 0.5;
+                            const double nhz = filteredBBoxesTemp[j].z_width * 0.5;
+                            const double ncz = filteredBBoxesTemp[j].z;
+
+                            std::vector<Eigen::Vector3d> newCluster;
+                            for (const auto& pt : filteredPcClustersTemp[j]){
+                                if (std::abs(pt(0) - newCenterX) <= nhx &&
+                                    std::abs(pt(1) - newCenterY) <= nhy &&
+                                    std::abs(pt(2) - ncz) <= nhz)
+                                    newCluster.push_back(pt);
+                            }
+                            filteredPcClustersTemp[j] = newCluster;
+
+                            if (!newCluster.empty()){
+                                Eigen::Vector3d center = Eigen::Vector3d::Zero();
+                                for (const auto& pt : newCluster) center += pt;
+                                center /= static_cast<double>(newCluster.size());
+                                filteredPcClusterCentersTemp[j] = center;
+
+                                Eigen::Vector3d stddev = Eigen::Vector3d::Zero();
+                                for (const auto& pt : newCluster)
+                                    stddev += (pt - center).cwiseAbs2();
+                                filteredPcClusterStdsTemp[j] = (stddev / static_cast<double>(newCluster.size())).cwiseSqrt();
+                            }
                         }
                     }
                 }
