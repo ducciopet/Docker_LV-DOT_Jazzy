@@ -33,8 +33,8 @@
 #include <onboard_detector/kalmanFilter.h>
 #include <onboard_detector/utils.h>
 #include <onboard_detector/srv/get_dynamic_obstacles.hpp>
-#include <onboard_detector/msg/dynamic_obstacle.hpp>
-#include <onboard_detector/msg/dynamic_obstacle_array.hpp>
+#include <jo_msgs/msg/obstacle.hpp>
+#include <jo_msgs/msg/obstacle_array.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <random>
 #include <mutex>
@@ -97,7 +97,7 @@ namespace onboardDetector{
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr predictedBBoxesUnconfirmedPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamicBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr potentiallyDynamicBBoxesPub_;
-        rclcpp::Publisher<onboard_detector::msg::DynamicObstacleArray>::SharedPtr trackedObstaclesPub_;
+        rclcpp::Publisher<jo_msgs::msg::ObstacleArray>::SharedPtr trackedObstaclesPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredDepthPointsPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr lidarClustersPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredPointsPub_;

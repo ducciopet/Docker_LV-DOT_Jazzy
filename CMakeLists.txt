@@ -41,6 +41,7 @@ find_package(pcl_conversions REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(jo_msgs REQUIRED)
 
 # Open3D from /usr/local may export hardcoded LLVM libc++ paths that are not
 # present on this image (e.g. /usr/lib/llvm-18/lib/libc++.so.1). Rewrite them
@@ -70,9 +71,7 @@ find_package(rosidl_default_generators REQUIRED)
 # --------------------------------------------------
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetDynamicObstacles.srv"
-  "msg/DynamicObstacle.msg"
-  "msg/DynamicObstacleArray.msg"
-  DEPENDENCIES std_msgs geometry_msgs
+  DEPENDENCIES geometry_msgs
 )
 
 # --------------------------------------------------
@@ -108,6 +107,7 @@ ament_target_dependencies(${PROJECT_NAME}_lib
   pcl_conversions
   tf2
   tf2_geometry_msgs
+  jo_msgs
 )
 
 target_link_libraries(${PROJECT_NAME}_lib
@@ -140,6 +140,7 @@ ament_target_dependencies(detector_node
   pcl_conversions
   tf2
   tf2_geometry_msgs
+  jo_msgs
 )
 
 # Calibration node executable

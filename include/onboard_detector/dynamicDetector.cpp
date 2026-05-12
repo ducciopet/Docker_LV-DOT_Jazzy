@@ -1278,7 +1278,7 @@ namespace onboardDetector{
             this->ns_.empty() ? "/tracked_bboxes" : this->ns_ + "/tracked_bboxes", 10);
 
         // tracked obstacles pub (machine-to-machine interface for Nav2)
-        this->trackedObstaclesPub_ = this->nh_->create_publisher<onboard_detector::msg::DynamicObstacleArray>(
+        this->trackedObstaclesPub_ = this->nh_->create_publisher<jo_msgs::msg::ObstacleArray>(
             this->ns_.empty() ? "/tracked_dynamic_obstacles" : this->ns_ + "/tracked_dynamic_obstacles", 10);
 
         // dynamic bounding box pub
@@ -2304,12 +2304,12 @@ namespace onboardDetector{
     }
 
     void dynamicDetector::publishDynamicObstacleArray(){
-        onboard_detector::msg::DynamicObstacleArray arr;
+        jo_msgs::msg::ObstacleArray arr;
         arr.header.frame_id = "odom";
         arr.header.stamp = this->nh_->now();
 
         for (const auto& box : this->trackedBBoxes_){
-            onboard_detector::msg::DynamicObstacle obs;
+            jo_msgs::msg::Obstacle obs;
             obs.header   = arr.header;
             obs.track_id = static_cast<uint32_t>(box.id);
             obs.track_age = box.track_age;
@@ -2334,11 +2334,11 @@ namespace onboardDetector{
             // Determine classification status (priority order); skip purely static tracks
             const double kfSpeed = std::sqrt(box.Vx * box.Vx + box.Vy * box.Vy);
             if (box.is_dynamic){
-                obs.status = onboard_detector::msg::DynamicObstacle::STATUS_DYNAMIC;
+                obs.status = jo_msgs::msg::Obstacle::STATUS_DYNAMIC;
             } else if (box.is_potentially_dynamic){
-                obs.status = onboard_detector::msg::DynamicObstacle::STATUS_POTENTIALLY_DYNAMIC;
+                obs.status = jo_msgs::msg::Obstacle::STATUS_POTENTIALLY_DYNAMIC;
             } else if (kfSpeed >= this->dynaVelThresh_){
-                obs.status = onboard_detector::msg::DynamicObstacle::STATUS_TRACKED;
+                obs.status = jo_msgs::msg::Obstacle::STATUS_TRACKED;
             } else {
                 continue; // static track — not published on this topic
             }
