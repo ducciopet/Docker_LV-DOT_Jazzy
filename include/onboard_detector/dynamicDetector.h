@@ -259,6 +259,7 @@ namespace onboardDetector{
         // YOLO Dynamic Classification
         std::vector<std::string> yoloDynamicClasses_;
         double yoloPointFractionThresh_;
+        double yoloPointDensityThresh_;          // [pts/m^3] min YOLO point density inside a 3D bbox
         double yoloDepthTolerance_;
         double yoloHeightCorrectionThreshold_; // [m] min height diff to override 3D box height with YOLO-derived height
         double yolo2dIouThreshold_;            // min 2D IoU between projected 3D bbox and YOLO rect to assign candidate (no-depth fallback)

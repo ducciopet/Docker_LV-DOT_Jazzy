@@ -254,6 +254,7 @@ detector_node:
       # -----------------------------------------------------------------------
       yolo_dynamic_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
       yolo_point_fraction_threshold: 0.2   # min fraction of foreground YOLO points inside a 3D bbox to mark it dynamic
+      yolo_point_density_threshold: 30.0   # [pts/m³] min foreground YOLO point density inside a 3D bbox; prevents huge sparse boxes becoming YOLO tracks
       yolo_depth_tolerance: 0.5            # [m] depth window beyond the foreground percentile to keep (background rejection)
       max_missed_frames_yolo: 10           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
       yolo_height_correction_threshold: 1.0 # [m] if |z_width_3D - z_width_yolo| >= this, override 3D box height with YOLO-derived height

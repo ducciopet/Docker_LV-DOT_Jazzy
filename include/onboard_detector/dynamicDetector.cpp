@@ -847,6 +847,14 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": YOLO point fraction threshold: " << this->yoloPointFractionThresh_ << std::endl;
         }
 
+        if (!this->nh_->get_parameter(pname("yolo_point_density_threshold"), this->yoloPointDensityThresh_)){
+            this->yoloPointDensityThresh_ = 30.0;
+            std::cout << this->hint_ << ": No yolo_point_density_threshold. Use default: 30.0 pts/m^3." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO point density threshold: " << this->yoloPointDensityThresh_ << " pts/m^3" << std::endl;
+        }
+
         if (!this->nh_->get_parameter(pname("yolo_depth_tolerance"), this->yoloDepthTolerance_)){
             this->yoloDepthTolerance_ = 1.0;
             std::cout << this->hint_ << ": No yolo_depth_tolerance. Use default: 1.0 m." << std::endl;
@@ -3717,8 +3725,11 @@ namespace onboardDetector{
 
                     const int totalFiltered = static_cast<int>(filteredYoloPoints.size());
                     const double fraction = static_cast<double>(yoloInsidePoints.size()) / static_cast<double>(totalFiltered);
+                    const double boxVolume = std::max(bb.x_width * bb.y_width * bb.z_width, 1e-6);
+                    const double yoloPointDensity = static_cast<double>(yoloInsidePoints.size()) / boxVolume;
 
-                    if (fraction >= this->yoloPointFractionThresh_){
+                    if (fraction >= this->yoloPointFractionThresh_ &&
+                        yoloPointDensity >= this->yoloPointDensityThresh_){
                         filteredBBoxesTemp[j].is_yolo_candidate = true;
 
                         // --- X/Y resize (optional) ---
@@ -5821,6 +5832,23 @@ namespace onboardDetector{
                 matchedTrackIdx < static_cast<int>(this->boxHist_.size()) &&
                 !this->boxHist_[matchedTrackIdx].empty() &&
                 this->boxHist_[matchedTrackIdx][0].is_yolo_candidate;
+
+            if (trackHasYolo){
+                const double yoloBaseX =
+                    (matchedTrackIdx < static_cast<int>(this->yoloXWidth_.size())) ? this->yoloXWidth_[matchedTrackIdx] : 0.0;
+                const double yoloBaseY =
+                    (matchedTrackIdx < static_cast<int>(this->yoloYWidth_.size())) ? this->yoloYWidth_[matchedTrackIdx] : 0.0;
+
+                if (yoloBaseX > 0.0 && yoloBaseY > 0.0){
+                    const double growthX = (currentBox.x_width - yoloBaseX) / std::max(yoloBaseX, 0.01);
+                    const double growthY = (currentBox.y_width - yoloBaseY) / std::max(yoloBaseY, 0.01);
+                    if (growthX > this->yoloBaseMismatchThresh_ ||
+                        growthY > this->yoloBaseMismatchThresh_){
+                        rejectReason = "REJECT_YOLO_BASE_GROWTH";
+                        return -1e9;
+                    }
+                }
+            }
 
             const bool yoloExempt = currentBox.is_yolo_candidate || trackHasYolo;
 
