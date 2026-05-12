@@ -329,17 +329,18 @@ calibration_icp_node:
     urdf_camera_frame: camera                     # logical camera frame name (used in output TF/logs)
     camera_frame_initial_guess: camera_initial_guess  # TF frame providing the initial LiDAR->camera transform guess
     refined_camera_frame: camera_refined          # name of the TF frame published after ICP refinement
-    icp_max_correspondence_distance: 0.2   # [m] max point-to-point distance considered an ICP correspondence
+    icp_max_correspondence_distance: 0.35  # [m] max point-to-point distance considered an ICP correspondence
     icp_max_iteration: 100                 # max ICP iterations per run
-    icp_voxel_size: 0.05                   # [m] voxel down-sampling before ICP (0 = disabled)
+    icp_voxel_size: 0.08                   # [m] voxel down-sampling before ICP (larger = smoother, better for sparse outdoor clouds)
     icp_use_point_to_plane: true           # true = point-to-plane ICP (requires normals); false = point-to-point
-    icp_normal_radius: 0.15                # [m] search radius for normal estimation
-    icp_normal_max_nn: 30                  # max neighbours used for normal estimation
-    min_overlap_points: 100                # min LiDAR points in camera FOV; if fewer, full cloud is used as target
+    icp_normal_radius: 0.25                # [m] search radius for normal estimation (larger for sparser outdoor clouds)
+    icp_normal_max_nn: 50                  # max neighbours used for normal estimation
+    min_overlap_points: 50                 # min LiDAR points in camera FOV; if fewer, full cloud is used as target
     overlap_fov_margin_px: 120             # [px] margin added around image boundary when computing FOV overlap
     icp_max_runs: 3                        # number of independent ICP scenes to collect before averaging
-    icp_fitness_threshold: 0.3             # min ICP fitness score to accept a result (0-1, higher = better fit)
-    is_indoor: false                       # outdoor: fall back to initial-guess TF after 3 s if ICP not done
+    icp_fitness_threshold: 0.15            # min ICP fitness score to accept a result (0-1, higher = better fit)
+    icp_timeout_sec: 7.0                  # [s] outdoor fallback: average valid results (or initial guess if none) after this delay
+    is_indoor: false                       # outdoor: fall back after icp_timeout_sec if ICP not done
     onboard_detector:
       depth_intrinsics: [436.9647521972656, 436.9647521972656, 431.9205627441406, 240.13380432128906] # [fx, fy, cx, cy]
       depth_scale_factor: 1000.0           # raw_value / scale = meters

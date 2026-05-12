@@ -65,6 +65,7 @@ public:
 
         icp_max_runs_ = this->declare_parameter("icp_max_runs", 10);
         icp_fitness_threshold_ = this->declare_parameter("icp_fitness_threshold", 0.5);
+        icp_timeout_sec_ = this->declare_parameter("icp_timeout_sec", 10.0);
 
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
@@ -95,27 +96,47 @@ public:
         // Outdoor only: if ICP calibration does not complete within 3 seconds,
         // fall back to publishing the initial-guess TF as camera_refined so the
         // detector can start without waiting for a valid ICP result.
+        // If the TF lookup fails (e.g. clock not yet running with use_sim_time),
+        // retry every second until it succeeds.
         if (!is_indoor_) {
             timeout_timer_ = this->create_wall_timer(
-                std::chrono::seconds(3),
+                std::chrono::duration<double>(icp_timeout_sec_),
                 [this]() {
-                    timeout_timer_->cancel();
-                    if (processed_) return;
-                    RCLCPP_WARN(this->get_logger(),
-                        "ICP calibration timeout (3 s) in outdoor mode. "
-                        "Falling back to initial-guess TF for '%s'.",
-                        refined_camera_frame_.c_str());
+                    if (processed_) {
+                        timeout_timer_->cancel();
+                        return;
+                    }
                     builtin_interfaces::msg::Time now_stamp;
                     const int64_t ns = this->now().nanoseconds();
                     now_stamp.sec    = static_cast<int32_t>(ns / 1000000000LL);
                     now_stamp.nanosec = static_cast<uint32_t>(ns % 1000000000LL);
                     if (!fetchInitialGuessFromTF(now_stamp)) {
-                        RCLCPP_ERROR(this->get_logger(),
-                            "Timeout fallback failed: cannot read initial-guess TF '%s -> %s'.",
+                        RCLCPP_WARN(this->get_logger(),
+                            "Fallback TF lookup failed for '%s -> %s', retrying in 1 s...",
                             lidar_frame_.c_str(), camera_frame_initial_guess_.c_str());
+                        timeout_timer_->cancel();
+                        timeout_timer_ = this->create_wall_timer(
+                            std::chrono::seconds(1),
+                            [this]() {
+                                if (processed_) { timeout_timer_->cancel(); return; }
+                                builtin_interfaces::msg::Time now_stamp2;
+                                const int64_t ns2 = this->now().nanoseconds();
+                                now_stamp2.sec    = static_cast<int32_t>(ns2 / 1000000000LL);
+                                now_stamp2.nanosec = static_cast<uint32_t>(ns2 % 1000000000LL);
+                                if (!fetchInitialGuessFromTF(now_stamp2)) {
+                                    RCLCPP_WARN(this->get_logger(),
+                                        "Fallback TF lookup still failing for '%s -> %s', retrying...",
+                                        lidar_frame_.c_str(), camera_frame_initial_guess_.c_str());
+                                    return;
+                                }
+                                timeout_timer_->cancel();
+                                publishOnTimeout(now_stamp2);
+                                processed_ = true;
+                            });
                         return;
                     }
-                    publishRefinedStaticTF(T_lidar_camera_init_, now_stamp);
+                    timeout_timer_->cancel();
+                    publishOnTimeout(now_stamp);
                     processed_ = true;
                 });
         }
@@ -127,7 +148,7 @@ public:
         RCLCPP_INFO(this->get_logger(), "  refined TF target child: %s", refined_camera_frame_.c_str());
         RCLCPP_INFO(this->get_logger(), "  overlap FOV margin: %d px", overlap_fov_margin_px_);
         RCLCPP_INFO(this->get_logger(), "  is_indoor: %s%s", is_indoor_ ? "true" : "false",
-            is_indoor_ ? "" : " (3 s fallback to initial guess enabled)");
+            is_indoor_ ? "" : (std::string(" (fallback after ") + std::to_string(static_cast<int>(icp_timeout_sec_)) + " s: average if any valid results, else initial guess)").c_str());
     }
 
 private:
@@ -159,6 +180,7 @@ private:
     double depth_scale_{1000.0};
 
     void finalizeCalibration();
+    void publishOnTimeout(const builtin_interfaces::msg::Time& now_stamp);
     double depth_min_{0.5};
     double depth_max_{5.0};
     int depth_skip_{2};
@@ -174,6 +196,7 @@ private:
 
     int icp_max_runs_{10};
     double icp_fitness_threshold_{0.5};
+    double icp_timeout_sec_{10.0};
 
     bool is_indoor_{false};
     rclcpp::TimerBase::SharedPtr timeout_timer_;
@@ -520,6 +543,25 @@ int main(int argc, char** argv) {
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
+}
+
+void CalibrationICPNode::publishOnTimeout(const builtin_interfaces::msg::Time& now_stamp) {
+    if (valid_count_ > 0) {
+        RCLCPP_WARN(this->get_logger(),
+            "ICP calibration timeout (%.0f s) in outdoor mode. "
+            "Using average of %d/%d valid ICP results for '%s'.",
+            icp_timeout_sec_, valid_count_, scene_count_, refined_camera_frame_.c_str());
+        if (last_stamp_.sec == 0 && last_stamp_.nanosec == 0) {
+            last_stamp_ = now_stamp;
+        }
+        finalizeCalibration();
+    } else {
+        RCLCPP_WARN(this->get_logger(),
+            "ICP calibration timeout (%.0f s) in outdoor mode. "
+            "No valid ICP results yet. Falling back to initial-guess TF for '%s'.",
+            icp_timeout_sec_, refined_camera_frame_.c_str());
+        publishRefinedStaticTF(T_lidar_camera_init_, now_stamp);
+    }
 }
 
 void CalibrationICPNode::finalizeCalibration() {
