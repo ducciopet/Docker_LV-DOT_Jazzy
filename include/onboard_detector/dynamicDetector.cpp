@@ -2645,9 +2645,29 @@ namespace onboardDetector{
                 bbox.Vx = 0;
                 bbox.Vy = 0;
 
-                auto cluster = group2pcClusters_[best_j];
-                auto center  = group2pcClusterCenters_[best_j];
-                auto stddev  = group2pcClusterStds_[best_j];
+                std::vector<Eigen::Vector3d> cluster;
+                cluster.insert(cluster.end(),
+                    group1pcClusters_[i].begin(),
+                    group1pcClusters_[i].end());
+                cluster.insert(cluster.end(),
+                    group2pcClusters_[best_j].begin(),
+                    group2pcClusters_[best_j].end());
+
+                Eigen::Vector3d center = Eigen::Vector3d::Zero();
+                for (const auto& p : cluster) {
+                    center += p;
+                }
+                if (!cluster.empty()) {
+                    center /= static_cast<double>(cluster.size());
+                }
+
+                Eigen::Vector3d stddev = Eigen::Vector3d::Zero();
+                for (const auto& p : cluster) {
+                    stddev += (p - center).cwiseAbs2();
+                }
+                if (!cluster.empty()) {
+                    stddev = (stddev / static_cast<double>(cluster.size())).cwiseSqrt();
+                }
 
                 BBoxesTemp.push_back(bbox);
                 PcClustersTemp.push_back(cluster);
@@ -3656,59 +3676,62 @@ namespace onboardDetector{
                     }
                 }
 
-                // Case 2 fallback: when the depth sensor has no coverage of the YOLO rect
-                // (object is LiDAR-only, or beyond depth range), project each 3D bbox's
-                // 8 corners onto the color image and accept the bbox if IoU >= threshold.
-                // Multiple 3D bboxes can match the same YOLO detection (large object split
-                // into several clusters by DBSCAN).
+                // 2D fallback: project each 3D bbox's 8 corners onto the color image
+                // and compare the projected rect with the YOLO rect. This is used both
+                // when the whole YOLO ROI has no useful depth and per-box when only a few
+                // YOLO depth points fall inside a candidate 3D box.
+                // Multiple 3D bboxes can match the same YOLO detection.
+                auto computeProjectedYoloIou = [&](const onboardDetector::box3D& bb3d) -> double {
+                    const double hx3 = bb3d.x_width * 0.5;
+                    const double hy3 = bb3d.y_width * 0.5;
+                    const double hz3 = bb3d.z_width * 0.5;
+
+                    const double cxArr[2] = {bb3d.x - hx3, bb3d.x + hx3};
+                    const double cyArr[2] = {bb3d.y - hy3, bb3d.y + hy3};
+                    const double czArr[2] = {bb3d.z - hz3, bb3d.z + hz3};
+
+                    double projMinU = std::numeric_limits<double>::max();
+                    double projMinV = std::numeric_limits<double>::max();
+                    double projMaxU = std::numeric_limits<double>::lowest();
+                    double projMaxV = std::numeric_limits<double>::lowest();
+                    bool anyValid = false;
+
+                    for (int ia = 0; ia < 2; ++ia)
+                    for (int ib = 0; ib < 2; ++ib)
+                    for (int ic = 0; ic < 2; ++ic){
+                        Eigen::Vector3d corner(cxArr[ia], cyArr[ib], czArr[ic]);
+                        Eigen::Vector3d camPt = this->orientationColor_.transpose() * (corner - this->positionColor_);
+                        if (camPt(2) <= 0.0) continue;
+                        const double u = this->fxC_ * camPt(0) / camPt(2) + this->cxC_;
+                        const double v = this->fyC_ * camPt(1) / camPt(2) + this->cyC_;
+                        if (u < projMinU) projMinU = u;
+                        if (u > projMaxU) projMaxU = u;
+                        if (v < projMinV) projMinV = v;
+                        if (v > projMaxV) projMaxV = v;
+                        anyValid = true;
+                    }
+
+                    if (!anyValid || projMaxU <= projMinU || projMaxV <= projMinV) return 0.0;
+
+                    const double interMinU = std::max(projMinU, static_cast<double>(tlX));
+                    const double interMaxU = std::min(projMaxU, static_cast<double>(brX));
+                    const double interMinV = std::max(projMinV, static_cast<double>(tlY));
+                    const double interMaxV = std::min(projMaxV, static_cast<double>(brY));
+
+                    if (interMaxU <= interMinU || interMaxV <= interMinV) return 0.0;
+
+                    const double interArea = (interMaxU - interMinU) * (interMaxV - interMinV);
+                    const double projArea  = (projMaxU - projMinU) * (projMaxV - projMinV);
+                    const double yoloArea  = static_cast<double>((brX - tlX) * (brY - tlY));
+                    const double unionArea = projArea + yoloArea - interArea;
+                    if (unionArea <= 0.0) return 0.0;
+
+                    return interArea / unionArea;
+                };
+
                 auto tryIouFallback = [&](){
                     for (size_t j2 = 0; j2 < filteredBBoxesTemp.size(); ++j2){
-                        const auto& bb3d = filteredBBoxesTemp[j2];
-                        const double hx3 = bb3d.x_width * 0.5;
-                        const double hy3 = bb3d.y_width * 0.5;
-                        const double hz3 = bb3d.z_width * 0.5;
-
-                        const double cxArr[2] = {bb3d.x - hx3, bb3d.x + hx3};
-                        const double cyArr[2] = {bb3d.y - hy3, bb3d.y + hy3};
-                        const double czArr[2] = {bb3d.z - hz3, bb3d.z + hz3};
-
-                        double projMinU = std::numeric_limits<double>::max();
-                        double projMinV = std::numeric_limits<double>::max();
-                        double projMaxU = std::numeric_limits<double>::lowest();
-                        double projMaxV = std::numeric_limits<double>::lowest();
-                        bool anyValid = false;
-
-                        for (int ia = 0; ia < 2; ++ia)
-                        for (int ib = 0; ib < 2; ++ib)
-                        for (int ic = 0; ic < 2; ++ic){
-                            Eigen::Vector3d corner(cxArr[ia], cyArr[ib], czArr[ic]);
-                            Eigen::Vector3d camPt = this->orientationColor_.transpose() * (corner - this->positionColor_);
-                            if (camPt(2) <= 0.0) continue;
-                            const double u = this->fxC_ * camPt(0) / camPt(2) + this->cxC_;
-                            const double v = this->fyC_ * camPt(1) / camPt(2) + this->cyC_;
-                            if (u < projMinU) projMinU = u;
-                            if (u > projMaxU) projMaxU = u;
-                            if (v < projMinV) projMinV = v;
-                            if (v > projMaxV) projMaxV = v;
-                            anyValid = true;
-                        }
-
-                        if (!anyValid || projMaxU <= projMinU || projMaxV <= projMinV) continue;
-
-                        const double interMinU = std::max(projMinU, static_cast<double>(tlX));
-                        const double interMaxU = std::min(projMaxU, static_cast<double>(brX));
-                        const double interMinV = std::max(projMinV, static_cast<double>(tlY));
-                        const double interMaxV = std::min(projMaxV, static_cast<double>(brY));
-
-                        if (interMaxU <= interMinU || interMaxV <= interMinV) continue;
-
-                        const double interArea = (interMaxU - interMinU) * (interMaxV - interMinV);
-                        const double projArea  = (projMaxU - projMinU) * (projMaxV - projMinV);
-                        const double yoloArea  = static_cast<double>((brX - tlX) * (brY - tlY));
-                        const double unionArea = projArea + yoloArea - interArea;
-                        if (unionArea <= 0.0) continue;
-
-                        if (interArea / unionArea >= this->yolo2dIouThreshold_)
+                        if (computeProjectedYoloIou(filteredBBoxesTemp[j2]) >= this->yolo2dIouThreshold_)
                             filteredBBoxesTemp[j2].is_yolo_candidate = true;
                     }
                 };
@@ -3774,11 +3797,9 @@ namespace onboardDetector{
                         }
                     }
 
-                    if (yoloInsidePoints.empty()) continue;
-
                     const int totalFiltered = static_cast<int>(filteredYoloPoints.size());
                     const int yoloInsideCount = static_cast<int>(yoloInsidePoints.size());
-                    const double fraction = static_cast<double>(yoloInsidePoints.size()) / static_cast<double>(totalFiltered);
+                    const double fraction = static_cast<double>(yoloInsideCount) / static_cast<double>(totalFiltered);
                     const double boxVolume = std::max(bb.x_width * bb.y_width * bb.z_width, 1e-6);
                     const double yoloPointDensity = static_cast<double>(yoloInsideCount) / boxVolume;
                     const bool sparseLargeBox =
@@ -3790,17 +3811,36 @@ namespace onboardDetector{
                     // span of the YOLO points inside it, the box is almost certainly a large
                     // static structure (wall, building) that the YOLO detection only partially
                     // hits. Clamp the YOLO Z span to yoloMinHeightSpan_ to avoid near-zero.
-                    double yoloZMin = std::numeric_limits<double>::max();
-                    double yoloZMax = std::numeric_limits<double>::lowest();
-                    for (const auto& pt : yoloInsidePoints){
-                        if (pt(2) < yoloZMin) yoloZMin = pt(2);
-                        if (pt(2) > yoloZMax) yoloZMax = pt(2);
+                    bool boxTooTall = false;
+                    if (!yoloInsidePoints.empty()){
+                        double yoloZMin = std::numeric_limits<double>::max();
+                        double yoloZMax = std::numeric_limits<double>::lowest();
+                        for (const auto& pt : yoloInsidePoints){
+                            if (pt(2) < yoloZMin) yoloZMin = pt(2);
+                            if (pt(2) > yoloZMax) yoloZMax = pt(2);
+                        }
+                        const double yoloZSpan = std::max(yoloZMax - yoloZMin, this->yoloMinHeightSpan_);
+                        boxTooTall = bb.z_width > yoloZSpan * this->yoloMaxHeightRatio_;
                     }
-                    const double yoloZSpan = std::max(yoloZMax - yoloZMin, this->yoloMinHeightSpan_);
-                    const bool boxTooTall = bb.z_width > yoloZSpan * this->yoloMaxHeightRatio_;
 
-                    if (fraction >= this->yoloPointFractionThresh_ && !sparseLargeBox && !boxTooTall){
+                    const bool pointBasedCandidate =
+                        !yoloInsidePoints.empty() &&
+                        fraction >= this->yoloPointFractionThresh_ &&
+                        !sparseLargeBox &&
+                        !boxTooTall;
+
+                    const bool sparseDepthSupport =
+                        yoloInsideCount < this->yoloSparseLargeMinPoints_ ||
+                        fraction < this->yoloPointFractionThresh_;
+                    const bool iouFallbackCandidate =
+                        !pointBasedCandidate &&
+                        sparseDepthSupport &&
+                        computeProjectedYoloIou(bb) >= this->yolo2dIouThreshold_;
+
+                    if (pointBasedCandidate || iouFallbackCandidate){
                         filteredBBoxesTemp[j].is_yolo_candidate = true;
+
+                        if (!pointBasedCandidate) continue;
 
                         // --- X/Y resize (optional) ---
                         double newCenterX = filteredBBoxesTemp[j].x;

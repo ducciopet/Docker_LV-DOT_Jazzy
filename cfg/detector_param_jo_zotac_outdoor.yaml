@@ -260,7 +260,7 @@ detector_node:
       yolo_max_height_ratio: 1.5           # max ratio of 3D bbox z_width to YOLO-points Z span; rejects boxes far taller than the YOLO detection
       yolo_min_height_span: 0.3            # [m] minimum YOLO Z span used as denominator (clamps near-zero spans)
       yolo_depth_tolerance: 0.5            # [m] depth window beyond the 10th-percentile foreground depth (indoor only)
-      yolo_outdoor_depth_tolerance: 1.8    # [m] depth window beyond the 20th-percentile foreground depth (outdoor only)
+      yolo_outdoor_depth_tolerance: 2.0    # [m] depth window beyond the 20th-percentile foreground depth (outdoor only)
       max_missed_frames_yolo: 6           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
       yolo_height_correction_threshold: 1.0 # [m] if |z_width_3D - z_width_yolo| >= this, override 3D box height with YOLO-derived height
       yolo_2d_iou_threshold: 0.30          # min 2D IoU between projected 3D bbox and YOLO rect when no depth points available (LiDAR-only fallback)
