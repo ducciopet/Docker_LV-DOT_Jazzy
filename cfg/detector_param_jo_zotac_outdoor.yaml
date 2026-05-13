@@ -254,9 +254,14 @@ detector_node:
       # -----------------------------------------------------------------------
       yolo_dynamic_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
       yolo_point_fraction_threshold: 0.2   # min fraction of foreground YOLO points inside a 3D bbox to mark it dynamic
-      yolo_point_density_threshold: 30.0   # [pts/m³] min foreground YOLO point density inside a 3D bbox; prevents huge sparse boxes becoming YOLO tracks
-      yolo_depth_tolerance: 0.5            # [m] depth window beyond the foreground percentile to keep (background rejection)
-      max_missed_frames_yolo: 10           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
+      yolo_sparse_large_box_volume_threshold: 2.0 # [m³] boxes above this need enough YOLO points to avoid large sparse false positives
+      yolo_sparse_large_min_points: 20     # min YOLO foreground points required when the matched 3D bbox is large
+      yolo_sparse_large_min_density: 8.0   # [pts/m³] min YOLO point density required for large matched 3D bboxes
+      yolo_max_height_ratio: 1.5           # max ratio of 3D bbox z_width to YOLO-points Z span; rejects boxes far taller than the YOLO detection
+      yolo_min_height_span: 0.3            # [m] minimum YOLO Z span used as denominator (clamps near-zero spans)
+      yolo_depth_tolerance: 0.5            # [m] depth window beyond the 10th-percentile foreground depth (indoor only)
+      yolo_outdoor_depth_tolerance: 1.8    # [m] depth window beyond the 20th-percentile foreground depth (outdoor only)
+      max_missed_frames_yolo: 6           # extended track lifetime for YOLO-confirmed objects (persons/vehicles)
       yolo_height_correction_threshold: 1.0 # [m] if |z_width_3D - z_width_yolo| >= this, override 3D box height with YOLO-derived height
       yolo_2d_iou_threshold: 0.30          # min 2D IoU between projected 3D bbox and YOLO rect when no depth points available (LiDAR-only fallback)
       yolo_x_y_resize: false               # if true, resize x/y of 3D bbox to fit YOLO foreground points (also re-filters cluster)
@@ -284,9 +289,9 @@ detector_node:
       # -----------------------------------------------------------------------
       # Object Size Constraints
       # -----------------------------------------------------------------------
-      target_constrain_size: false           # if true, fix detected bbox to target_object_size
+      target_constrain_size: true           # if true, fix detected bbox to target_object_size
       target_object_size: [0.5, 0.5, 1.8]   # [m] expected object size [x, y, z] when constrain is active
-      max_object_size: [10.0, 10.0, 10.0]   # [m] bboxes larger than this in any axis are discarded
+      max_object_size: [5.0, 5.0, 5.0]   # [m] bboxes larger than this in any axis are discarded
 
       # -----------------------------------------------------------------------
       # Outside-FOV Association Parameters

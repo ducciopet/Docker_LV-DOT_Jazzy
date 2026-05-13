@@ -259,8 +259,13 @@ namespace onboardDetector{
         // YOLO Dynamic Classification
         std::vector<std::string> yoloDynamicClasses_;
         double yoloPointFractionThresh_;
-        double yoloPointDensityThresh_;          // [pts/m^3] min YOLO point density inside a 3D bbox
+        double yoloSparseLargeBoxVolumeThresh_;  // [m^3] boxes above this need enough YOLO points to avoid sparse-large false positives
+        int yoloSparseLargeMinPoints_;           // min YOLO foreground points required for large boxes
+        double yoloSparseLargeMinDensity_;       // [pts/m^3] min YOLO point density required for large boxes
+        double yoloMaxHeightRatio_;              // max allowed ratio of 3D bbox z_width to YOLO points Z span
+        double yoloMinHeightSpan_;               // [m] minimum YOLO Z span (clamp to avoid near-zero division)
         double yoloDepthTolerance_;
+        double yoloOutdoorDepthTolerance_;     // [m] depth window beyond the 20th-percentile foreground depth (outdoor filter)
         double yoloHeightCorrectionThreshold_; // [m] min height diff to override 3D box height with YOLO-derived height
         double yolo2dIouThreshold_;            // min 2D IoU between projected 3D bbox and YOLO rect to assign candidate (no-depth fallback)
         bool yoloXYResize_;                    // if true, resize x/y of 3D bbox to fit YOLO foreground points

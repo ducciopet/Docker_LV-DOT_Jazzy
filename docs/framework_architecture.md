@@ -25,48 +25,48 @@ This document describes the internal logic of every node and processing module i
 
 ## 1. System-level data flow
 
-The pipeline processes one detection frame per incoming synchronized (depth + LiDAR) message pair. The full sequence within a single frame is:
+The pipeline is **timer-driven**, not callback-driven. The synchronized sensor callbacks only update shared state buffers; five independent wall timers at `time_step` (default 0.1 s = 10 Hz) consume those buffers and run the actual detection stages.
 
 ```
-[Frame N arrives]
-        │
-        ├─ depth image ──────────────────────────────────────────────────────┐
-        │                                                                    │
-        │   uvDetect()          build UV occupancy map, cluster, back-project│
-        │   dbscanDetect()      voxel-filter depth cloud, DBSCAN, split      │
-        │                                                                    │
-        ├─ LiDAR scan ───────────────────────────────────────────────────────┤
-        │                                                                    │
-        │   lidarDetect()       project to local volume, DBSCAN             │
-        │                                                                    │
-        ├─ YOLO 2D detections (async, latest available) ─────────────────────┤
-        │                                                                    │
-        └──────────────────────────────────────────────────────────────────► filterLVBBoxes()
-                                                                             │
-                                                                             │  Phase A: UV ↔ DBSCAN merge
-                                                                             │  Phase B: visual ↔ LiDAR merge
-                                                                             │  Phase C: YOLO association
-                                                                             │
-                                                                             ▼
-                                                              kalmanFilterAndUpdateHist()
-                                                                             │
-                                                                             │  predict tracks
-                                                                             │  associate detections → tracks
-                                                                             │  update / create / drop tracks
-                                                                             │
-                                                                             ▼
-                                                              classificationCB()
-                                                                             │
-                                                                             ├─ PATH 1: YOLO candidate → speed gate
-                                                                             ├─ PATH 2: in FOV → point-cloud motion voting
-                                                                             └─ PATH 3: outside FOV → kinematics-only
-                                                                             │
-                                                                             ▼
-                                                                          visCB()
-                                                              publish MarkerArrays + ObstacleArray
+SENSOR CALLBACKS (update shared state, fire at sensor rate)
+─────────────────────────────────────────────────────────────────────
+ApproximateTime(depth, odom)  ──► depthOdomCB()
+                                    store depthImage_, camera pose
+
+ApproximateTime(LiDAR, odom)  ──► lidarOdomCB()
+                                    range-filter, Gaussian downsample,
+                                    transform to world frame, wall-filter
+                                    → store lidarCloud_, lidar pose
+
+color image  ──────────────────► colorImgCB()     store detectedColorImage_
+YOLO 2D      ──────────────────► yoloDetectionCB() store yoloDetectionResults_
+ground/walls ──────────────────► groundHeightCB()  store groundHeight_, roofHeight_, wallBBoxes_
+
+
+TIMER PIPELINE (fire every time_step = 0.1 s)
+─────────────────────────────────────────────────────────────────────
+detectionTimer_      ──► detectionCB()
+                             dbscanDetect()     depth → DBSCAN clusters
+                             uvDetect()         depth → UV occupancy boxes
+                             filterLVBBoxes()   fuse UV+DBSCAN+LiDAR + YOLO assoc
+
+lidarDetectionTimer_ ──► lidarDetectionCB()
+                             lidarDetect()      lidarCloud_ → DBSCAN clusters
+
+trackingTimer_       ──► trackingCB()
+                             kalmanFilterAndUpdateHist()
+                               predict · associate · update / create / drop tracks
+
+classificationTimer_ ──► classificationCB()
+                             PATH 1: YOLO candidate → speed gate
+                             PATH 2: in FOV → point-cloud motion voting
+                             PATH 3: outside FOV → kinematics-only
+
+visTimer_            ──► visCB()
+                             publish MarkerArrays + ObstacleArray
 ```
 
-Throughout this pipeline the robot's current pose (from odometry or TF) is used to transform all sensor data into a consistent world frame before any geometry comparison is made.
+The decoupling between sensor callbacks and processing timers means that the detection pipeline always operates on the **latest available** data from each sensor, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter. The odom/pose is paired independently with each sensor to ensure each buffer is stamped with the correct robot pose at the time of acquisition.
 
 ---
 
@@ -185,20 +185,25 @@ Individual LiDAR scans are noisy and may miss walls due to occlusion or scan ang
 
 ## 4. detector_node — overview
 
-`detector_node` instantiates `dynamicDetector` and wires its inputs to ROS subscriptions. The main callback runs on every synchronized (depth + LiDAR) message pair and executes the full pipeline:
+`detector_node` instantiates `dynamicDetector` and wires its inputs to ROS subscriptions and timers. There is no single monolithic callback: sensor data arrives through two independent `ApproximateTime` synchronizers and is buffered in shared members; five wall timers at `time_step` (0.1 s) then consume that data in pipeline order:
 
 ```
-depthAndCloudCB()
-    ├── uvDetect()
-    ├── dbscanDetect()
-    ├── lidarDetect()
-    ├── filterLVBBoxes()        // fusion + YOLO association
-    ├── kalmanFilterAndUpdateHist()
-    ├── classificationCB()
-    └── visCB()                 // publish
+Sensor callbacks (update shared state only):
+  depthOdomCB()        ← ApproximateTime(depth, odom)   → depthImage_, camera pose
+  lidarOdomCB()        ← ApproximateTime(LiDAR, odom)   → lidarCloud_, lidar pose
+  colorImgCB()         ← color image topic              → detectedColorImage_
+  yoloDetectionCB()    ← YOLO detections topic          → yoloDetectionResults_
+  groundHeightCB()     ← wall_detector topic            → groundHeight_, roofHeight_, wallBBoxes_
+
+Timer callbacks (drive the pipeline at time_step):
+  detectionCB()        → dbscanDetect() + uvDetect() + filterLVBBoxes()
+  lidarDetectionCB()   → lidarDetect()
+  trackingCB()         → kalmanFilterAndUpdateHist()
+  classificationCB()   → PATH 1/2/3 classification
+  visCB()              → publish MarkerArrays + ObstacleArray
 ```
 
-The robot's pose is read at the start of each callback either from the latest odometry message (`localization_mode: 1`) or by looking up the `odom → base_link` TF chain. All detection functions receive the current pose so they can transform sensor data into the world frame.
+The odom message is paired independently with each sensor so each buffer carries the correct robot pose at the time of acquisition, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter.
 
 ---
 
@@ -206,17 +211,28 @@ The robot's pose is read at the start of each callback either from the latest od
 
 ### Concept
 
-The UV detector builds a **bird's-eye-view occupancy grid** from the depth image. Each cell in the grid represents a column of 3D space above a fixed XY footprint. Occupied cells are clustered and their 3D bounding boxes are extracted. This is fast and works well for compact objects (pedestrians, boxes) because it avoids 3D point cloud processing entirely.
+The UV detector builds a **U-disparity map** from the depth image — a 2D histogram where each column corresponds to an image column range and each row corresponds to a depth bin. A cell is "hot" when many pixels in that image-column band have depth falling in that bin. Contiguous hot runs within a row are segmented and merged across rows to form image-space bounding boxes, which are then back-projected to 3D in the camera frame. The approach avoids full 3D point cloud construction; it operates entirely on the raw 16-bit depth image.
 
 ### Algorithm
 
-1. **Depth unprojection.** Each valid depth pixel is projected to 3D using the pinhole model. Points outside `[depth_min_value, depth_max_value]` and outside `local_sensor_range` are discarded.
-2. **Ground/roof filtering.** Points below `ground_height + margin` or above `roof_height` are discarded. The ground height comes from `wall_detector_node` (or falls back to the parameter default).
-3. **UV projection.** Each 3D point `(X, Y, Z)` in the world frame is mapped to a 2D UV cell `(u, v)` by discretizing X and Y at a fixed resolution. The cell is marked occupied.
-4. **2D connected-component clustering.** Occupied UV cells are clustered using 4-connectivity or DBSCAN on the 2D grid.
-5. **3D back-projection.** For each cluster, the bounding box is computed from the 3D points that fell into its cells: min/max X, Y, Z give the `box3D` geometry. The center and dimensions are stored in a `box3D` struct.
+1. **U-map construction (`extract_U_map`).** The depth image is scanned column by column. For each pixel with a valid depth in `[min_dist, max_dist]` mm, the depth is quantised into one of `histSize = depth.rows / row_downsample` bins, and the corresponding U-map cell `(col / col_scale, bin)` is incremented. A `(5, 9)` Gaussian blur (σ = 10) is applied to smooth the histogram.
 
-The UV detector is complementary to DBSCAN: it tends to give tighter horizontal bounds but can merge vertically separated objects (stacked boxes) into one cluster.
+2. **Bounding-box extraction (`extract_bb`).** Each row of the U-map is scanned left-to-right for runs of cells whose count exceeds `u_min = threshold_point × row_downsample`. Each run becomes a `UVbox` segment. Vertically adjacent segments in consecutive rows that overlap horizontally are merged into the same parent using union-find. After merging, boxes with area < 25 cells are discarded. The result is a list of `bounding_box_U` rectangles in U-map space `(col_start, col_end, bin_start, bin_end)`.
+
+3. **3D bounding-box extraction (`extract_3Dbox`, called from `uvDetect`).** For each U-map bbox:
+   - The depth range `[depth_near, depth_far]` is recovered from the bin indices.
+   - The image columns `[x_left, x_right]` are recovered from the col indices (× `col_scale`).
+   - The vertical extent `[y_up, y_down]` is found by scanning those depth-image columns for the topmost and bottommost pixels whose depth falls in `[depth_near, depth_far]`, using a forward-look of `num_check = 15` consecutive rows to suppress isolated noise.
+   - The 3D center in the camera frame is computed via the pinhole back-projection: `X = (col_center − cx) × z / fx`, `Y = (row_center − cy) × z / fy`, `Z = (depth_near + depth_far) / 2`, with depth converted from mm to m.
+   - Width and height are derived from the pixel extents scaled by `z / focal_length`.
+
+4. **Bird's-eye visualization (`extract_bird_view`).** Converts U-map bboxes to top-down rectangles for RViz display. This output is **not** used by the 3D detection pipeline.
+
+### Notes
+
+- There is **no ground/roof filtering** inside the UV detector itself; height gating is applied later in `filterLVBBoxes`.
+- The 3D boxes come out in the **camera frame**, not the world frame; `filterLVBBoxes` transforms them via the stored camera-to-world pose.
+- The UV detector is complementary to DBSCAN: it is faster and works on the raw depth image, but can merge objects at similar depth that are separated horizontally, or split a single object that spans multiple depth bins.
 
 ---
 
@@ -224,18 +240,30 @@ The UV detector is complementary to DBSCAN: it tends to give tighter horizontal 
 
 ### Concept
 
-The visual DBSCAN detector clusters the depth point cloud directly in 3D world space. It captures elongated or irregular shapes that the UV grid would merge or split incorrectly, and provides per-point assignment to clusters.
+The visual DBSCAN detector projects the depth image to a full 3D point cloud in world space and clusters it with DBSCAN. Unlike the UV detector, which only captures per-column depth histograms, DBSCAN works on individual 3D points and can resolve spatially separated objects at the same depth, distinguish objects with irregular or elongated shapes, and leverage 3D density information for post-processing refinement.
 
 ### Algorithm
 
-1. **Depth cloud construction.** Same projection and filtering as UV detection. The resulting 3D point cloud is expressed in the world frame.
-2. **Voxel down-sampling.** The cloud is voxel-filtered at `voxel_size` to normalize density. The occupied voxel threshold `voxel_occupied_thresh` discards voxels with too few raw points (noise rejection).
-3. **DBSCAN.** The `dbscan` class runs standard DBSCAN with:
-   - `dbscan_search_range_epsilon` — neighbourhood radius in 3D world space
-   - `dbscan_min_points_cluster` — minimum cluster size
-   Each cluster is assigned a unique label; noise points get label -1.
-4. **Bounding box extraction.** For each cluster, axis-aligned bounding box min/max XYZ are computed.
-5. **Cluster refinement (optional).** When `dbscan_refinement_enable: true`, large clusters (diagonal > `dbscan_refine_max_diagonal`) are recursively split if their density is below `dbscan_refine_min_density`. Splitting uses a second DBSCAN pass with `dbscan_refine_split_eps` and discards sub-clusters smaller than `dbscan_refine_min_subcluster_pts`. This breaks apart merged blobs (e.g., two people standing close together) at the cost of increased computation.
+1. **Depth projection (`projectDepthImage`).** Every valid depth pixel (in `[depth_min_value, depth_max_value]`) is back-projected to the camera frame using the pinhole model, then transformed to the world frame via the stored camera pose (`orientationDepth_`, `positionDepth_` from the last `depthOdomCB`). Points beyond `local_sensor_range` in X or Y are rejected early.
+
+2. **Voxel filtering (`voxelFilter`).** The projected cloud is discretised into voxels of side `voxel_size`. A voxel is kept only when it accumulates at least `voxel_occupied_thresh` raw points — this simultaneously down-samples the cloud and rejects isolated noisy readings without discarding coherent but low-density returns.
+
+3. **Ground/roof and wall filtering (`filterPoints`).** After voxel filtering, points outside `[groundHeight_, roofHeight_]` in Z are discarded, and points that fall inside any known wall OBB (`isInsideAnyWall`) are removed. Both thresholds are updated live from `wall_detector_node`.
+
+4. **DBSCAN (`clusterPointsAndBBoxes`).** Standard DBSCAN runs on the filtered cloud:
+   - `dbscan_search_range_epsilon` — neighbourhood radius in world-frame metres
+   - `dbscan_min_points_cluster` — minimum points to form a core
+   Points not assigned to any cluster (noise) are discarded.
+
+5. **Cluster refinement (optional, `visual_dbscan_refinement_enable`).** After DBSCAN, each raw cluster is processed by `refineClusterRecursive`:
+   - A cluster is a **split candidate** when its XY diagonal > `dbscan_refine_max_diagonal` **and** its point density (pts / volume) < `dbscan_refine_min_density`. The diagonal is computed only in XY to avoid height variation triggering false splits.
+   - The split is first attempted with a tighter DBSCAN pass (`dbscan_refine_split_eps`, `dbscan_refine_split_min_pts`). If that yields fewer than 2 sub-clusters, the algorithm falls back to **axis-slicing**: the longest axis is divided into slices of width `dbscan_refine_axis_slice_width`; contiguous non-empty slices are merged into sub-clusters.
+   - Sub-clusters below `dbscan_refine_min_subcluster_pts` points are discarded. If `dbscan_refine_recursive: true`, each surviving sub-cluster is evaluated again recursively up to `dbscan_refine_max_depth` levels.
+   - Sub-clusters whose bounding-box volume is below `dbscan_refine_min_box_volume` are clamped to that minimum when computing density (prevents division by near-zero for flat clusters).
+
+   **Why refinement matters indoors.** In indoor environments the depth camera's ~5 m range covers the entire room, and objects like furniture, people near walls, or clustered items are spatially close. With a broad epsilon (needed to bridge depth noise), DBSCAN readily merges adjacent objects into one large, sparse super-cluster. Refinement detects these "merged blobs" — large diagonal + low density — and cleanly splits them before they enter the tracker. Outdoors, objects are generally well-separated and the depth range is shorter than the scene, so the merging problem is much rarer; refinement can be disabled (`visual_dbscan_refinement_enable: false`) to save CPU.
+
+6. **Bounding box extraction.** For each final cluster, the AABB (min/max XYZ) is computed and stored as a `box3D`.
 
 ---
 
@@ -243,16 +271,33 @@ The visual DBSCAN detector clusters the depth point cloud directly in 3D world s
 
 ### Concept
 
-The LiDAR provides a 360° dense scan at longer range than the depth camera. Its DBSCAN operates in the LiDAR's local frame (projected to the robot-centred `local_lidar_range` volume) and uses wider parameters than the visual DBSCAN because spinning LiDARs have lower point density per unit area at range.
+The LiDAR provides a 360° scan that extends far beyond the depth camera's range (typically 20–30 m vs 5 m). The LiDAR pipeline runs in two stages: a **preprocessing callback** (`lidarOdomCB`) that fires on every synchronised (LiDAR, odom) pair and stores a clean world-frame cloud, and a **detection function** (`lidarDetect`) called by the timer pipeline that clusters the stored cloud.
 
-### Algorithm
+### Preprocessing in `lidarOdomCB`
 
-1. **Range filtering.** Points outside `local_lidar_range` (a box ±X, ±Y, ±Z around the robot) are discarded.
-2. **Ground/roof filtering.** Same height gates as the visual pipeline.
-3. **DBSCAN.** Parameters: `lidar_DBSCAN_epsilon` (neighbourhood radius, typically 0.25 m to bridge point gaps on car surfaces at range) and `lidar_DBSCAN_min_points`.
-4. **Bounding box extraction.** Axis-aligned bounding boxes are computed per cluster.
+1. **XY range filtering.** A `pcl::PassThrough` filter retains only points within `±local_lidar_range.x` and `±local_lidar_range.y` of the sensor origin. This caps the computational load and discards background returns beyond the region of interest.
 
-LiDAR clusters are the backbone of the far-field detection pipeline. They are typically larger and noisier than depth clusters but cover objects well beyond the depth camera's 5 m range.
+2. **Gaussian distance-based downsampling.** Each point surviving the XY filter is accepted with probability `p = exp(−dist² / (2σ²))` where σ = `gaussian_down_sample_rate` and `dist` is the planar distance to the sensor. This keeps a dense representation near the robot (where small/fast objects need precise boundaries) while thinning the far-field (where DBSCAN only needs to capture the cluster's bulk). Without this step, the near field would have orders of magnitude more points than the far field, making a single epsilon value poorly suited across the full range.
+
+3. **World-frame transform.** The downsampled cloud is transformed from the LiDAR frame to the world frame using `orientationLidar_` and `positionLidar_` (extracted from the synchronized odometry).
+
+4. **Ground/roof and wall filtering.** A Z pass-through filter applies `[groundHeight_, roofHeight_]`, then `isInsideAnyWall` removes points inside known wall OBBs.
+
+5. **Adaptive VoxelGrid downsampling.** A `pcl::VoxelGrid` is applied to the height- and wall-filtered cloud starting with a 0.1 m leaf size. If the point count still exceeds `downsample_threshold` (default 4000), the leaf size is multiplied by 1.1 and the filter is re-run, repeating until the count falls below the threshold. This is the most important computational safeguard in the preprocessing chain: it provides a hard upper bound on the number of points that DBSCAN will ever see, guaranteeing bounded execution time regardless of scene density. Without it, a dense near-range scan or a cluttered environment could inflate the cloud by an order of magnitude and stall real-time processing.
+
+6. **Storage.** The resulting cloud is stored as `lidarCloud_` for the timer pipeline.
+
+### Detection in `lidarDetect`
+
+1. **DBSCAN.** The stored `lidarCloud_` is clustered with `lidar_DBSCAN_epsilon` and `lidar_DBSCAN_min_points`. A larger epsilon than the visual DBSCAN is typical (e.g. 0.25 m vs 0.15 m) because spinning LiDARs have sparse angular sampling at range — consecutive scan lines can be centimetres apart on a 10 m object.
+
+2. **Cluster refinement (optional, `dbscan_refinement_enable`).** The same `refineClusterRecursive` logic used by the visual pipeline is applied here. LiDAR shares the full set of refinement parameters with the visual path; the only difference is that visual DBSCAN has an independent override flag (`visual_dbscan_refinement_enable`) while LiDAR is gated solely by `dbscan_refinement_enable`. Indoors, LiDAR refinement is particularly effective: the 360° scan captures both sides of a doorway, a room corner, or two people walking together, and DBSCAN's epsilon easily bridges their gap. Refinement splits these merged blobs before they corrupt track geometry. Outdoors, objects are more spread out and the far-field angular sparsity naturally prevents merging, so refinement adds little benefit at the cost of more computation.
+
+3. **Max-object-size filter.** After DBSCAN + refinement, each cluster whose bounding box exceeds `max_object_size [x, y, z]` in any axis is discarded. This removes walls, trees, and other large static structures that DBSCAN merges into single clusters before any further stage can handle them.
+
+3. **Bounding box storage.** Surviving clusters and their AABBs are stored as `lidarBBoxes_` and `lidarClusters_` for the fusion stage.
+
+LiDAR clusters are the backbone of the far-field detection pipeline. They are typically sparser than depth clusters but provide reliable coverage of vehicles and pedestrians well beyond the depth camera's range.
 
 ---
 

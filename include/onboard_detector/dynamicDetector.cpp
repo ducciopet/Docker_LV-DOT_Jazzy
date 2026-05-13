@@ -847,12 +847,44 @@ namespace onboardDetector{
             std::cout << this->hint_ << ": YOLO point fraction threshold: " << this->yoloPointFractionThresh_ << std::endl;
         }
 
-        if (!this->nh_->get_parameter(pname("yolo_point_density_threshold"), this->yoloPointDensityThresh_)){
-            this->yoloPointDensityThresh_ = 30.0;
-            std::cout << this->hint_ << ": No yolo_point_density_threshold. Use default: 30.0 pts/m^3." << std::endl;
+        if (!this->nh_->get_parameter(pname("yolo_sparse_large_box_volume_threshold"), this->yoloSparseLargeBoxVolumeThresh_)){
+            this->yoloSparseLargeBoxVolumeThresh_ = 2.0;
+            std::cout << this->hint_ << ": No yolo_sparse_large_box_volume_threshold. Use default: 2.0 m^3." << std::endl;
         }
         else{
-            std::cout << this->hint_ << ": YOLO point density threshold: " << this->yoloPointDensityThresh_ << " pts/m^3" << std::endl;
+            std::cout << this->hint_ << ": YOLO sparse-large box volume threshold: " << this->yoloSparseLargeBoxVolumeThresh_ << " m^3" << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_sparse_large_min_points"), this->yoloSparseLargeMinPoints_)){
+            this->yoloSparseLargeMinPoints_ = 20;
+            std::cout << this->hint_ << ": No yolo_sparse_large_min_points. Use default: 20." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO sparse-large min points: " << this->yoloSparseLargeMinPoints_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_sparse_large_min_density"), this->yoloSparseLargeMinDensity_)){
+            this->yoloSparseLargeMinDensity_ = 8.0;
+            std::cout << this->hint_ << ": No yolo_sparse_large_min_density. Use default: 8.0 pts/m^3." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO sparse-large min density: " << this->yoloSparseLargeMinDensity_ << " pts/m^3" << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_max_height_ratio"), this->yoloMaxHeightRatio_)){
+            this->yoloMaxHeightRatio_ = 2.5;
+            std::cout << this->hint_ << ": No yolo_max_height_ratio. Use default: 2.5." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO max height ratio: " << this->yoloMaxHeightRatio_ << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_min_height_span"), this->yoloMinHeightSpan_)){
+            this->yoloMinHeightSpan_ = 0.3;
+            std::cout << this->hint_ << ": No yolo_min_height_span. Use default: 0.3 m." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO min height span: " << this->yoloMinHeightSpan_ << " m" << std::endl;
         }
 
         if (!this->nh_->get_parameter(pname("yolo_depth_tolerance"), this->yoloDepthTolerance_)){
@@ -861,6 +893,14 @@ namespace onboardDetector{
         }
         else{
             std::cout << this->hint_ << ": YOLO depth tolerance: " << this->yoloDepthTolerance_ << " m" << std::endl;
+        }
+
+        if (!this->nh_->get_parameter(pname("yolo_outdoor_depth_tolerance"), this->yoloOutdoorDepthTolerance_)){
+            this->yoloOutdoorDepthTolerance_ = 1.5;
+            std::cout << this->hint_ << ": No yolo_outdoor_depth_tolerance. Use default: 1.5 m." << std::endl;
+        }
+        else{
+            std::cout << this->hint_ << ": YOLO outdoor depth tolerance: " << this->yoloOutdoorDepthTolerance_ << " m" << std::endl;
         }
 
         if (!this->nh_->get_parameter(pname("yolo_height_correction_threshold"), this->yoloHeightCorrectionThreshold_)){
@@ -1955,7 +1995,8 @@ namespace onboardDetector{
     //
     // A track can become is_dynamic = true through exactly 3 paths (evaluated in order):
     //
-    //   PATH 1 — YOLO:  is_yolo_candidate → always dynamic, no motion analysis.
+    //   PATH 1 — YOLO:  is_yolo_candidate → dynamic only when KF speed is above
+    //            dynaVelThresh_; otherwise it is potentially dynamic.
     //   PATH 2 — Historical continuity:  already classified dynamic in recent frames
     //            AND still moving → stays dynamic (avoids re-running point voting).
     //   PATH 3 — Point-cloud motion voting:  per-point nearest-neighbor velocity
@@ -2276,9 +2317,19 @@ namespace onboardDetector{
             idMarker.scale.x = 0.15;
             idMarker.scale.y = 0.15;
             idMarker.color.a = 1.0;
-            idMarker.color.r = 0.0;
-            idMarker.color.g = 1.0;
-            idMarker.color.b = 0.0;
+            if (this->trackedBBoxes_[i].is_dynamic){
+                idMarker.color.r = 0.0;
+                idMarker.color.g = 0.0;
+                idMarker.color.b = 1.0;
+            } else if (this->trackedBBoxes_[i].is_potentially_dynamic){
+                idMarker.color.r = 0.0;
+                idMarker.color.g = 1.0;
+                idMarker.color.b = 0.0;
+            } else {
+                idMarker.color.r = 0.0;
+                idMarker.color.g = 1.0;
+                idMarker.color.b = 0.0;
+            }
             int track_id = static_cast<int>(this->trackedBBoxes_[i].id);
             double vx = this->trackedBBoxes_[i].Vx;
             double vy = this->trackedBBoxes_[i].Vy;
@@ -3670,28 +3721,30 @@ namespace onboardDetector{
                 // --------------------------------------------------
                 // STEP 2: Background filtering
                 // --------------------------------------------------
-                // Indoor: ellipse + 10th-percentile depth filter to strip background
-                // (walls/ceiling close behind the object are the dominant noise source).
-                // Outdoor: ellipse alone is sufficient; depth-percentile would cut too
-                // many valid returns from objects at varying distances.
+                // Indoor: 10th-percentile depth + tight tolerance to strip walls/ceiling
+                //   directly behind the object.
+                // Outdoor: 20th-percentile depth + wider tolerance to remove distant
+                //   background (terrain, buildings) while preserving the full depth
+                //   range of large objects (vehicles, cyclists seen from an angle).
                 std::vector<Eigen::Vector3d> filteredYoloPoints;
                 filteredYoloPoints.reserve(yoloPoints.size());
 
-                if (this->isIndoor_){
+                {
                     std::vector<double> sortedDepths = yoloDepths;
                     std::sort(sortedDepths.begin(), sortedDepths.end());
-                    const double foregroundDepth = sortedDepths[sortedDepths.size() / 10];
-                    const double maxAllowedDepth = foregroundDepth + this->yoloDepthTolerance_;
+                    const size_t n = sortedDepths.size();
+                    const double foregroundDepth = this->isIndoor_
+                        ? sortedDepths[n / 10]   // 10th percentile — tight, walls right behind
+                        : sortedDepths[n / 5];   // 20th percentile — softer, objects span more depth
+                    const double tolerance = this->isIndoor_
+                        ? this->yoloDepthTolerance_
+                        : this->yoloOutdoorDepthTolerance_;
+                    const double maxAllowedDepth = foregroundDepth + tolerance;
                     for (size_t k = 0; k < yoloPoints.size(); ++k){
                         if (yoloDepths[k] <= maxAllowedDepth &&
                             yoloPoints[k].z() >= this->groundHeight_ &&
                             yoloPoints[k].z() <= this->roofHeight_)
                             filteredYoloPoints.push_back(yoloPoints[k]);
-                    }
-                } else {
-                    for (const auto& pt : yoloPoints){
-                        if (pt.z() >= this->groundHeight_ && pt.z() <= this->roofHeight_)
-                            filteredYoloPoints.push_back(pt);
                     }
                 }
 
@@ -3724,12 +3777,29 @@ namespace onboardDetector{
                     if (yoloInsidePoints.empty()) continue;
 
                     const int totalFiltered = static_cast<int>(filteredYoloPoints.size());
+                    const int yoloInsideCount = static_cast<int>(yoloInsidePoints.size());
                     const double fraction = static_cast<double>(yoloInsidePoints.size()) / static_cast<double>(totalFiltered);
                     const double boxVolume = std::max(bb.x_width * bb.y_width * bb.z_width, 1e-6);
-                    const double yoloPointDensity = static_cast<double>(yoloInsidePoints.size()) / boxVolume;
+                    const double yoloPointDensity = static_cast<double>(yoloInsideCount) / boxVolume;
+                    const bool sparseLargeBox =
+                        boxVolume >= this->yoloSparseLargeBoxVolumeThresh_ &&
+                        (yoloInsideCount < this->yoloSparseLargeMinPoints_ ||
+                         yoloPointDensity < this->yoloSparseLargeMinDensity_);
 
-                    if (fraction >= this->yoloPointFractionThresh_ &&
-                        yoloPointDensity >= this->yoloPointDensityThresh_){
+                    // Height ratio filter: if the 3D box is much taller than the vertical
+                    // span of the YOLO points inside it, the box is almost certainly a large
+                    // static structure (wall, building) that the YOLO detection only partially
+                    // hits. Clamp the YOLO Z span to yoloMinHeightSpan_ to avoid near-zero.
+                    double yoloZMin = std::numeric_limits<double>::max();
+                    double yoloZMax = std::numeric_limits<double>::lowest();
+                    for (const auto& pt : yoloInsidePoints){
+                        if (pt(2) < yoloZMin) yoloZMin = pt(2);
+                        if (pt(2) > yoloZMax) yoloZMax = pt(2);
+                    }
+                    const double yoloZSpan = std::max(yoloZMax - yoloZMin, this->yoloMinHeightSpan_);
+                    const bool boxTooTall = bb.z_width > yoloZSpan * this->yoloMaxHeightRatio_;
+
+                    if (fraction >= this->yoloPointFractionThresh_ && !sparseLargeBox && !boxTooTall){
                         filteredBBoxesTemp[j].is_yolo_candidate = true;
 
                         // --- X/Y resize (optional) ---
@@ -5833,23 +5903,6 @@ namespace onboardDetector{
                 !this->boxHist_[matchedTrackIdx].empty() &&
                 this->boxHist_[matchedTrackIdx][0].is_yolo_candidate;
 
-            if (trackHasYolo){
-                const double yoloBaseX =
-                    (matchedTrackIdx < static_cast<int>(this->yoloXWidth_.size())) ? this->yoloXWidth_[matchedTrackIdx] : 0.0;
-                const double yoloBaseY =
-                    (matchedTrackIdx < static_cast<int>(this->yoloYWidth_.size())) ? this->yoloYWidth_[matchedTrackIdx] : 0.0;
-
-                if (yoloBaseX > 0.0 && yoloBaseY > 0.0){
-                    const double growthX = (currentBox.x_width - yoloBaseX) / std::max(yoloBaseX, 0.01);
-                    const double growthY = (currentBox.y_width - yoloBaseY) / std::max(yoloBaseY, 0.01);
-                    if (growthX > this->yoloBaseMismatchThresh_ ||
-                        growthY > this->yoloBaseMismatchThresh_){
-                        rejectReason = "REJECT_YOLO_BASE_GROWTH";
-                        return -1e9;
-                    }
-                }
-            }
-
             const bool yoloExempt = currentBox.is_yolo_candidate || trackHasYolo;
 
             bool passVelDir = this->passesVelocityDirectionGate(matchedTrackIdx,
@@ -6096,9 +6149,19 @@ namespace onboardDetector{
             line.type = visualization_msgs::msg::Marker::LINE_LIST;
             line.action = visualization_msgs::msg::Marker::ADD;
             line.scale.x = 0.06;
-            line.color.r = r;
-            line.color.g = g;
-            line.color.b = b;
+            if (boxes[i].is_dynamic){
+                line.color.r = 0.0;
+                line.color.g = 0.0;
+                line.color.b = 1.0;
+            } else if (boxes[i].is_potentially_dynamic){
+                line.color.r = 0.0;
+                line.color.g = 1.0;
+                line.color.b = 0.0;
+            } else {
+                line.color.r = r;
+                line.color.g = g;
+                line.color.b = b;
+            }
             line.color.a = a;
             line.lifetime = rclcpp::Duration::from_seconds(this->dt_);
             line.pose.orientation.x = 0.0;
