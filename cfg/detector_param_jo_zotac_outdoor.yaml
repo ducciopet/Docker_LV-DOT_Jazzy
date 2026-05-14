@@ -236,7 +236,7 @@ detector_node:
       # -----------------------------------------------------------------------
       # Track Confirmation & Natural Motion
       # -----------------------------------------------------------------------
-      min_confirm_hits: 4                  # a track needs this many consecutive hits before being confirmed
+      min_confirm_hits: 3                  # a track needs this many consecutive hits before being confirmed
       min_natural_motion_dist: 0.08        # [m] minimum displacement per frame to be considered moving
       max_natural_motion_dist: 1.50        # [m] displacements larger than this are flagged as unnatural jumps
       max_natural_innovation: 0.60         # [m] max Kalman innovation for an unconfirmed track

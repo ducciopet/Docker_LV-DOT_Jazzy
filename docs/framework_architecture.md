@@ -15,7 +15,7 @@ This document describes the internal logic of every node and processing module i
 7. [LiDAR detection (lidarDetect)](#7-lidar-detection-lidardetect)
 8. [Fusion and YOLO association (filterLVBBoxes)](#8-fusion-and-yolo-association-filterlvbboxes)
 9. [Kalman filter and track management](#9-kalman-filter-and-track-management)
-10. [Dynamic classification (classificationCB)](#10-dynamic-classification-classificationcb)
+10. [Dynamic classification stage](#10-dynamic-classification-stage)
 11. [Outside-FOV association and classification](#11-outside-fov-association-and-classification)
 12. [yolov11_detector_node](#12-yolov11_detector_node)
 13. [odometry_tf_publisher_node](#13-odometry_tf_publisher_node)
@@ -28,7 +28,7 @@ This document describes the internal logic of every node and processing module i
 
 ## 1. System-level data flow
 
-The pipeline is **timer-driven**, not callback-driven. The synchronized sensor callbacks only update shared state buffers; five independent wall timers at `time_step` (default 0.1 s = 10 Hz) consume those buffers and run the actual detection stages.
+The pipeline is **timer-driven**, not callback-driven, but the current architecture is no longer split across five independent processing timers. The synchronized sensor callbacks update shared state buffers; one main wall timer (`mainTimer_`, period `time_step`, default 0.1 s = 10 Hz) consumes the latest buffers and runs the perception pipeline in a deterministic order. Inside that main callback, the expensive detector front-ends run in parallel worker threads.
 
 ```
 SENSOR CALLBACKS (update shared state, fire at sensor rate)
@@ -46,30 +46,35 @@ YOLO 2D      ──────────────────► yoloDetec
 ground/walls ──────────────────► groundHeightCB()  store groundHeight_, roofHeight_, wallBBoxes_
 
 
-TIMER PIPELINE (fire every time_step = 0.1 s)
+MAIN TIMER PIPELINE (mainTimer_, every time_step = 0.1 s)
 ─────────────────────────────────────────────────────────────────────
-detectionTimer_      ──► detectionCB()
-                             dbscanDetect()     depth → DBSCAN clusters
-                             uvDetect()         depth → UV occupancy boxes
-                             filterLVBBoxes()   fuse UV+DBSCAN+LiDAR + YOLO assoc
+mainCB()
+  ├─ parallel detector front-end
+  │    ├─ thread 1: dbscanDetect()   depth → DBSCAN clusters
+  │    ├─ thread 2: uvDetect()       depth → UV occupancy boxes
+  │    └─ thread 3: lidarDetect()    lidarCloud_ → DBSCAN clusters
+  │
+  ├─ join all detector threads
+  ├─ filterLVBBoxes()                fuse UV+DBSCAN+LiDAR + YOLO assoc
+  ├─ tracking pre-filter             remove boxes whose bottom is too high
+  ├─ boxAssociation()
+  ├─ kalmanFilterAndUpdateHist()      predict · associate · update / create / drop
+  └─ classification stage             PATH 1/2/3 dynamic classification
 
-lidarDetectionTimer_ ──► lidarDetectionCB()
-                             lidarDetect()      lidarCloud_ → DBSCAN clusters
-
-trackingTimer_       ──► trackingCB()
-                             kalmanFilterAndUpdateHist()
-                               predict · associate · update / create / drop tracks
-
-classificationTimer_ ──► classificationCB()
-                             PATH 1: YOLO candidate → speed gate
-                             PATH 2: recent dynamic continuity
-                             PATH 3: point-cloud/KF motion evidence
-
-visTimer_            ──► visCB()
-                             publish MarkerArrays + ObstacleArray
+VIS TIMER (visTimer_, every time_step = 0.1 s)
+─────────────────────────────────────────────────────────────────────
+visCB()
+  └─ publish MarkerArrays + ObstacleArray
 ```
 
-The decoupling between sensor callbacks and processing timers means that the detection pipeline always operates on the **latest available** data from each sensor, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter. The odom/pose is paired independently with each sensor to ensure each buffer is stamped with the correct robot pose at the time of acquisition.
+The decoupling between sensor callbacks and `mainCB()` means that the detection pipeline always operates on the **latest available** data from each sensor, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter. The odom/pose is paired independently with each sensor to ensure each buffer is stamped with the correct robot pose at the time of acquisition.
+
+This is a **single-orchestrator, multi-worker** design:
+
+- `mainCB()` owns the stage ordering. Fusion never starts until DBSCAN, UV, and LiDAR detection threads have all returned.
+- `dbscanDetect()`, `uvDetect()`, and `lidarDetect()` are independent enough to run concurrently because they write separate stage buffers (`dbBBoxes_`, `uvBBoxes_`, `lidarBBoxes_`).
+- Tracking and classification remain sequential after fusion, because they mutate shared track history, Kalman filters, and classification flags.
+- `visCB()` runs on its own timer so visualization/publication is decoupled from the heavier detection/tracking path.
 
 ### Coordinate-frame convention
 
@@ -210,7 +215,7 @@ Individual LiDAR scans are noisy and may miss walls due to occlusion or scan ang
 
 ## 4. detector_node — overview
 
-`detector_node` instantiates `dynamicDetector` and wires its inputs to ROS subscriptions and timers. There is no single monolithic callback: sensor data arrives through two independent `ApproximateTime` synchronizers and is buffered in shared members; five wall timers at `time_step` (0.1 s) then consume that data in pipeline order:
+`detector_node` instantiates `dynamicDetector` and wires its inputs to ROS subscriptions and timers. Sensor data arrives through two independent `ApproximateTime` synchronizers and is buffered in shared members. A single main wall timer at `time_step` then runs the ordered perception pipeline, while spawning three short-lived worker threads for the detector front-end:
 
 ```
 Sensor callbacks (update shared state only):
@@ -220,15 +225,34 @@ Sensor callbacks (update shared state only):
   yoloDetectionCB()    ← YOLO detections topic          → yoloDetectionResults_
   groundHeightCB()     ← wall_detector topic            → groundHeight_, roofHeight_, wallBBoxes_
 
-Timer callbacks (drive the pipeline at time_step):
-  detectionCB()        → dbscanDetect() + uvDetect() + filterLVBBoxes()
-  lidarDetectionCB()   → lidarDetect()
-  trackingCB()         → kalmanFilterAndUpdateHist()
-  classificationCB()   → PATH 1/2/3 classification
+Timer callbacks:
+  mainCB()             → parallel(dbscanDetect, uvDetect, lidarDetect)
+                       → filterLVBBoxes()
+                       → boxAssociation()
+                       → kalmanFilterAndUpdateHist()
+                       → PATH 1/2/3 classification
+
   visCB()              → publish MarkerArrays + ObstacleArray
 ```
 
 The odom message is paired independently with each sensor so each buffer carries the correct robot pose at the time of acquisition, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter.
+
+### Multithreaded execution model
+
+The ROS executor itself is still launched with `rclcpp::spin(nh)` in `detector_node.cpp`. The detector's parallelism is explicit inside `dynamicDetector::mainCB()`:
+
+```cpp
+std::thread t_db([this]{ this->dbscanDetect(); });
+std::thread t_uv([this]{ this->uvDetect(); });
+std::thread t_li([this]{ this->lidarDetect(); });
+t_db.join();
+t_uv.join();
+t_li.join();
+```
+
+This means there is no ROS callback-group based scheduling for the detector stages. Instead, `mainCB()` starts the three detector workers, waits for all of them, and only then continues with fusion, tracking, and classification. The result is parallel front-end computation with a deterministic back-end order.
+
+Wall OBB updates are the one explicitly protected shared structure: `wallBBoxes_` is guarded by `wallBBoxesMutex_` when received from `wall_detector_node` and when copied/used during point filtering. Most other sensor buffers are updated by ROS callbacks and consumed by the next `mainCB()` cycle as latest-value state.
 
 ### Main internal buffers
 
@@ -242,11 +266,11 @@ The detector keeps separate buffers for each stage so that debugging each stage 
 | `uvBBoxes_` | U-map boxes | `uvDetect()` | `filterLVBBoxes()` |
 | `lidarBBoxes_`, `lidarClusters_` | LiDAR DBSCAN boxes and clusters | `lidarDetect()` | `filterLVBBoxes()` |
 | `filteredBBoxesBeforeYolo_` | Fused 3D boxes before YOLO annotation | `filterLVBBoxes()` | RViz/debug |
-| `filteredBBoxes_`, `filteredPcClusters_` | Final detections entering tracking | `filterLVBBoxes()` | `trackingCB()` |
+| `filteredBBoxes_`, `filteredPcClusters_` | Final detections entering tracking | `filterLVBBoxes()` | `mainCB()` tracking stage |
 | `boxHist_`, `pcHist_` | Per-track history deques | `kalmanFilterAndUpdateHist()` | association, classification, output |
-| `trackedBBoxes_` | Confirmed tracks currently publishable | `kalmanFilterAndUpdateHist()` | `classificationCB()`, `visCB()` |
-| `dynamicBBoxes_` | Tracks classified as moving dynamic obstacles | `classificationCB()` | RViz, dynamic point cloud |
-| `potentiallyDynamicBBoxes_` | YOLO dynamic-class tracks that are currently stationary | `classificationCB()` | RViz, `ObstacleArray` |
+| `trackedBBoxes_` | Confirmed tracks currently publishable | `kalmanFilterAndUpdateHist()` | classification stage, `visCB()` |
+| `dynamicBBoxes_` | Tracks classified as moving dynamic obstacles after optional size constraint | classification stage in `mainCB()` | RViz, dynamic point cloud |
+| `potentiallyDynamicBBoxes_` | YOLO dynamic-class tracks that are currently stationary | classification stage in `mainCB()` | RViz, `ObstacleArray` |
 
 Two implementation details are worth keeping in mind:
 
@@ -267,10 +291,10 @@ The main modules can be read as explicit contracts:
 | `filterLVBBoxes()` | UV, visual DBSCAN, LiDAR boxes, YOLO detections | `filteredBBoxes_`, `filteredPcClusters_`, `filteredBBoxesBeforeYolo_` | odom | fusion, YOLO flags, optional box resize/height correction |
 | `boxAssociation()` | `filteredBBoxes_`, track predictions | `bestMatch` | odom | assignment only, no state mutation |
 | `kalmanFilterAndUpdateHist()` | `bestMatch`, detections, previous tracks | histories, filters, `trackedBBoxes_` | odom | creates/deletes tracks, sticky YOLO propagation |
-| `classificationCB()` | confirmed tracks and histories | `dynamicBBoxes_`, `potentiallyDynamicBBoxes_`, flags in `boxHist_` | odom | dynamic decision logic |
+| classification stage in `mainCB()` | confirmed output tracks and histories | flags in `boxHist_`, `dynamicBBoxes_`, `potentiallyDynamicBBoxes_` | odom | dynamic decision logic plus optional dynamic-size filtering |
 | `visCB()` | all stage outputs | RViz topics + `ObstacleArray` | odom | machine-readable publication |
 
-This table is often the fastest way to debug the pipeline: if a bad box appears in `filteredBBoxesBeforeYolo_`, the problem is fusion; if it appears only after tracking, the problem is association/history; if its status is unexpected, the problem is classification or stale track-level flags.
+This table is often the fastest way to debug the pipeline: if a bad box appears in `filteredBBoxesBeforeYolo_`, the problem is fusion; if it appears only after tracking, the problem is association/history; if its status is unexpected, the problem is classification, sticky YOLO evidence, or output suppression.
 
 ---
 
@@ -338,7 +362,7 @@ The visual DBSCAN detector projects the depth image to a full 3D point cloud in 
 
 ### Concept
 
-The LiDAR provides a 360° scan that extends far beyond the depth camera's range (typically 20–30 m vs 5 m). The LiDAR pipeline runs in two stages: a **preprocessing callback** (`lidarOdomCB`) that fires on every synchronised (LiDAR, odom) pair and stores a clean world-frame cloud, and a **detection function** (`lidarDetect`) called by the timer pipeline that clusters the stored cloud.
+The LiDAR provides a 360° scan that extends far beyond the depth camera's range (typically 20–30 m vs 5 m). The LiDAR pipeline runs in two stages: a **preprocessing callback** (`lidarOdomCB`) that fires on every synchronised (LiDAR, odom) pair and stores a clean world-frame cloud, and a **detection function** (`lidarDetect`) launched as one of the three parallel detector workers inside `mainCB()`.
 
 ### Preprocessing in `lidarOdomCB`
 
@@ -352,7 +376,7 @@ The LiDAR provides a 360° scan that extends far beyond the depth camera's range
 
 5. **Adaptive VoxelGrid downsampling.** A `pcl::VoxelGrid` is applied to the height- and wall-filtered cloud starting with a 0.1 m leaf size. If the point count still exceeds `downsample_threshold` (default 4000), the leaf size is multiplied by 1.1 and the filter is re-run, repeating until the count falls below the threshold. This is the most important computational safeguard in the preprocessing chain: it provides a hard upper bound on the number of points that DBSCAN will ever see, guaranteeing bounded execution time regardless of scene density. Without it, a dense near-range scan or a cluttered environment could inflate the cloud by an order of magnitude and stall real-time processing.
 
-6. **Storage.** The resulting cloud is stored as `lidarCloud_` for the timer pipeline.
+6. **Storage.** The resulting cloud is stored as `lidarCloud_` for the next `mainCB()` detection cycle.
 
 ### Detection in `lidarDetect`
 
@@ -372,7 +396,7 @@ LiDAR clusters are the backbone of the far-field detection pipeline. They are ty
 
 This function receives three independent lists of `box3D` (UV, DBSCAN, LiDAR) plus the latest YOLO 2D detections and produces a single fused, YOLO-annotated list.
 
-The output of this stage is still a **detection list**, not a track list. IDs, velocities, acceleration, confirmation state, sticky YOLO evidence, and dynamic labels are assigned later by `kalmanFilterAndUpdateHist()` and `classificationCB()`.
+The output of this stage is still a **detection list**, not a track list. IDs, velocities, acceleration, confirmation state, sticky YOLO evidence, and dynamic labels are assigned later by `kalmanFilterAndUpdateHist()` and the classification stage inside `mainCB()`.
 
 ### Local data-flow diagram
 
@@ -554,7 +578,7 @@ The depth pixels inside the YOLO ellipse still contain background: ground, walls
 
 Result: `filteredYoloPoints` — a tight 3D point cloud representing the foreground object seen by YOLO.
 
-#### STEP 3A — Match with depth points (Case 1)
+#### STEP 3A — Point-based match with YOLO depth points
 
 For each fused 3D box, count how many `filteredYoloPoints` fall inside it. A box can become a YOLO candidate only if:
 
@@ -597,10 +621,12 @@ If the box is much taller than the actual YOLO foreground, it is rejected. This 
 
 **XY resize (`yolo_x_y_resize: true`):** the box X/Y extents are also shrunk to fit the inside points, and the cluster is re-filtered using only those points. This tightens the bounding box to the true object footprint as seen by depth, at the cost of some robustness to depth holes.
 
-The final Case-1 decision is therefore:
+In code, the point-based decision is:
 
 ```
-mark_yolo_candidate =
+point_based_candidate =
+    yolo_inside_count > 0
+    AND
     fraction >= yolo_point_fraction_threshold
     AND NOT sparse_large_box
     AND NOT box_too_tall
@@ -608,25 +634,35 @@ mark_yolo_candidate =
 
 #### STEP 3B — 2D IoU fallback
 
-When `filteredYoloPoints` is empty (object is beyond depth camera range, or the depth image has no returns), `tryIouFallback()` projects the 8 corners of each 3D box onto the color image using the camera intrinsics and the `camera_refined` extrinsic TF. The axis-aligned 2D bounding box of those projected corners is compared to the YOLO rect. If 2D IoU ≥ `yolo_2d_iou_threshold` → `is_yolo_candidate = true`.
+The 2D IoU fallback is used when depth evidence is missing or too weak to associate a YOLO detection with a specific 3D box.
 
-This fallback allows YOLO to annotate LiDAR-only clusters of cars and persons that are beyond the depth camera's effective range (~5 m).
+For each candidate 3D box, the detector projects the 8 bbox corners into the color image using the color-camera pose/intrinsics. It then builds the axis-aligned 2D rectangle that contains those projected corners and computes its 2D IoU against the YOLO rectangle. If the IoU is at least `yolo_2d_iou_threshold`, the box can be marked as `is_yolo_candidate`.
 
-The same 2D fallback is also applied **per box** when the YOLO detection has some depth points, but a specific 3D box has sparse depth support inside it:
+There are two fallback paths:
+
+1. **Global no-depth fallback.** If `yoloPoints` is empty, or if all YOLO depth points are removed by foreground/height filtering and `filteredYoloPoints` is empty, the detector runs `tryIouFallback()` over every fused 3D box. In this mode, any box whose projected 2D rectangle overlaps the YOLO rectangle enough becomes `is_yolo_candidate`.
+2. **Per-box sparse-depth fallback.** If the YOLO detection has usable depth points, each box first tries the point-based association above. If that fails because this specific box has sparse depth support, the same projected-2D IoU test is attempted for that box.
 
 ```cpp
 point_based_candidate =
-    enough YOLO foreground points fall inside the 3D box
+    yolo_inside_count > 0
+    AND fraction >= yolo_point_fraction_threshold
     AND NOT sparse_large_box
     AND NOT box_too_tall
 
+sparse_depth_support =
+    yolo_inside_count < yolo_sparse_large_min_points
+    OR fraction < yolo_point_fraction_threshold
+
 iou_fallback_candidate =
     NOT point_based_candidate
-    AND sparse depth support for this box
+    AND sparse_depth_support
     AND projected_3d_box_2d_iou >= yolo_2d_iou_threshold
 ```
 
 This covers the mixed case where a YOLO detection partially has valid depth returns, but the relevant LiDAR box is beyond the useful depth range or receives only a few depth pixels. In that situation the box can still become `is_yolo_candidate` from camera projection overlap.
+
+Important implementation detail: the `sparse_large_box` and `box_too_tall` gates currently belong to the **point-based** association path. They are not direct hard gates on the 2D fallback, but fallback is attempted only when this specific box has sparse depth support (`inside_count < yolo_sparse_large_min_points` or fraction below threshold). Therefore, for LiDAR-only/no-depth associations, `yolo_2d_iou_threshold` is the main strictness control; for boxes with many YOLO depth points but rejected by shape gates, the code generally does not use 2D IoU as a second chance.
 
 When a box is accepted only by 2D IoU fallback, the detector does **not** apply YOLO-based X/Y resize or height correction, because those corrections require reliable inside-depth points.
 
@@ -645,21 +681,33 @@ This distinction is important for downstream consumers such as GLIM and Nav2: a 
 
 ### Motion model
 
-The Kalman filter uses a **constant-acceleration** model with 9-dimensional state:
+The active tracker uses `kalmanFilterMatrixAccV2()`, a **2D constant-acceleration** Kalman filter. The state is 6-dimensional:
 
 ```
-x = [px, py, pz, vx, vy, vz, ax, ay, az]ᵀ
+x = [px, py, vx, vy, ax, ay]ᵀ
 ```
 
 The state transition matrix `A` is parametrized by `dt` (the time elapsed since the last frame):
 
 ```
-A = I₉ + dt * B_vel + (dt²/2) * B_acc
+A =
+[ 1  0  dt  0  0.5dt²   0    ]
+[ 0  1  0   dt   0    0.5dt² ]
+[ 0  0  1   0    dt     0    ]
+[ 0  0  0   1    0      dt   ]
+[ 0  0  0   0    1      0    ]
+[ 0  0  0   0    0      1    ]
 ```
 
-where `B_vel` and `B_acc` couple velocity and acceleration into the position terms. Only the 3D position `[px, py, pz]` is observed directly (observation matrix `H` is a 3×9 identity-like matrix picking the first three states).
+Only XY position is observed directly:
 
-This means velocity and acceleration are never measured directly — they are estimated purely from the sequence of position observations. The filter learns to predict where a moving object will be in the next frame.
+```
+z = [measured_x, measured_y]ᵀ
+H = [1 0 0 0 0 0
+     0 1 0 0 0 0]
+```
+
+Z is not part of the Kalman state. On matched detections, `newEstimatedBBox.z` is copied from the current detected box, while XY velocity and acceleration are estimated by the filter from the sequence of XY position observations. The published/tracked bbox dimensions are also taken from the current detection rather than predicted by the filter.
 
 **Noise parameters** (`kalman_filter_v2_param: [eP, eQPos, eQVel, eQAcc, eRPos]`):
 - `eP` — initial state covariance (uncertainty at track creation).
@@ -668,25 +716,60 @@ This means velocity and acceleration are never measured directly — they are es
 
 ### Association scoring
 
-Each frame, the Kalman filter first **predicts** each track's position (no measurement needed). Then incoming detections are matched to existing tracks using a composite score:
+Each tracking cycle first predicts each existing track's next XY position. Incoming detections are then matched to those predictions using a composite score. In the current implementation, **higher score is better**:
 
 ```
-score = match_pos_score_weight            × Δposition(predicted, detection)
-      + match_size_score_weight           × |size_diff| / mean_size
-      + match_iou2d_score_weight          × (1 - 2D_IoU)
-      + match_velocity_direction_weight   × velocity_direction_error [rad]
-      + match_yolo_class_weight           × class_consistency_penalty
-      + match_prev_obs_pos_weight         × Δposition(last_obs, detection)
-      + match_prev_obs_iou2d_weight       × (1 - 2D_IoU_vs_last_obs)
-      − confirmed_track_assoc_bonus       (if track is confirmed)
-      − yolo_track_assoc_bonus            (if detection is YOLO-flagged)
+score =
+    - match_pos_score_weight          * normalized_distance(predicted, detection)
+    - match_size_score_weight         * relative_size_diff
+    + match_iou2d_score_weight        * IoU2D(predicted, detection)
+    - match_prev_obs_pos_score_weight * normalized_distance(previous_observation, detection)
+    + match_prev_obs_iou2d_weight     * IoU2D(previous_observation, detection)
+    - match_velocity_direction_weight * velocity_direction_error
+    - match_yolo_class_weight         * yolo_missing_penalty
+    + confirmed_track_assoc_bonus       if the previous track is confirmed
+    + yolo_track_assoc_bonus            if the current detection is YOLO-associated
+    + outside-FOV association bonuses   for LiDAR-only outside-FOV matches
 ```
 
-Lower score = better match. Assignments with score > `min_match_score` are rejected outright. Confirmed tracks use the stricter `min_match_score_confirmed` threshold; dynamic tracks use `min_match_score_dynamic`. The best-scoring valid assignment is used (greedy, single-pass).
+The association pipeline has three layers:
 
-The velocity direction error term penalizes assignments where the implied motion direction (from predicted position to detection position) is inconsistent with the track's current velocity direction. This is particularly effective at preventing ID swaps when two objects cross paths.
+1. **Hard physical gates.** Reject impossible matches before scoring: too far, too fast, too different in size, inconsistent velocity direction, or unnatural motion.
+2. **Score ranking.** For every remaining pair `(current_detection, previous_track)`, compute the score above. Better geometric continuity and helpful semantic evidence push the score upward.
+3. **Minimum-score rejection and global assignment.** A candidate is usable only if it reaches its adaptive minimum score. Then the assignment step chooses a one-to-one set of matches.
 
-A **speed gate** additionally rejects assignments where the implied speed exceeds `max_match_speed` (25 m/s by default, designed to handle fast cars).
+Candidates with score below the adaptive minimum are rejected:
+
+- `min_match_score` for normal tentative tracks.
+- `min_match_score_confirmed` for confirmed tracks.
+- `min_match_score_dynamic` when the current detection is YOLO-associated.
+
+Example:
+
+```text
+min_match_score = -2.5
+score = -1.0  → accepted candidate
+score = -3.0  → rejected candidate
+```
+
+The score is therefore a mixture of penalties and bonuses. Distances, size mismatch, velocity-direction disagreement, and missing YOLO evidence inside the FOV reduce the score. IoU, confirmation history, YOLO evidence, and outside-FOV association bonuses raise it. More permissive minimum scores are more negative; stricter minimum scores are closer to zero or positive.
+
+The adaptive threshold is selected from the current detection/track context:
+
+```cpp
+if current_detection.is_yolo_candidate:
+    adaptiveMinScore = min_match_score_dynamic
+else if previous_track_is_confirmed:
+    adaptiveMinScore = min_match_score_confirmed
+else:
+    adaptiveMinScore = min_match_score
+```
+
+Because the YOLO check comes first in the code, a YOLO-associated detection uses `min_match_score_dynamic` even if the previous track is already confirmed.
+
+The velocity direction error term compares the observed velocity from the previous observation to the current detection against the Kalman-predicted velocity. It includes both velocity-vector difference and direction mismatch, and it returns zero when both observed and predicted motion are below `stationary_speed_thresh`.
+
+A **speed gate** additionally rejects assignments where the implied speed exceeds `max_match_speed`; LiDAR-only outside-FOV associations can use `max_match_speed_outside_fov`.
 
 ### Association rejection gates
 
@@ -695,10 +778,11 @@ Before a candidate match is scored, hard gates can reject it:
 - **Position gate:** predicted center vs detected center must be within `max_match_range`; outside camera FOV the relaxed `max_match_range_outside_fov` can be used.
 - **Implied speed gate:** center displacement divided by `dt` must be below `max_match_speed`; outside FOV uses `max_match_speed_outside_fov`.
 - **Relative size gate:** box dimensions must be compatible. Confirmed tracks get a small tolerance relaxation, and LiDAR-only outside-FOV associations can use `max_relative_size_diff_outside_fov`.
-- **Velocity-direction gate:** the current detection must be compatible with the predicted track motion direction. YOLO-associated tracks are exempt from the strictest direction gate because the semantic evidence is stronger than instantaneous geometric direction.
+- **Velocity-direction gate:** the current detection must be compatible with the predicted track motion. YOLO-associated detections or tracks with sticky YOLO evidence use the more permissive dynamic direction thresholds, not the strict non-YOLO thresholds.
 - **Abrupt-turn exception:** mature confirmed tracks outside the FOV can survive a large heading change if their position, speed, observed speed, and size are within `outside_fov_turn_*` limits.
+- **Natural-motion gate:** unconfirmed non-YOLO tracks must pass `isNaturalMotion()`. Inside FOV this rejects too-small motion when `track_steady_objects: false`; everywhere it rejects excessive jumps and large Kalman innovation.
 
-Candidate assignment is global enough to avoid assigning the same previous track to multiple current detections: detections propose candidate previous tracks, candidates are sorted by score, and the assignment pass resolves conflicts.
+Candidate assignment is global enough to avoid assigning the same previous track to multiple current detections. Valid candidates are sorted by score from best to worst, then `assignMatchesGlobally()` builds a one-to-one assignment with an augmenting-path pass over the ordered candidate lists.
 
 ### Track lifecycle
 
@@ -709,8 +793,7 @@ Candidate assignment is global enough to avoid assigning the same previous track
               UNCONFIRMED TRACK
                       │
                       │ enough valid hits
-                      │ (`min_confirm_hits`, or
-                      │  `min_confirm_hits_outside_fov`)
+                      │ or fresh YOLO evidence
                       ▼
                 CONFIRMED TRACK
                       │
@@ -729,13 +812,14 @@ Candidate assignment is global enough to avoid assigning the same previous track
                                     DELETED
 ```
 
-**Natural motion gates** prevent noise from inflating track age. For an unconfirmed track to progress toward confirmation, each frame's update must satisfy:
-- Displacement ≥ `min_natural_motion_dist` (track is not frozen)
-- Displacement ≤ `max_natural_motion_dist` (track is not jumping)
-- Kalman innovation ≤ `max_natural_innovation` (measurement agrees with prediction)
-- Velocity direction error ≤ `max_velocity_direction_error_confirm`
+Confirmation is asymmetric:
 
-Confirmed tracks use looser gates (`max_natural_innovation_confirmed`, `max_velocity_direction_error_tracked`), and dynamic tracks use even looser ones (`max_natural_innovation_dynamic`, `max_velocity_direction_error_tracked_dynamic`) to tolerate the higher speed and acceleration of fast-moving objects.
+- A new unmatched YOLO-associated detection is confirmed immediately and can enter `trackedBBoxes_` on its first update, except during the very first tracker initialization pass when `boxHist_` is empty and all initial detections are only used to seed histories and filters.
+- A matched track with current or historical YOLO evidence is also confirmed immediately by `shouldConfirmTrack()`.
+- A non-YOLO track inside the FOV needs `min_confirm_hits`, non-stationary observed motion when `track_steady_objects: false`, and a valid velocity-direction gate.
+- A non-YOLO track outside the FOV uses the stricter outside-FOV bootstrap: `min_confirm_hits_outside_fov`, observed average speed inside `[min_outside_fov_avg_obs_speed, max_outside_fov_avg_obs_speed]`, natural motion, and velocity-direction consistency.
+
+Unmatched tracks are propagated internally by Kalman prediction and missed-frame counters, but predicted-only boxes are **not** pushed to `trackedBBoxes_`. Output only contains current detections that were matched to confirmed tracks, plus newly created YOLO-confirmed tracks.
 
 ### Confirmation and output suppression
 
@@ -747,7 +831,13 @@ Track confirmation and track publication are related but not identical:
 
 This design avoids flooding the navigation stack with stationary non-semantic clutter while preserving people/vehicles even when they stop.
 
-There is one timing detail to remember: `trackedBBoxes_` is assembled in `kalmanFilterAndUpdateHist()`, before `classificationCB()` has run for the current cycle. Therefore its `is_dynamic` and `is_potentially_dynamic` fields can reflect the previous classification result by one timer tick. The dedicated `dynamicBBoxes_` and `potentiallyDynamicBBoxes_` arrays are produced by `classificationCB()` itself. In practice the timers run at the same configured period, so this is a small delay, but it explains occasional one-frame differences between tracked-box text and dynamic-box markers.
+There is one snapshot detail to remember: inside `mainCB()`, `trackedBBoxes_` is assembled in `kalmanFilterAndUpdateHist()` before the classification stage runs. For matched confirmed tracks, that first output snapshot may initially inherit `prevDynamic` and `prevPotentiallyDynamic` from the previous history entry.
+
+The current implementation fixes this before visualization/publication: after classification fills `dynamicBBoxes_` and `potentiallyDynamicBBoxes_`, `mainCB()` iterates again over `trackedBBoxes_` and refreshes each tracked output box from the latest `boxHist_[i][0].is_dynamic` / `is_potentially_dynamic` values using the track id.
+
+Practical consequence: `/tracked_bboxes` text/color and `ObstacleArray` status use the current-cycle classification flags, not a one-cycle-old snapshot. The geometry, velocity, age, and track id in `trackedBBoxes_` still come from the tracking output; only the semantic classification flags are patched after the classification stage. Without this final refresh, tracked-box text/color and `ObstacleArray` status could lag one `mainCB()` cycle behind.
+
+One nuance: when `target_constrain_size` is enabled, the dedicated `/dynamic_bboxes` list can be filtered after a track is marked dynamic in `boxHist_`. In that case, `trackedBBoxes_` and `ObstacleArray` may still show the track as dynamic while the dedicated dynamic marker list omits it. That is a size-filtering effect, not a stale-snapshot effect. `/potentially_dynamic_bboxes` does not go through that size filter.
 
 ### Sticky YOLO evidence
 
@@ -767,13 +857,26 @@ The stored YOLO baseline uses the maximum X/Y size ever seen during fresh YOLO d
 
 ### Duplicate suppression
 
-After the main association pass, a deduplication step removes tracks that overlap with another track beyond thresholds (`duplicate_track_dist_threshold`, `duplicate_track_iou_threshold`, `duplicate_size_rel_threshold`). The younger/less-confirmed track is removed.
+The tracker has two duplicate filters for new unmatched detections:
+
+- `isCloseToExistingTrack()` compares a new detection against every predicted existing track using center distance, 2D IoU, and relative size difference. If it is too similar to an existing prediction, no new track is created.
+- `isDuplicateOfTrackedThisFrame()` compares the new detection against boxes already emitted in the current tracking cycle. This prevents two detections in the same frame from spawning duplicate outputs for the same object.
 
 ---
 
-## 10. Dynamic classification (classificationCB)
+## 10. Dynamic classification stage
 
-Each confirmed track is reclassified every frame through an ordered decision tree. The paths are evaluated in order, and the first path that can make a final decision wins.
+The classification stage runs near the end of `mainCB()`, after fusion, association, and Kalman tracking have already produced `trackedBBoxes_`. It does not classify every internal track in `boxHist_`: first it builds the set of track ids currently present in `trackedBBoxes_`, then it processes only those tracks. This means predicted-only missed tracks, unconfirmed tracks, and stationary non-YOLO tracks suppressed from output are kept alive internally but are skipped by classification for that cycle.
+
+The classifier writes the latest semantic state into `boxHist_[i][0]`:
+
+- `is_dynamic = true` means the object is considered moving now.
+- `is_potentially_dynamic = true` means YOLO recognized a dynamic-class object, but the current KF speed is below the dynamic threshold.
+- `is_dynamic_candidate = true` means the current frame had motion evidence, but the track has not necessarily passed the multi-frame consistency gate yet.
+
+The final published arrays are then built from that state: `dynamicBBoxes_` receives moving dynamic tracks, `potentiallyDynamicBBoxes_` receives stationary YOLO dynamic-class tracks, and `trackedBBoxes_` is refreshed with the same flags before visualization and `ObstacleArray` publication.
+
+The paths are evaluated in order. PATH 1 has priority over everything else, PATH 2 is a shortcut for tracks that were already dynamic recently, and PATH 3 is the full point-cloud/KF evidence path.
 
 ```
 confirmed published track
@@ -795,6 +898,13 @@ confirmed published track
                 └─ consistency threshold → dynamic
 ```
 
+There are therefore two different questions being answered:
+
+1. **Can this object belong to a dynamic semantic class?** YOLO answers this through `is_yolo_candidate`.
+2. **Is it moving right now?** KF speed, point-cloud motion, and outside-FOV observed motion answer this.
+
+This separation is why a standing person and a parked car are not called `dynamic`; they are `potentially_dynamic`.
+
 ### PATH 1 — YOLO candidate
 
 A track is on PATH 1 if its `is_yolo_candidate` flag was set during YOLO association in the current or a recent frame (the flag is sticky for `max_non_yolo_in_fov_frames` frames inside the FOV, longer outside it).
@@ -815,30 +925,36 @@ This is why a parked car or standing person appears as `potentially_dynamic`, no
 
 ### PATH 2 — Historical continuity
 
-If a track was dynamic in enough recent frames (`frames_force_dynamic` within `frames_force_dynamic_check_range`) and its current KF speed is still ≥ `dynamic_velocity_threshold`, it is immediately kept dynamic.
+PATH 2 exists to avoid re-running the full point-cloud motion test on every frame for an object that was already classified dynamic very recently. The code looks at previous history entries, starting from `boxHist_[i][1]`, and counts how many of the last `frames_force_dynamic_check_range` frames had `is_dynamic = true`. If that count is at least `frames_force_dynamic`, the track can be kept dynamic immediately.
+
+This is still gated by current motion. The current KF speed must be ≥ `dynamic_velocity_threshold`. Therefore a track that stops moving loses `dynamic`; the recent dynamic history alone is not enough.
 
 For non-YOLO tracks outside the camera FOV, this shortcut is accepted only if the outside-FOV observed-motion test also passes. This prevents a noisy static LiDAR cluster from remaining dynamic merely because the Kalman filter still has residual velocity.
 
 ### PATH 3 — Point-cloud motion voting
 
-Tracks that are neither YOLO candidates nor already sustained by historical continuity are assessed by **point-cloud motion voting**:
+Tracks that are neither YOLO candidates nor already sustained by historical continuity go through the full motion-evidence path. This path combines local point-cloud motion with the Kalman velocity estimate.
 
-1. **Frame comparison.** The current frame's point cloud for the track is compared with the point cloud from `frame_skip` frames ago. Each point in the current frame finds its nearest neighbour in the historical cloud and computes the displacement vector.
-2. **Per-point vote.** A point casts a "moving" vote if its displacement ≥ `dynamic_velocity_threshold × dt × frame_skip`.
-3. **Voting threshold.** If the fraction of moving votes ≥ `dynamic_voting_threshold` AND the Kalman velocity estimate has low standard deviation (coefficient of variation ≤ `dynamic_kf_vel_std_ratio`), the track is a **dynamic candidate**.
-4. **Consistency gate.** The track must be a dynamic candidate for `dynamic_consistency_threshold` consecutive frames before the `is_dynamic` flag is set. This prevents single noisy frames from triggering false positives.
-5. **Sticky label.** Once confirmed dynamic, the label is maintained if at least `frames_force_dynamic` out of the last `frames_force_dynamic_check_range` frames show dynamic evidence. This keeps the track dynamic during brief occlusions.
+1. **Choose the temporal baseline.** The current point cloud is compared with the cloud from `frame_skip` frames ago. If the track is younger than that, the code uses the oldest available history entry.
+2. **Estimate box motion.** `Vbox` is computed from the centroid displacement between the current bbox and the historical bbox. `Vkf` is the Kalman velocity estimate stored in `boxHist_[i][0]`.
+3. **Compute per-point motion.** Each current point finds its nearest neighbour in the historical cloud. The displacement divided by `dt * frame_gap` gives a per-point velocity `Vcur`.
+4. **Vote only with compatible points.** If the per-point velocity points opposite to `Vbox`, that point is removed from the effective denominator. Otherwise, it votes dynamic when `|Vcur| > dynamic_velocity_threshold`.
+5. **Build one-frame evidence.** The frame has dynamic evidence if the KF speed hard gate passes and at least one soft cue is true: `voteRatio >= dynamic_voting_threshold`, or the KF velocity is confident.
+6. **Apply outside-FOV protection.** For outside-FOV non-YOLO tracks, the observed-motion gate must also pass. This stops static LiDAR clusters with jittery KF velocity from becoming dynamic.
+7. **Apply consistency.** Single-frame evidence sets `is_dynamic_candidate = true`. The track becomes `is_dynamic = true` only when all of the last `dynamic_consistency_threshold` history entries contain evidence (`is_dynamic_candidate`, `is_yolo_candidate`, or `is_dynamic`).
 
-There is also a Kalman-confidence shortcut inside this path: if the recent KF speed mean is above the dynamic threshold and its standard deviation is small relative to the mean (`dynamic_kf_vel_std_ratio`), the track can count as having single-frame dynamic evidence even when point voting is sparse. The final decision still requires the KF speed hard gate.
+The Kalman-confidence cue is meant for sparse clouds, especially outside the depth camera range. It computes the recent KF speed mean and standard deviation. It is true when the mean speed is above `dynamic_velocity_threshold` and the standard deviation is small relative to the mean (`std <= dynamic_kf_vel_std_ratio * mean`). This can replace point-vote evidence, but it does not bypass the final KF speed hard gate.
+
+The consistency gate is stricter than a single-frame vote. A noisy frame can mark the track as `is_dynamic_candidate`, but it will not publish as `dynamic` until enough consecutive history entries show evidence.
 
 ### Outside camera FOV
 
-For tracks that have moved out of the camera FOV, depth-based motion voting is unavailable. Classification uses Kalman-estimated kinematics:
+For non-YOLO tracks that have moved out of the camera FOV, depth-based motion voting is unreliable because the current cluster is usually LiDAR-only and sparse. The classifier therefore adds an observed-motion gate based on the sequence of associated bbox centers stored in `boxHist_`:
 
-1. **Speed window.** The observed speeds (Kalman-estimated `‖v‖`) over the last `outside_fov_class_window` frames are averaged.
+1. **Net motion window.** The current bbox center is compared with the bbox center up to `outside_fov_class_window` history steps ago.
 2. **Net displacement and straightness.** The displacement from the oldest to the newest position in the window is compared to the sum of step-by-step distances. A high ratio (close to 1.0) means the object is moving in a straight line; a low ratio means it's oscillating (likely noise or a stationary object jitter).
 3. **Conditions for dynamic:**
-   - Mean speed ≥ `outside_fov_class_min_net_speed`
+   - Net speed ≥ `outside_fov_class_min_net_speed`
    - Net displacement ≥ `outside_fov_class_min_net_disp`
    - Straightness ≥ `outside_fov_class_min_straightness`
    - Per-step speed ≤ `outside_fov_class_max_step_speed` (eliminates spurious jumps)
@@ -848,15 +964,22 @@ This conservative set of conditions prevents noise-induced Kalman velocity from 
 
 For outside-FOV **non-YOLO** tracks, this observed-motion test is required both for historical continuity and for new dynamic evidence. For outside-FOV YOLO tracks, PATH 1 still applies: moving YOLO tracks become dynamic, stationary YOLO tracks remain potentially dynamic.
 
+### Optional dynamic-size filter
+
+After classification, if `target_constrain_size` is enabled, only `dynamicBBoxes_` is post-filtered by size. A dynamic box is kept in `/dynamic_bboxes` if it is close to at least one configured `target_object_size` within fixed tolerances (`|dx| < 0.8`, `|dy| < 0.8`, `|dz| < 1.0`). This filter does not change `boxHist_` and does not apply to `potentiallyDynamicBBoxes_`.
+
+This distinction matters during debugging: a track can be classified dynamic in `boxHist_` and appear as dynamic in `trackedBBoxes_` / `ObstacleArray`, but be missing from `/dynamic_bboxes` if the optional size filter removes it from the dedicated dynamic marker list.
+
 ---
 
 ## 11. Outside-FOV association and classification
 
-When a track exits the camera FOV, normal 3D IoU-based association may fail because the box shapes differ between LiDAR-only (less precise) and LiDAR+depth (tighter) detection modes. A dedicated outside-FOV association pass runs with:
+When a non-YOLO track and the current detection are both outside the camera FOV, normal association may fail because the box shapes differ between LiDAR-only and LiDAR+depth detection modes. The current implementation does not run a separate second association pass; instead, `computeAssociationScore()` switches to outside-FOV gates and bonuses when `isLidarOnlyOutsideFovAssociation()` is true.
 
-- **Wider positional gate:** `max_match_range_outside_fov` (e.g., 1.2 m vs 4.0 m in-FOV).
-- **Size tolerance:** `max_relative_size_diff_outside_fov` — LiDAR-only clusters are typically smaller than their LiDAR+depth equivalents (depth fills in between scan lines), so a moderate size difference is tolerated.
-- **Innovation gate:** `max_natural_innovation_outside_fov` — Kalman residual threshold.
+- **Position gate:** `max_match_range_outside_fov`. This is an outside-FOV-specific limit, not necessarily wider than the in-FOV `max_match_range`; in the current outdoor config it is intentionally tighter in position while allowing high speed.
+- **Speed gate:** `max_match_speed_outside_fov`. This can be higher outdoors to allow fast cars without opening the positional gate too much.
+- **Size tolerance:** `max_relative_size_diff_outside_fov`. LiDAR-only clusters are typically smaller or less stable than their LiDAR+depth equivalents, so a dedicated size limit is used for this case.
+- **Innovation gate:** `max_natural_innovation_outside_fov`. This is used by the natural-motion gate for outside-FOV tentative tracks.
 - **Abrupt-turn association:** confirmed, mature tracks (`track_age ≥ outside_fov_turn_min_track_age`) can be matched even when the implied direction change is large (e.g., a car turning at a corner), provided the track is moving and the size difference is small. Tuned by `outside_fov_turn_*` parameters.
 
 **YOLO ID-swap guard:** after a YOLO detection on the object, the `yolo_base_size` is recorded. If the track's bounding box grows by more than `yolo_base_mismatch_thresh` (e.g., 150%) relative to that baseline for `max_yolo_base_mismatch_frames` consecutive frames, the `is_yolo_candidate` flag is cleared. This prevents LiDAR noise or a nearby wall from inheriting a pedestrian's YOLO label after an ID swap outside the FOV.
@@ -929,7 +1052,7 @@ This avoids the old ambiguity where a label could say `dynamic` while the marker
 
 ### Main visualization topics
 
-The exact namespace depends on the launch namespace, but the default topics include:
+The exact namespace depends on `detector_namespace`. With an empty namespace the publishers use the root topic names below; with `detector_namespace: onboard_detector`, the same names are prefixed with `/onboard_detector`.
 
 | Topic | Content |
 |---|---|
@@ -939,10 +1062,11 @@ The exact namespace depends on the launch namespace, but the default topics incl
 | `/predicted_bboxes_active` | Predictions for active tracks |
 | `/predicted_bboxes_missed` | Predictions for temporarily missed tracks |
 | `/predicted_bboxes_unconfirmed` | Predictions for tentative/unconfirmed tracks |
-| `/dynamic_bboxes` | Boxes currently classified dynamic |
+| `/dynamic_bboxes` | Boxes currently classified dynamic after optional `target_constrain_size` filtering |
 | `/potentially_dynamic_bboxes` | YOLO dynamic-class boxes currently stationary |
 | `/yolo_points` | YOLO foreground depth points used for association |
-| `/dynamic_pc` | Points inside current dynamic boxes |
+| `/dynamic_point_cloud` | Points inside current dynamic boxes |
+| `/filtered_lidar_points_velodyne_frame` | LiDAR points after dynamic-obstacle filtering, expressed in the Velodyne frame |
 | `/detected_color_image` | Color image annotated with YOLO rectangles |
 | `/history_trajectories` | Track trajectory history markers |
 | `/velocity_visualizaton` | Velocity marker visualization, keeping the existing topic spelling |
@@ -968,7 +1092,7 @@ The `is_indoor` flag in the config file controls several pipeline behaviours sim
 | **Typical YOLO association mode** | Case 1 (depth available) dominant — depth camera fully covers scene | Case 2 (IoU fallback) common — many objects beyond depth range |
 | **Recommended `icp_fitness_threshold`** | 0.5 (strict — indoor geometry constrains ICP well) | 0.15 (relaxed — fewer planar surfaces) |
 | **Detection range** | `local_sensor_range: [5, 5, 5]` m — tight, no far-field | `local_lidar_range: [15, 15, 5]` m — wide, LiDAR dominant beyond 5 m |
-| **Object size policy** | Often allows larger max boxes; constraining size is usually off | Often constrains boxes toward `target_object_size` and tighter `max_object_size` to reduce tree/wall false positives |
+| **Object size policy** | Often allows larger max boxes; dynamic size filtering is usually off | Often uses tighter `max_object_size`; `target_constrain_size` can filter the dedicated dynamic output to expected object sizes |
 
 In outdoor mode, the pipeline relies much more heavily on LiDAR clusters (Phase B and Case 2 of YOLO association) because the depth camera is effectively limited to ~4–5 m in most outdoor conditions. The classification pipeline must therefore depend more on Kalman kinematics and outside-FOV observed-motion checks than on dense depth point-cloud voting.
 
@@ -1061,14 +1185,14 @@ Relevant parameters:
 | Parameter | Effect |
 |---|---|
 | `max_object_size` | Discards boxes larger than per-axis limits |
-| `target_constrain_size` | Forces detected boxes toward `target_object_size` |
-| `target_object_size` | Expected object size when size constraining is active |
+| `target_constrain_size` | Filters `/dynamic_bboxes` after classification, keeping only dynamic boxes close to configured target sizes |
+| `target_object_size` | Expected object sizes used by that dynamic-output filter |
 | `dbscan_refinement_enable` | Enables recursive split of large sparse clusters |
 | `visual_dbscan_refinement_enable` | Same idea for depth-camera DBSCAN |
 | `dbscan_refine_max_diagonal` | Large-cluster split trigger |
 | `dbscan_refine_min_density` | Density threshold below which large clusters are split |
 
-Outdoors, reducing `max_object_size` and enabling target-size constraints can be useful against trees and walls, but overly tight values may truncate vehicles.
+Outdoors, reducing `max_object_size` can stop oversized detections before tracking. Enabling `target_constrain_size` is a later dynamic-output filter: it can prevent wrongly shaped boxes from appearing on `/dynamic_bboxes`, but it does not resize the detection, and `trackedBBoxes_` / `ObstacleArray` can still carry the raw dynamic flag from `boxHist_`.
 
 ---
 
@@ -1096,7 +1220,7 @@ Current marker code forces:
 - `is_potentially_dynamic` → green
 - else caller color
 
-If this happens again, check whether the text is coming from `tracked_bboxes` while the latest classification is visible in `/dynamic_bboxes`. `trackedBBoxes_` can carry classification flags from the previous timer tick, while `dynamicBBoxes_` is produced directly by `classificationCB()`.
+If this happens again with the current code, first check whether the tracked marker and the dynamic marker are being observed from the same timestamp/frame. `mainCB()` refreshes the semantic flags in `trackedBBoxes_` after classification, so a persistent mismatch should no longer be explained by a one-cycle stale `trackedBBoxes_` snapshot. More likely causes are marker lifetime/timing in RViz, a different publisher/topic being displayed, or `target_constrain_size` filtering a box out of `/dynamic_bboxes` while `trackedBBoxes_` still carries the raw dynamic flag from `boxHist_`.
 
 ### A valid car/person beyond depth range does not become YOLO-associated
 
@@ -1104,7 +1228,7 @@ Likely stage: 2D IoU fallback.
 
 Check:
 
-1. Whether `filteredYoloPoints` is empty. If it is not empty, Case 1 is used, not fallback.
+1. Whether `filteredYoloPoints` is empty. If it is empty, the global projected-2D IoU fallback is used for all fused boxes. If it is not empty, each box still has a per-box IoU fallback, but only when that specific box has sparse depth support.
 2. `yolo_2d_iou_threshold`: lower it if projected LiDAR boxes overlap the YOLO rectangle only partially.
 3. Calibration: poor `camera_refined` extrinsic shifts projected 3D boxes and kills IoU.
 4. LiDAR clustering: if the 3D box is too small/fragmented, the projection may not cover enough of the YOLO rectangle.

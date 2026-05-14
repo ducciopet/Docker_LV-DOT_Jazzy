@@ -38,6 +38,7 @@
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <random>
 #include <mutex>
+#include <thread>
 #include <unordered_set>
 
 namespace onboardDetector{
@@ -73,10 +74,7 @@ namespace onboardDetector{
         std::vector<WallOBB> wallBBoxes_;
         std::mutex wallBBoxesMutex_;
 
-        rclcpp::TimerBase::SharedPtr detectionTimer_;
-        rclcpp::TimerBase::SharedPtr lidarDetectionTimer_;
-        rclcpp::TimerBase::SharedPtr trackingTimer_;
-        rclcpp::TimerBase::SharedPtr classificationTimer_;
+        rclcpp::TimerBase::SharedPtr mainTimer_;
         rclcpp::TimerBase::SharedPtr visTimer_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr uvDepthMapPub_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr uDepthMapPub_;
@@ -404,10 +402,7 @@ namespace onboardDetector{
         void yoloDetectionCB(const vision_msgs::msg::Detection2DArray::ConstSharedPtr& detections);
         void groundHeightCB(const std_msgs::msg::Float64MultiArray::ConstSharedPtr& msg);
         void wallMarkersCB(const visualization_msgs::msg::MarkerArray::ConstSharedPtr& msg);
-        void detectionCB();
-        void lidarDetectionCB();
-        void trackingCB();
-        void classificationCB();
+        void mainCB();
         void visCB();
 
         // detect function

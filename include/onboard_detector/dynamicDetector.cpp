@@ -1416,27 +1416,12 @@ namespace onboardDetector{
             "/wall_detector/wall_markers", 10,
             std::bind(&dynamicDetector::wallMarkersCB, this, std::placeholders::_1));
 
-        // detection timer
-        this->detectionTimer_ = this->nh_->create_wall_timer(
+        // main pipeline timer: detect (parallel) → tracking → classification
+        this->mainTimer_ = this->nh_->create_wall_timer(
             std::chrono::milliseconds(static_cast<int>(this->dt_ * 1000.0)),
-            std::bind(&dynamicDetector::detectionCB, this));
+            std::bind(&dynamicDetector::mainCB, this));
 
-        // lidar detection timer
-        this->lidarDetectionTimer_ = this->nh_->create_wall_timer(
-            std::chrono::milliseconds(static_cast<int>(this->dt_ * 1000.0)),
-            std::bind(&dynamicDetector::lidarDetectionCB, this));
-
-        // tracking timer
-        this->trackingTimer_ = this->nh_->create_wall_timer(
-            std::chrono::milliseconds(static_cast<int>(this->dt_ * 1000.0)),
-            std::bind(&dynamicDetector::trackingCB, this));
-
-        // classification timer
-        this->classificationTimer_ = this->nh_->create_wall_timer(
-            std::chrono::milliseconds(static_cast<int>(this->dt_ * 1000.0)),
-            std::bind(&dynamicDetector::classificationCB, this));
-    
-        // visualization timer
+        // visualization runs independently so it never blocks the detection pipeline
         this->visTimer_ = this->nh_->create_wall_timer(
             std::chrono::milliseconds(static_cast<int>(this->dt_ * 1000.0)),
             std::bind(&dynamicDetector::visCB, this));
@@ -1896,43 +1881,25 @@ namespace onboardDetector{
         // }
     }
    
-    void dynamicDetector::lidarDetectionCB(){
+    void dynamicDetector::mainCB(){
 
         if(this->lidarToDepthCamOk_ == false){
             RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
             return;
         }
 
-        this->lidarDetect();
-    }
+        // --- parallel detection: dbscan + uv + lidar ---
+        std::thread t_db([this]{ this->dbscanDetect(); });
+        std::thread t_uv([this]{ this->uvDetect(); });
+        std::thread t_li([this]{ this->lidarDetect(); });
+        t_db.join();
+        t_uv.join();
+        t_li.join();
 
-    void dynamicDetector::detectionCB(){
-
-        if(this->lidarToDepthCamOk_ == false){
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
-            return;
-        }
-        // Debug: Print vector sizes before detection
-        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] projPoints_ size: %zu, pointsDepth_ size: %zu", this->projPoints_.size(), this->pointsDepth_.size());
-        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] imgCols_: %d, imgRows_: %d, skipPixel_: %d", this->imgCols_, this->imgRows_, this->skipPixel_);
-        // size_t expected_size = (this->imgCols_ * this->imgRows_) / (this->skipPixel_ * this->skipPixel_);
-        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] Expected projPoints_/pointsDepth_ size: %zu", expected_size);
-        // detection thread
-        this->dbscanDetect();
-        this->uvDetect();
         this->filterLVBBoxes();
-        // Debug: Print bounding box vector sizes after detection
-        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] dbBBoxes_ size: %zu, uvBBoxes_ size: %zu, filteredBBoxes_ size: %zu", this->dbBBoxes_.size(), this->uvBBoxes_.size(), this->filteredBBoxes_.size());
-        this->newDetectFlag_ = true; // get a new detection
-    }
+        this->newDetectFlag_ = true;
 
-    void dynamicDetector::trackingCB(){
-
-        if(this->lidarToDepthCamOk_ == false){
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
-            return;
-        }
-
+        // --- tracking ---
         // Filter out bboxes whose bottom face is too high above ground
         {
             const double zminThresh = this->groundHeight_ + this->trackMaxZminAboveGround_;
@@ -1984,37 +1951,8 @@ namespace onboardDetector{
 
         // Debug: Print history and filter sizes after tracking
         // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] (post) boxHist_ size: %zu, pcHist_ size: %zu, filters_ size: %zu, missedFrames_ size: %zu, trackedBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->filters_.size(), this->missedFrames_.size(), this->trackedBBoxes_.size());
-    }
 
-    // =====================================================================================
-    // classificationCB() — Dynamic obstacle classification.
-    //
-    // Decides which tracked bounding boxes are dynamic obstacles. Runs periodically
-    // (same rate as tracking) and processes only confirmed, non-suppressed tracks
-    // that appear in the tracked output (trackedBBoxes_).
-    //
-    // A track can become is_dynamic = true through exactly 3 paths (evaluated in order):
-    //
-    //   PATH 1 — YOLO:  is_yolo_candidate → dynamic only when KF speed is above
-    //            dynaVelThresh_; otherwise it is potentially dynamic.
-    //   PATH 2 — Historical continuity:  already classified dynamic in recent frames
-    //            AND still moving → stays dynamic (avoids re-running point voting).
-    //   PATH 3 — Point-cloud motion voting:  per-point nearest-neighbor velocity
-    //            analysis + multi-frame consistency check.
-    //
-    // The is_dynamic flag is NOT sticky: it is reset to false each frame by
-    // kalmanFilterAndUpdateHist() and must be re-earned here every cycle.
-    // This means a track that stops moving will lose its dynamic label.
-    // =====================================================================================
-    void dynamicDetector::classificationCB(){
-
-        if(this->lidarToDepthCamOk_ == false){
-            RCLCPP_WARN(this->nh_->get_logger(), "[dynamicDetector]: Waiting for LiDAR to depth camera extrinsic calibration...");
-            return;
-        }
-
-        // RCLCPP_INFO(this->nh_->get_logger(), "[DEBUG] boxHist_ size: %zu, pcHist_ size: %zu, dynamicBBoxes_ size: %zu", this->boxHist_.size(), this->pcHist_.size(), this->dynamicBBoxes_.size());
-
+        // --- classification ---
         // Only classify tracks that are currently in the tracked output
         // (confirmed + not stationary-suppressed + not predict-only).
         // This guarantees every dynamic (blue) bbox has a corresponding tracked (yellow) bbox.
@@ -2282,6 +2220,25 @@ namespace onboardDetector{
 
         this->dynamicBBoxes_ = dynamicBBoxesTemp;
         this->potentiallyDynamicBBoxes_ = potentiallyDynamicBBoxesTemp;
+
+        // trackedBBoxes_ is assembled before classification in the same mainCB()
+        // cycle. Refresh its classification flags now so visualization and
+        // ObstacleArray publication use the current classification, not the
+        // previous history snapshot.
+        for (auto& trackedBox : this->trackedBBoxes_){
+            trackedBox.is_dynamic = false;
+            trackedBox.is_potentially_dynamic = false;
+
+            for (const auto& hist : this->boxHist_){
+                if (hist.empty()) continue;
+                const auto& classifiedBox = hist.front();
+                if (classifiedBox.id != trackedBox.id) continue;
+
+                trackedBox.is_dynamic = classifiedBox.is_dynamic;
+                trackedBox.is_potentially_dynamic = classifiedBox.is_potentially_dynamic;
+                break;
+            }
+        }
     }
 
     void dynamicDetector::visCB(){
@@ -4712,7 +4669,8 @@ namespace onboardDetector{
             !this->boxHist_[trackIdx].empty() &&
             this->boxHist_[trackIdx][0].is_yolo_candidate);
 
-        // Lascia invariato comportamento YOLO/storia YOLO.
+        // YOLO tracks bypass the motion/stationary bootstrap and are confirmed
+        // immediately: they represent known dynamic-class objects.
         if (currDetectedBBox.is_yolo_candidate || historyHasYolo){
             return true;
         }
