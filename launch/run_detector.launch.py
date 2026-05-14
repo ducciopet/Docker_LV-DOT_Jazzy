@@ -28,6 +28,11 @@ def generate_launch_description():
         description='Launch odometry TF publisher (odom->base_link) from /odometry/filtered')
     odom_pub = LaunchConfiguration('odom_pub')
 
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time', default_value='false',
+        description='Use simulation clock')
+    use_sim_time = LaunchConfiguration('use_sim_time')
+
     pkg_dir = get_package_share_directory('onboard_detector')
     config_file = os.path.join(pkg_dir, 'cfg', 'detector_param_jo_zotac_outdoor.yaml')
     rviz_config_file = os.path.join(pkg_dir, 'rviz', 'detector_jo_zotac.rviz')
@@ -51,7 +56,7 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='calib_icp_tf_velodyne_to_camera_link_initial_guess',
-            parameters=[{'use_sim_time': True}],
+            parameters=[{'use_sim_time': use_sim_time}],
             # arguments=[
             #     '--x', '0.218304037',
             #     '--y', '0.107423631',
@@ -82,7 +87,7 @@ def generate_launch_description():
         output='screen',
         parameters=[
             ParameterFile(config_file, allow_substs=True),
-            {'use_sim_time': True},
+            {'use_sim_time': use_sim_time},
         ],
     )
 
@@ -93,7 +98,7 @@ def generate_launch_description():
         output='screen',
         parameters=[
             ParameterFile(config_file, allow_substs=True),
-            {'use_sim_time': True},
+            {'use_sim_time': use_sim_time},
             {'onboard_detector.odom_topic': odom_topic},
         ],
     )
@@ -105,7 +110,7 @@ def generate_launch_description():
         output='screen',
         parameters=[
             ParameterFile(config_file, allow_substs=True),
-            {'use_sim_time': True},
+            {'use_sim_time': use_sim_time},
         ],
     )
 
@@ -125,7 +130,7 @@ def generate_launch_description():
         output='screen',
         parameters=[
             ParameterFile(config_file, allow_substs=True),
-            {'use_sim_time': True},
+            {'use_sim_time': use_sim_time},
         ],
     )
 
@@ -135,7 +140,7 @@ def generate_launch_description():
         name='odometry_tf_publisher',
         output='screen',
         parameters=[
-            {'use_sim_time': True},
+            {'use_sim_time': use_sim_time},
             {'odom_topic': '/odometry/filtered'},
         ],
         condition=IfCondition(odom_pub),
@@ -143,6 +148,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         odom_pub_arg,
+        use_sim_time_arg,
         pythonpath_action,
         static_tf_velodyne_to_camera_link_initial_guess,
         calibration_node,
