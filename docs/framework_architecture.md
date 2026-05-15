@@ -43,7 +43,8 @@ ApproximateTime(LiDAR, odom)  ──► lidarOdomCB()
 
 color image  ──────────────────► colorImgCB()     store detectedColorImage_
 YOLO 2D      ──────────────────► yoloDetectionCB() store yoloDetectionResults_
-ground/walls ──────────────────► groundHeightCB()  store groundHeight_, roofHeight_, wallBBoxes_
+ground height ─────────────────► groundHeightCB()  store groundHeight_, roofHeight_
+wall markers ──────────────────► wallMarkersCB()   store wallBBoxes_
 
 
 MAIN TIMER PIPELINE (mainTimer_, every time_step = 0.1 s)
@@ -67,7 +68,9 @@ visCB()
   └─ publish MarkerArrays + ObstacleArray
 ```
 
-The decoupling between sensor callbacks and `mainCB()` means that the detection pipeline always operates on the **latest available** data from each sensor, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter. The odom/pose is paired independently with each sensor to ensure each buffer is stamped with the correct robot pose at the time of acquisition.
+The decoupling between sensor callbacks and `mainCB()` means that the detection pipeline operates on the **latest available** buffered data from each sensor, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter. Depth and LiDAR are each synchronized with odometry/pose independently, so the detector can keep a pose buffer for each sensor stream.
+
+Implementation detail: `depthOdomCB()` / `depthPoseCB()` compute the depth/color camera pose before storing depth-derived state. `lidarOdomCB()` / `lidarPoseCB()` currently apply the LiDAR transform using the already-buffered `positionLidar_` / `orientationLidar_`, then refresh those fields from the current odometry/pose at the end of the callback. At normal rates this is usually a one-callback pose lag, but it is worth remembering when debugging fast motion or timestamp alignment.
 
 This is a **single-orchestrator, multi-worker** design:
 
@@ -75,13 +78,14 @@ This is a **single-orchestrator, multi-worker** design:
 - `dbscanDetect()`, `uvDetect()`, and `lidarDetect()` are independent enough to run concurrently because they write separate stage buffers (`dbBBoxes_`, `uvBBoxes_`, `lidarBBoxes_`).
 - Tracking and classification remain sequential after fusion, because they mutate shared track history, Kalman filters, and classification flags.
 - `visCB()` runs on its own timer so visualization/publication is decoupled from the heavier detection/tracking path.
+- `mainCB()` returns early until the LiDAR-to-depth-camera calibration is available (`lidarToDepthCamOk_`). This prevents the detector from fusing uncalibrated camera/LiDAR geometry.
 
 ### Coordinate-frame convention
 
 `detector_node` publishes object-level outputs in the odometry/world frame used by the detector, currently `odom` for point clouds and marker arrays. Sensor-local data is converted before fusion:
 
-- Depth-derived boxes start in the camera frame, then are transformed by the pose buffered in `depthOdomCB()`.
-- LiDAR clusters are transformed in `lidarOdomCB()` from LiDAR frame to world frame before DBSCAN.
+- Depth-derived boxes start in the camera frame, then are transformed by the pose buffered in `depthOdomCB()` / `depthPoseCB()`.
+- LiDAR points are transformed in `lidarOdomCB()` / `lidarPoseCB()` from LiDAR frame to world frame before DBSCAN. As noted above, this uses the currently buffered LiDAR pose and then refreshes that pose from the synchronized odometry/pose message.
 - YOLO depth points are unprojected in the depth camera frame and then transformed to world frame before testing against 3D boxes.
 
 This means the tracker, classifier, wall filtering, and YOLO association all operate on a single world-frame geometry. The only image-frame operation that remains image-native is the 2D YOLO rectangle and the 2D IoU fallback.
@@ -223,7 +227,8 @@ Sensor callbacks (update shared state only):
   lidarOdomCB()        ← ApproximateTime(LiDAR, odom)   → lidarCloud_, lidar pose
   colorImgCB()         ← color image topic              → detectedColorImage_
   yoloDetectionCB()    ← YOLO detections topic          → yoloDetectionResults_
-  groundHeightCB()     ← wall_detector topic            → groundHeight_, roofHeight_, wallBBoxes_
+  groundHeightCB()     ← wall_detector ground topic     → groundHeight_, roofHeight_
+  wallMarkersCB()      ← wall_detector marker topic     → wallBBoxes_
 
 Timer callbacks:
   mainCB()             → parallel(dbscanDetect, uvDetect, lidarDetect)
@@ -235,7 +240,7 @@ Timer callbacks:
   visCB()              → publish MarkerArrays + ObstacleArray
 ```
 
-The odom message is paired independently with each sensor so each buffer carries the correct robot pose at the time of acquisition, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter.
+The odom/pose message is paired independently with each sensor so the detector can maintain separate camera and LiDAR pose buffers, without needing to triple-synchronize depth, LiDAR, and odometry in a single message filter. In the current LiDAR callback implementation, the cloud transform uses the previously buffered LiDAR pose and then refreshes that pose from the synchronized message.
 
 ### Multithreaded execution model
 
@@ -253,6 +258,8 @@ t_li.join();
 This means there is no ROS callback-group based scheduling for the detector stages. Instead, `mainCB()` starts the three detector workers, waits for all of them, and only then continues with fusion, tracking, and classification. The result is parallel front-end computation with a deterministic back-end order.
 
 Wall OBB updates are the one explicitly protected shared structure: `wallBBoxes_` is guarded by `wallBBoxesMutex_` when received from `wall_detector_node` and when copied/used during point filtering. Most other sensor buffers are updated by ROS callbacks and consumed by the next `mainCB()` cycle as latest-value state.
+
+There is also a small service interface, `onboard_detector/get_dynamic_obstacles`, which returns nearby entries from `dynamicBBoxes_` sorted by distance from a requested point. It is a convenience/legacy query path over the dedicated dynamic list; the richer and more stable downstream interface is still the `jo_msgs/ObstacleArray` topic.
 
 ### Main internal buffers
 
@@ -284,7 +291,7 @@ The main modules can be read as explicit contracts:
 | Module | Input | Output | Frame | Important side effects |
 |---|---|---|---|---|
 | `depthOdomCB()` | depth image + pose/odom | `depthImage_`, `positionDepth_`, `orientationDepth_` | camera → odom pose buffer | updates latest depth pose only |
-| `lidarOdomCB()` | LiDAR cloud + pose/odom | `lidarCloud_`, raw/downsample debug clouds | velodyne → odom/world | range filter, random distance downsample, wall/height filtering, adaptive voxel |
+| `lidarOdomCB()` | LiDAR cloud + pose/odom | `lidarCloud_`, raw/downsample debug clouds | velodyne → odom/world | range filter, random distance downsample, wall/height filtering, adaptive voxel; transform uses buffered LiDAR pose then refreshes it |
 | `dbscanDetect()` | `depthImage_`, depth pose, wall/height limits | `dbBBoxes_`, `dbPcClusters_`, `filteredDepthPoints_` | odom | visual point-cloud clustering |
 | `uvDetect()` | `depthImage_` | `uvBBoxes_`, UV debug images | camera box then transformed downstream | U-map detection |
 | `lidarDetect()` | `lidarCloud_` | `lidarBBoxes_`, `lidarClusters_` | odom | LiDAR DBSCAN and size filtering |
@@ -370,7 +377,7 @@ The LiDAR provides a 360° scan that extends far beyond the depth camera's range
 
 2. **Gaussian distance-based downsampling.** Each point surviving the XY filter is accepted with probability `p = exp(−dist² / (2σ²))` where σ = `gaussian_down_sample_rate` and `dist` is the planar distance to the sensor. This keeps a dense representation near the robot (where small/fast objects need precise boundaries) while thinning the far-field (where DBSCAN only needs to capture the cluster's bulk). Without this step, the near field would have orders of magnitude more points than the far field, making a single epsilon value poorly suited across the full range.
 
-3. **World-frame transform.** The downsampled cloud is transformed from the LiDAR frame to the world frame using `orientationLidar_` and `positionLidar_` (extracted from the synchronized odometry).
+3. **World-frame transform.** The downsampled cloud is transformed from the LiDAR frame to the world frame using the currently buffered `orientationLidar_` and `positionLidar_`. The callback then refreshes those fields from the synchronized odometry/pose message near the end of the callback, so the transform applied to the cloud reflects the previous buffered LiDAR pose rather than a pose recomputed earlier in the same callback.
 
 4. **Ground/roof and wall filtering.** A Z pass-through filter applies `[groundHeight_, roofHeight_]`, then `isInsideAnyWall` removes points inside known wall OBBs.
 
@@ -577,6 +584,8 @@ The depth pixels inside the YOLO ellipse still contain background: ground, walls
 - Both modes apply the live height bounds `[ground_height, roof_height]`.
 
 Result: `filteredYoloPoints` — a tight 3D point cloud representing the foreground object seen by YOLO.
+
+After each `filterLVBBoxes()` pass, the raw YOLO detection array is cleared. The long-lived semantic memory is not the raw YOLO message; it is the sticky `is_yolo_candidate` flag propagated later in track history by `kalmanFilterAndUpdateHist()`. This prevents one YOLO message from being re-applied across multiple detector cycles while still allowing a confirmed YOLO track to survive frames where YOLO has not published a fresh detection.
 
 #### STEP 3A — Point-based match with YOLO depth points
 
@@ -949,20 +958,32 @@ The consistency gate is stricter than a single-frame vote. A noisy frame can mar
 
 ### Outside camera FOV
 
-For non-YOLO tracks that have moved out of the camera FOV, depth-based motion voting is unreliable because the current cluster is usually LiDAR-only and sparse. The classifier therefore adds an observed-motion gate based on the sequence of associated bbox centers stored in `boxHist_`:
+For non-YOLO tracks that have moved out of the camera FOV, depth-based motion voting is unreliable because the current cluster is usually LiDAR-only and sparse. The classifier therefore adds an observed-motion gate based only on the sequence of associated bbox centers stored in `boxHist_`.
 
-1. **Net motion window.** The current bbox center is compared with the bbox center up to `outside_fov_class_window` history steps ago.
-2. **Net displacement and straightness.** The displacement from the oldest to the newest position in the window is compared to the sum of step-by-step distances. A high ratio (close to 1.0) means the object is moving in a straight line; a low ratio means it's oscillating (likely noise or a stationary object jitter).
-3. **Conditions for dynamic:**
+This check is implemented by `hasConsistentObservedMotionOutsideFov()`:
+
+1. **Choose the history window.** The code compares the current box center, `boxHist_[i][0]`, with an older center, `boxHist_[i][k]`, where `k = min(outside_fov_class_window, history_size - 1)`. The window is therefore as long as configured when enough history exists, and shorter for young tracks.
+2. **Compute net motion.** `netDisp` is the straight-line XY displacement between the oldest and newest centers in the window. It is not the sum of all small frame-to-frame moves; it answers: "after this many frames, how far did the object actually move away from where it was?"
+3. **Compute net speed.** `netSpeed = netDisp / (k * dt)`. This is an average speed over the whole window, based on the endpoint displacement.
+4. **Compute travelled path and straightness.** `pathLen` is the sum of every frame-to-frame XY displacement inside the same window. `straightness = netDisp / pathLen`:
+   - close to `1.0`: the centers move coherently in one direction;
+   - much lower than `1.0`: the centers move back and forth, curve sharply, or jitter around nearly the same place.
+5. **Reject impossible jumps.** `maxStepSpeed` is the largest single frame-to-frame speed inside the window. If it is too high, the motion is treated as a likely association jump or cluster glitch.
+6. **Conditions for dynamic evidence outside FOV:**
    - Net speed ≥ `outside_fov_class_min_net_speed`
    - Net displacement ≥ `outside_fov_class_min_net_disp`
    - Straightness ≥ `outside_fov_class_min_straightness`
    - Per-step speed ≤ `outside_fov_class_max_step_speed` (eliminates spurious jumps)
    - Track age ≥ `outside_fov_class_min_track_age`
 
-This conservative set of conditions prevents noise-induced Kalman velocity from falsely promoting static objects to dynamic.
+The important distinction is that this gate is measuring **observed displacement of the matched boxes**, not just Kalman velocity. A static object with noisy LiDAR boxes may produce non-zero instantaneous velocity, but it normally has small net displacement, low straightness, or one large suspicious step. That is why this test is required before a non-YOLO outside-FOV track can remain dynamic through historical continuity or become dynamic through new point-cloud/KF evidence.
 
-For outside-FOV **non-YOLO** tracks, this observed-motion test is required both for historical continuity and for new dynamic evidence. For outside-FOV YOLO tracks, PATH 1 still applies: moving YOLO tracks become dynamic, stationary YOLO tracks remain potentially dynamic.
+Objects that genuinely change direction are handled in two places:
+
+- **Association stage:** before classification, `computeAssociationScore()` can accept an abrupt outside-FOV turn through `isAbruptTurnAllowedOutsideFov()` when the track is mature, non-YOLO, still close enough to the prediction, moving within configured speed limits, size-compatible, and has coherent observed motion. This is the mechanism that prevents a valid turning object from immediately losing its track ID.
+- **Classification stage:** after association, the same observed-motion gate remains conservative. If the history window spans a very sharp turn, `straightness` can drop because `pathLen` becomes much larger than the endpoint displacement. In that case the object can stay associated, but dynamic classification may be delayed until the recent window again shows enough coherent net motion. Tune `outside_fov_class_window` and `outside_fov_class_min_straightness` if valid turns are being suppressed too long.
+
+For outside-FOV **YOLO** tracks, PATH 1 still applies: moving YOLO tracks become dynamic, stationary YOLO tracks remain potentially dynamic. The outside-FOV observed-motion gate described here is only added for non-YOLO tracks.
 
 ### Optional dynamic-size filter
 
@@ -980,7 +1001,7 @@ When a non-YOLO track and the current detection are both outside the camera FOV,
 - **Speed gate:** `max_match_speed_outside_fov`. This can be higher outdoors to allow fast cars without opening the positional gate too much.
 - **Size tolerance:** `max_relative_size_diff_outside_fov`. LiDAR-only clusters are typically smaller or less stable than their LiDAR+depth equivalents, so a dedicated size limit is used for this case.
 - **Innovation gate:** `max_natural_innovation_outside_fov`. This is used by the natural-motion gate for outside-FOV tentative tracks.
-- **Abrupt-turn association:** confirmed, mature tracks (`track_age ≥ outside_fov_turn_min_track_age`) can be matched even when the implied direction change is large (e.g., a car turning at a corner), provided the track is moving and the size difference is small. Tuned by `outside_fov_turn_*` parameters.
+- **Abrupt-turn association:** normal direction checks can reject a detection when the measured displacement points in a very different direction from the track velocity. For confirmed, mature, non-YOLO tracks outside the FOV, `isAbruptTurnAllowedOutsideFov()` can override that rejection. The detection is accepted only if both predicted and current boxes are outside the camera FOV, the current box remains within `outside_fov_turn_max_pos_dist` from the prediction, observed speed is inside [`outside_fov_turn_min_obs_speed`, `outside_fov_turn_max_speed`], relative size difference is below `outside_fov_turn_max_size_diff`, and the observed-motion gate still passes. When accepted, the score receives `outside_fov_turn_assoc_bonus`. This keeps the same track alive through realistic turns, but it does not by itself force the track to become dynamic; classification still applies the outside-FOV dynamic gates described above.
 
 **YOLO ID-swap guard:** after a YOLO detection on the object, the `yolo_base_size` is recorded. If the track's bounding box grows by more than `yolo_base_mismatch_thresh` (e.g., 150%) relative to that baseline for `max_yolo_base_mismatch_frames` consecutive frames, the `is_yolo_candidate` flag is cleared. This prevents LiDAR noise or a nearby wall from inheriting a pedestrian's YOLO label after an ID swap outside the FOV.
 
@@ -1066,7 +1087,10 @@ The exact namespace depends on `detector_namespace`. With an empty namespace the
 | `/potentially_dynamic_bboxes` | YOLO dynamic-class boxes currently stationary |
 | `/yolo_points` | YOLO foreground depth points used for association |
 | `/dynamic_point_cloud` | Points inside current dynamic boxes |
-| `/filtered_lidar_points_velodyne_frame` | LiDAR points after dynamic-obstacle filtering, expressed in the Velodyne frame |
+| `/raw_dynamic_point_cloud` | Raw latest LiDAR points that fall inside current dynamic boxes |
+| `/filtered_lidar_points_velodyne_frame` | LiDAR points after XY range filtering and Gaussian distance downsampling, still expressed in the Velodyne frame; despite the topic name, this is not GLIM-style dynamic-obstacle filtering |
+| `/downsampled_point_cloud` | LiDAR cloud after world transform, ground/roof and wall filtering, and adaptive voxel downsampling |
+| `/raw_lidar_point_cloud` | Latest raw LiDAR cloud transformed to `odom` for debug visualization |
 | `/detected_color_image` | Color image annotated with YOLO rectangles |
 | `/history_trajectories` | Track trajectory history markers |
 | `/velocity_visualizaton` | Velocity marker visualization, keeping the existing topic spelling |
