@@ -204,6 +204,8 @@ detector_node:
       # kalman_filter_param:     [0.25, 0.01, 0.05, 0.05, 0.04, 0.3, 0.6]
       # kalman_filter_param_vel: [0.25, 0.02, 0.1, 0.2, 0.05]
       kalman_filter_averaging_frames: 3  # smooth velocity estimate over this many frames
+      prediction_visualization_steps: 10 # publish confirmed-track boxes after this many KF predict-only steps
+      lifecycle_deleted_visualization_frames: 12 # keep deleted-track debug boxes visible for this many main cycles
       max_missed_frames: 12              # delete a track after this many consecutive missed detections (12 for occlusion tolerance)
 
       # -----------------------------------------------------------------------
@@ -362,6 +364,7 @@ yolov11_detector_node:
     weights_path: weights/yolo11n.pt        # path to YOLO model weights (relative to package share)
     class_names_path: config/coco.names     # path to class name list
     target_classes: [person, car, bus, truck, motorbike, bicycle, dog, cat, horse, cow, sheep]
+    score_threshold: 0.70    # min YOLO confidence required to keep and publish a detection
     timer_period_sec: 0.033  # [s] inference period (~30 Hz)
     inference_size: 640       # [px] YOLO input resolution (640 for better car detection at distance)
     queue_size: 10            # ROS subscriber queue depth

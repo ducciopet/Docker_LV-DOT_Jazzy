@@ -1328,6 +1328,8 @@ namespace onboardDetector{
         // tracked obstacles pub (machine-to-machine interface for Nav2)
         this->trackedObstaclesPub_ = this->nh_->create_publisher<jo_msgs::msg::ObstacleArray>(
             this->ns_.empty() ? "/tracked_dynamic_obstacles" : this->ns_ + "/tracked_dynamic_obstacles", 10);
+        this->trackedObstaclesBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            this->ns_.empty() ? "/tracked_dynamic_obstacles_bboxes" : this->ns_ + "/tracked_dynamic_obstacles_bboxes", 10);
 
         // dynamic bounding box pub
         this->dynamicBBoxesPub_ = this->nh_->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -2317,6 +2319,7 @@ namespace onboardDetector{
         this->publishHistoryTraj();
         this->publishVelVis();
         this->publishDynamicObstacleArray();
+        this->publishTrackedDynamicObstacleMarkers();
     }
 
     void dynamicDetector::publishDynamicObstacleArray(){
@@ -2363,6 +2366,23 @@ namespace onboardDetector{
         }
 
         this->trackedObstaclesPub_->publish(arr);
+    }
+
+    void dynamicDetector::publishTrackedDynamicObstacleMarkers(){
+        std::vector<onboardDetector::box3D> obstacleBoxes;
+        obstacleBoxes.reserve(this->trackedBBoxes_.size());
+
+        for (const auto& box : this->trackedBBoxes_){
+            const double kfSpeed = std::sqrt(box.Vx * box.Vx + box.Vy * box.Vy);
+            if (box.is_dynamic || box.is_potentially_dynamic || kfSpeed >= this->dynaVelThresh_){
+                obstacleBoxes.push_back(box);
+            }
+        }
+
+        // This mirrors /tracked_dynamic_obstacles for RViz. Dynamic and
+        // potentially dynamic boxes keep their semantic colors through
+        // publish3dBox(); plain TRACKED obstacles use a muted amber fallback.
+        this->publish3dBox(obstacleBoxes, this->trackedObstaclesBBoxesPub_, 0.85, 0.55, 0.18);
     }
 
     void dynamicDetector::uvDetect(){
@@ -3714,7 +3734,7 @@ namespace onboardDetector{
                     std::sort(sortedDepths.begin(), sortedDepths.end());
                     const size_t n = sortedDepths.size();
                     const double foregroundDepth = this->isIndoor_
-                        ? sortedDepths[n / 10]   // 10th percentile — tight, walls right behind
+                        ? sortedDepths[n / 20]   // 5th percentile — tight, walls right behind
                         : sortedDepths[n / 5];   // 20th percentile — softer, objects span more depth
                     const double tolerance = this->isIndoor_
                         ? this->yoloDepthTolerance_

@@ -96,6 +96,7 @@ namespace onboardDetector{
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr dynamicBBoxesPub_;
         rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr potentiallyDynamicBBoxesPub_;
         rclcpp::Publisher<jo_msgs::msg::ObstacleArray>::SharedPtr trackedObstaclesPub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr trackedObstaclesBBoxesPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredDepthPointsPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr lidarClustersPub_;
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filteredPointsPub_;
@@ -469,6 +470,7 @@ namespace onboardDetector{
         void publishFilteredPoints();
         void publishRawDynamicPoints();
         void publishDynamicObstacleArray();
+        void publishTrackedDynamicObstacleMarkers();
 
         // helper function
         void transformBBox(const Eigen::Vector3d& center, const Eigen::Vector3d& size, const Eigen::Vector3d& position, const Eigen::Matrix3d& orientation, Eigen::Vector3d& newCenter, Eigen::Vector3d& newSize);

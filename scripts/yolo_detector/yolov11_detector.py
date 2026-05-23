@@ -48,6 +48,7 @@ class yolo_detector(Node):
         self.weights_path = str(self.declare_parameter('weights_path', '').value)
         self.class_names_path = str(self.declare_parameter('class_names_path', '').value)
         self.target_classes = list(self.declare_parameter('target_classes', ['person']).value)
+        self.score_threshold = float(self.declare_parameter('score_threshold', 0.7).value)
         self.timer_period_sec = float(self.declare_parameter('timer_period_sec', 0.033).value)
         self.inference_size = int(self.declare_parameter('inference_size', 352).value)
         self.queue_size = int(self.declare_parameter('queue_size', 10).value)
@@ -82,7 +83,8 @@ class yolo_detector(Node):
         self.model = YOLO(self.weights_path)
         self.model.eval()
         self.get_logger().info(
-            f"YOLOv11 configured: device={device}, half={self.use_half}, image_topic={self.image_topic}, weights={self.weights_path}"
+            f"YOLOv11 configured: device={device}, half={self.use_half}, image_topic={self.image_topic}, "
+            f"weights={self.weights_path}, score_threshold={self.score_threshold:.2f}"
         )
 
         # subscriber
@@ -163,16 +165,18 @@ class yolo_detector(Node):
             for detected_box in self.detected_bboxes:
                 if detected_box[4] in self.target_classes:
                     bbox_msg = Detection2D()
-                    # detected_box format: [x1, y1, x2, y2, class]
+                    # detected_box format: [x1, y1, x2, y2, class, score]
                     x1 = float(detected_box[0])
                     y1 = float(detected_box[1])
                     x2 = float(detected_box[2])
                     y2 = float(detected_box[3])
                     class_name = str(detected_box[4])
+                    score = float(detected_box[5])
                     # Store top-left corner in hypothesis pose, class in class_id, and size in bbox
                     from vision_msgs.msg import ObjectHypothesisWithPose
                     hyp = ObjectHypothesisWithPose()
                     hyp.hypothesis.class_id = class_name
+                    hyp.hypothesis.score = score
                     hyp.pose.pose.position.x = x1  # top-left x
                     hyp.pose.pose.position.y = y1  # top-left y
                     bbox_msg.results.append(hyp)
@@ -267,11 +271,13 @@ class yolo_detector(Node):
         for i, box in enumerate(output[0]):
             box = box.tolist()
            
-            obj_score = output[1][i]
+            obj_score = float(output[1][i])
+            if obj_score < self.score_threshold:
+                continue
             category = LABEL_NAMES[int(output[2][i])]
             x1, y1 = int(box[0] * W), int(box[1] * H)
             x2, y2 = int(box[2] * W), int(box[3] * H)
-            detected_box = [x1, y1, x2, y2, category]
+            detected_box = [x1, y1, x2, y2, category, obj_score]
             detected_boxes.append(detected_box)
 
             # Draw rectangle using PIL (yellow)

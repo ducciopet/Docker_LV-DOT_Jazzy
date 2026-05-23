@@ -159,6 +159,18 @@ Visualization Manager:
         Value: /onboard_detector/tracked_bboxes
       Value: true
     - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Tracked Dynamic Obstacles BBoxes
+      Namespaces:
+        box3D: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /onboard_detector/tracked_dynamic_obstacles_bboxes
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
       Enabled: false
       Name: KF Predicted - Active (orange)
       Namespaces:
