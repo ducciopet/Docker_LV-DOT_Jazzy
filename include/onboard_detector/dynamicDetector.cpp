@@ -2350,7 +2350,7 @@ namespace onboardDetector{
             obs.accel.linear.y = box.Ay;
             obs.accel.linear.z = box.Az;
 
-            // Determine classification status (priority order); skip purely static tracks
+            // Determine classification status (priority order)
             const double kfSpeed = std::sqrt(box.Vx * box.Vx + box.Vy * box.Vy);
             if (box.is_dynamic){
                 obs.status = jo_msgs::msg::Obstacle::STATUS_DYNAMIC;
@@ -2359,7 +2359,7 @@ namespace onboardDetector{
             } else if (kfSpeed >= this->dynaVelThresh_){
                 obs.status = jo_msgs::msg::Obstacle::STATUS_TRACKED;
             } else {
-                continue; // static track — not published on this topic
+                obs.status = jo_msgs::msg::Obstacle::STATUS_STATIC;
             }
 
             arr.obstacles.push_back(obs);
@@ -2373,10 +2373,7 @@ namespace onboardDetector{
         obstacleBoxes.reserve(this->trackedBBoxes_.size());
 
         for (const auto& box : this->trackedBBoxes_){
-            const double kfSpeed = std::sqrt(box.Vx * box.Vx + box.Vy * box.Vy);
-            if (box.is_dynamic || box.is_potentially_dynamic || kfSpeed >= this->dynaVelThresh_){
-                obstacleBoxes.push_back(box);
-            }
+            obstacleBoxes.push_back(box);
         }
 
         // This mirrors /tracked_dynamic_obstacles for RViz. Dynamic and

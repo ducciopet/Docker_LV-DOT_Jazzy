@@ -63,11 +63,12 @@ STATUS_TRACKED             = 3
 NOT_DETECTED               = -1
 
 GT_CLASSES = (STATUS_DYNAMIC, STATUS_POTENTIALLY_DYNAMIC)
-PRED_CLASSES = (STATUS_DYNAMIC, STATUS_POTENTIALLY_DYNAMIC, STATUS_TRACKED, NOT_DETECTED)
+PRED_CLASSES = (STATUS_DYNAMIC, STATUS_POTENTIALLY_DYNAMIC, STATUS_STATIC, NOT_DETECTED)
 LABEL_MAP = {
     STATUS_DYNAMIC: 'DYNAMIC',
     STATUS_POTENTIALLY_DYNAMIC: 'POTENTIALLY_DYNAMIC',
-    STATUS_TRACKED: 'TRACKED',
+    STATUS_STATIC: 'STATIC',
+    STATUS_TRACKED: 'STATIC',  # TRACKED is not a classifier output; treated as STATIC
     NOT_DETECTED: 'NOT_DETECTED',
 }
 
@@ -1013,6 +1014,9 @@ def evaluate(detector_frames: list,
         detection_total += 1
         if best_obs is not None and best_dist <= match_dist_thresh:
             pred_label = best_obs['status']
+            # TRACKED is not a classifier output; collapse it into STATIC
+            if pred_label == STATUS_TRACKED:
+                pred_label = STATUS_STATIC
             detection_found += 1
         else:
             pred_label = NOT_DETECTED
@@ -1090,14 +1094,14 @@ def print_results(exp_name: str, results: dict, dyn_vel_thresh: float):
     print(f"  GT vel thresh: {dyn_vel_thresh} m/s")
     print(f"{'─'*60}")
     print("  [MULTICLASS CONFUSION MATRIX]")
-    print("    GT \\ Pred             DYNAMIC  POT_DYN  TRACKED  NOT_DET")
+    print("    GT \\ Pred             DYNAMIC  POT_DYN   STATIC  NOT_DET")
     for gt_cls in GT_CLASSES:
         row = results['confusion'][gt_cls]
         gt_name = 'DYNAMIC' if gt_cls == STATUS_DYNAMIC else 'POTENTIALLY_DYNAMIC'
         print(f"    {gt_name:22s}"
               f"{row[STATUS_DYNAMIC]:8d}"
               f"{row[STATUS_POTENTIALLY_DYNAMIC]:9d}"
-              f"{row[STATUS_TRACKED]:9d}"
+              f"{row[STATUS_STATIC]:9d}"
               f"{row[NOT_DETECTED]:9d}")
     correct = sum(results['confusion'][cls][cls] for cls in GT_CLASSES)
     total = results['detection_total']
@@ -1141,7 +1145,7 @@ def save_csv(out_dir: str, exp_name: str, results: dict, dyn_vel_thresh: float):
         w = csv.writer(f)
         w.writerow(['experiment', 'gt_label',
                     'pred_dynamic', 'pred_potentially_dynamic',
-                    'pred_tracked', 'pred_not_detected',
+                    'pred_static', 'pred_not_detected',
                     'gt_total', 'correct', 'class_recall'])
         for gt_cls in GT_CLASSES:
             row = results['confusion'][gt_cls]
@@ -1151,7 +1155,7 @@ def save_csv(out_dir: str, exp_name: str, results: dict, dyn_vel_thresh: float):
             w.writerow([exp_name, LABEL_MAP[gt_cls],
                         row[STATUS_DYNAMIC],
                         row[STATUS_POTENTIALLY_DYNAMIC],
-                        row[STATUS_TRACKED],
+                        row[STATUS_STATIC],
                         row[NOT_DETECTED],
                         gt_total,
                         correct,

@@ -345,7 +345,7 @@ calibration_icp_node:
     icp_normal_max_nn: 30                  # max neighbours used for normal estimation
     min_overlap_points: 100                # min LiDAR points in camera FOV; if fewer, full cloud is used as target
     overlap_fov_margin_px: 120             # [px] margin added around image boundary when computing FOV overlap
-    icp_max_runs: 10                        # number of independent ICP scenes to collect before averaging
+    icp_max_runs: 5                        # number of independent ICP scenes to collect before averaging
     icp_fitness_threshold: 0.3             # min ICP fitness score to accept a result (0-1, higher = better fit)
     is_indoor: true                        # indoor: no timeout fallback, wait for full ICP calibration
     onboard_detector:
